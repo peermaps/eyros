@@ -3,22 +3,27 @@ extern crate failure;
 extern crate rand;
 extern crate random_access_disk;
 
-use eyros::DB;
+use eyros::{DB,Row,Point,Coord};
 use rand::random;
 use failure::Error;
 use random_access_disk::RandomAccessDisk;
 use std::path::PathBuf;
 
 fn main() -> Result<(),Error> {
-  let mut db = DB::open(storage)?;
-  let polygons = (0..100).map(|_| {
+  let mut db: DB<_,_,f32,f32,f32,f32,f32,f32,u32> = DB::open(storage)?;
+  let polygons = (0..8_u32.pow(4)).map(|_| {
     let xmin: f32 = random::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + random::<f32>()*(1.0-xmin);
     let ymin: f32 = random::<f32>()*2.0-1.0;
     let ymax: f32 = ymin + random::<f32>()*(1.0-ymin);
     let time: f32 = random::<f32>()*1000.0;
-    let id: u32 = random();
-    (((xmin,xmax),(ymin,ymax),time),id)
+    let value: u32 = random();
+    Row::Insert(Point::P3(
+      Coord::Range(xmin,xmax),
+      Coord::Range(ymin,ymax),
+      Coord::Point(time),
+      value
+    ))
   }).collect();
   db.batch(&polygons)?;
   Ok(())
