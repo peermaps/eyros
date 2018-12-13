@@ -11,7 +11,8 @@ use std::path::PathBuf;
 
 fn main() -> Result<(),Error> {
   let mut db: DB<_,_,f32,f32,f32,f32,f32,f32,u32> = DB::open(storage)?;
-  let polygons = (0..8_u32.pow(4)).map(|_| {
+  //let polygons = (0..8_u32.pow(4)).map(|_| {
+  let polygons = (0..8_u32.pow(1)).map(|_| {
     let xmin: f32 = random::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + random::<f32>()*(1.0-xmin);
     let ymin: f32 = random::<f32>()*2.0-1.0;

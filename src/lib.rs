@@ -11,17 +11,19 @@ mod tree;
 use tree::Tree;
 pub use tree::{Row,Coord,Point};
 
+mod sort;
+
 mod meta;
 use meta::Meta;
 
 #[derive(Debug)]
 pub struct DB<S,U,A,B,C,D,E,F,V> where
-A: Debug,
-B: Debug,
-C: Debug,
-D: Debug,
-E: Debug,
-F: Debug,
+A: Debug+PartialOrd,
+B: Debug+PartialOrd,
+C: Debug+PartialOrd,
+D: Debug+PartialOrd,
+E: Debug+PartialOrd,
+F: Debug+PartialOrd,
 V: Debug,
 S: Debug+RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>) {
@@ -39,12 +41,12 @@ U: (Fn(&str) -> Result<S,Error>) {
 }
 
 impl<S,U,A,B,C,D,E,F,V> DB<S,U,A,B,C,D,E,F,V> where
-A: Debug,
-B: Debug,
-C: Debug,
-D: Debug,
-E: Debug,
-F: Debug,
+A: Debug+PartialOrd,
+B: Debug+PartialOrd,
+C: Debug+PartialOrd,
+D: Debug+PartialOrd,
+E: Debug+PartialOrd,
+F: Debug+PartialOrd,
 V: Debug,
 S: Debug+RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>) {
@@ -80,18 +82,18 @@ U: (Fn(&str) -> Result<S,Error>) {
       trees
     })
   }
-  fn get_tree(&mut self, i: usize) -> Result<&Tree<S,A,B,C,D,E,F,V>,Error> {
-    if i < self.trees.len() { return Ok(&self.trees[i]) }
+  fn get_tree(&mut self, i: usize) -> Result<&mut Tree<S,A,B,C,D,E,F,V>,Error> {
+    if i < self.trees.len() { return Ok(&mut self.trees[i]) }
     let tree = Tree::new(
       self.meta.branch_factor,
       (self.open_store)(&format!("tree{}",i))?
     );
     self.trees.push(tree);
-    return Ok(&self.trees[i]);
+    return Ok(&mut self.trees[i]);
   }
   pub fn batch(&mut self, rows: &Vec<Row<A,B,C,D,E,F,V>>) -> Result<(),Error> {
-    let mut tree = self.get_tree(0);
-    println!("tree={:?}", tree);
+    let tree = self.get_tree(0)?;
+    tree.build(rows)?;
     Ok(())
   }
   pub fn query(&mut self) -> Result<(),Error> {
