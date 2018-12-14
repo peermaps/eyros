@@ -4,12 +4,7 @@ use std::fmt::Debug;
 
 #[derive(Debug)]
 pub struct Sorted<A,B,C,D,E,F,V> {
-  s0: Option<Vec<usize>>,
-  s1: Option<Vec<usize>>,
-  s2: Option<Vec<usize>>,
-  s3: Option<Vec<usize>>,
-  s4: Option<Vec<usize>>,
-  s5: Option<Vec<usize>>,
+  by_dimension: Vec<Option<Vec<usize>>>,
   _marker0: PhantomData<A>,
   _marker1: PhantomData<B>,
   _marker2: PhantomData<C>,
@@ -26,14 +21,13 @@ C: Debug+PartialOrd,
 D: Debug+PartialOrd,
 E: Debug+PartialOrd,
 F: Debug+PartialOrd {
-  fn new (rows: &Vec<Row<A,B,C,D,E,F,V>>) -> Self {
+  pub fn new (rows: &Vec<Row<A,B,C,D,E,F,V>>) -> Self {
     let row0 = &rows[0];
     match row0 {
       Row::Insert(ref point) => Self::from_point(&point, rows),
       Row::Delete(ref point) => Self::from_point(&point, rows)
     }
   }
-  #[inline]
   fn from_point (point: &Point<A,B,C,D,E,F,V>, rows: &Vec<Row<A,B,C,D,E,F,V>>) -> Self {
     let mut xs: Vec<usize> = (0..rows.len()).collect();
     xs.sort_unstable_by(|a,b| {
@@ -96,7 +90,7 @@ F: Debug+PartialOrd {
       }
     }
     Self {
-      s0, s1, s2, s3, s4, s5,
+      by_dimension: vec![s0, s1, s2, s3, s4, s5],
       _marker0: PhantomData,
       _marker1: PhantomData,
       _marker2: PhantomData,
@@ -219,5 +213,17 @@ F: Debug+PartialOrd {
       },
       _ => panic!("point/range mismatch")
     }
+  }
+  pub fn pivots (&self, dim: usize, rows: &Vec<Row<A,B,C,D,E,F,V>>)
+  -> Vec<usize> {
+    let sorted = match self.by_dimension[dim] {
+      None => panic!("dimension out of bounds"),
+      Some(x) => x
+    };
+    vec![]
+  }
+  pub fn divide (&mut self, rows: &Vec<Row<A,B,C,D,E,F,V>>,
+  pivots: &Vec<Option<usize>>) -> Vec<Self> {
+    unimplemented!();
   }
 }
