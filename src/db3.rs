@@ -32,14 +32,42 @@ T: PartialOrd+Copy+Debug+From<u8>+Div<T,Output=T>+Add<T,Output=T> {
       Self::cmp(rows[*a], rows[*b])
     });
     let n = branch_factor*2-1;
-    let pivots = (0..n).map(|k| {
+    let pivots: Vec<T> = (0..n).map(|k| {
       let m = (k+1)*sorted.len()/(n+1);
       let a = rows[sorted[m]];
       let b = rows[sorted[m+1]];
       (*(Self::upper(a)) + *(Self::upper(b))) / 2.into()
     }).collect();
-    let intersecting = vec![];
-    let buckets = vec![];
+    let mut intersecting = vec![];
+    let mut buckets = vec![vec![];branch_factor+1];
+    let mut matched = vec![0;(rows.len()+7)/8];
+    for i in order {
+      let pivot = pivots[*i];
+      for j in sorted.iter() {
+        let row = rows[*j];
+        if (matched[(*j)/8]>>((*j)%8))&1 == 1 { continue }
+        match row {
+          Coord::Point(_) => {},
+          Coord::Range(min,max) => {
+            if *min <= pivot && pivot <= *max {
+              matched[(*j)/8] |= (1<<((*j)%8));
+              intersecting.push(*j);
+            }
+          }
+        }
+      }
+    }
+    let mut j = 0;
+    for i in sorted.iter() {
+      if matched[(*i)/8]>>((*i)%8)&1 == 1 { continue }
+      let row = rows[*i];
+      for k in j..branch_factor {
+        let pivot = pivots[order[order.len()-branch_factor+k]];
+        if *Self::upper(&row) < pivot { break }
+        j += 1;
+      }
+      buckets[j].push(*i);
+    }
     Self {
       sorted,
       intersecting,
@@ -103,7 +131,7 @@ S: Debug+RandomAccess<Error=Error> {
   pub fn build(&mut self, rows: &Vec<((Coord<A>,Coord<B>,Coord<C>),V)>)
   -> Result<(),Error> {
     let nlevels = ((rows.len() as f32).log(self.branch_factor as f32)) as u32;
-    let order = Self::pivot_order(rows.len());
+    let order = Self::pivot_order(2*self.branch_factor-1);
     let first_branch = Branch::new(
       self.branch_factor, &order, &rows.iter().map(|r| { &(r.0).0 }).collect()
     );
@@ -115,28 +143,40 @@ S: Debug+RandomAccess<Error=Error> {
       match i%3 {
         0 => {
           for b in branches0.iter() {
-            branches1.extend(b.buckets.iter().map(|bs| {
-              Branch::new(self.branch_factor, &order,
-                &bs.iter().map(|b| { &(rows[*b].0).1 }).collect())
-            }));
+            println!("0: {} {}", b.buckets.len(), b.intersecting.len());
+            for bs in b.buckets.iter() {
+              if bs.len() < 50 {
+                continue;
+              }
+              branches1.push(Branch::new(self.branch_factor, &order,
+                &bs.iter().map(|b| { &(rows[*b].0).1 }).collect()));
+            }
           }
           branches0.clear();
         },
         1 => {
           for b in branches1.iter() {
-            branches2.extend(b.buckets.iter().map(|bs| {
-              Branch::new(self.branch_factor, &order,
-                &bs.iter().map(|b| { &(rows[*b].0).2 }).collect())
-            }));
+            println!("1: {} {}", b.buckets.len(), b.intersecting.len());
+            for bs in b.buckets.iter() {
+              if bs.len() < 50 {
+                continue;
+              }
+              branches2.push(Branch::new(self.branch_factor, &order,
+                &bs.iter().map(|b| { &(rows[*b].0).2 }).collect()));
+            }
           }
           branches1.clear();
         },
         _ => {
           for b in branches2.iter() {
-            branches0.extend(b.buckets.iter().map(|bs| {
-              Branch::new(self.branch_factor, &order,
-                &bs.iter().map(|b| { &(rows[*b].0).0 }).collect())
-            }));
+            println!("2: {} {}", b.buckets.len(), b.intersecting.len());
+            for bs in b.buckets.iter() {
+              if bs.len() < 50 {
+                continue;
+              }
+              branches0.push(Branch::new(self.branch_factor, &order,
+                  &bs.iter().map(|b| { &(rows[*b].0).0 }).collect()));
+            }
           }
           branches2.clear();
         }
