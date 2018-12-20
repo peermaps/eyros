@@ -1,5 +1,7 @@
 use random_access_storage::RandomAccess;
 use failure::Error;
+use bincode::{serialize,deserialize};
+use serde::{Serialize};
 
 use meta::Meta;
 use ::Coord;
@@ -7,6 +9,9 @@ use ::Coord;
 use std::fmt::Debug;
 use std::marker::{PhantomData,Copy};
 use std::ops::{Div,Add};
+use std::mem::size_of;
+
+type PSIZE = u64;
 
 #[derive(Debug)]
 pub enum Row3<A,B,C,V> {
@@ -18,15 +23,19 @@ pub enum Row3<A,B,C,V> {
 struct Branch<T> where
 T: PartialOrd+Copy+Debug+From<u8>+Div<T,Output=T>+Add<T,Output=T> {
   sorted: Vec<usize>,
-  intersecting: Vec<usize>,
-  pivots: Vec<T>,
-  pub buckets: Vec<Vec<usize>>
+  branch_factor: usize,
+  pub offset: u64,
+  pub intersecting: Vec<(PSIZE,Vec<usize>)>,
+  pub pivots: Vec<T>,
+  pub buckets: Vec<(PSIZE,Vec<usize>)>,
+  pub level: u32
 }
 
 impl<T> Branch<T> where
-T: PartialOrd+Copy+Debug+From<u8>+Div<T,Output=T>+Add<T,Output=T> {
-  pub fn new (branch_factor: usize, order: &Vec<usize>, rows: &Vec<&Coord<T>>)
-  -> Self {
+T: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<T,Output=T>+Add<T,Output=T> {
+  const MAX_DATA_SIZE: usize = 50;
+  pub fn new (offset: u64, branch_factor: usize, level: u32, order: &Vec<usize>,
+  rows: &Vec<&Coord<T>>) -> Self {
     let mut sorted: Vec<usize> = (0..rows.len()).collect();
     sorted.sort_unstable_by(|a,b| {
       Self::cmp(rows[*a], rows[*b])
@@ -38,8 +47,8 @@ T: PartialOrd+Copy+Debug+From<u8>+Div<T,Output=T>+Add<T,Output=T> {
       let b = rows[sorted[m+1]];
       (*(Self::upper(a)) + *(Self::upper(b))) / 2.into()
     }).collect();
-    let mut intersecting = vec![];
-    let mut buckets = vec![vec![];branch_factor+1];
+    let mut intersecting = vec![(0,vec![]);n];
+    let mut buckets = vec![(0,vec![]);branch_factor+1];
     let mut matched = vec![0;(rows.len()+7)/8];
     for i in order {
       let pivot = pivots[*i];
@@ -50,8 +59,8 @@ T: PartialOrd+Copy+Debug+From<u8>+Div<T,Output=T>+Add<T,Output=T> {
           Coord::Point(_) => {},
           Coord::Range(min,max) => {
             if *min <= pivot && pivot <= *max {
-              matched[(*j)/8] |= (1<<((*j)%8));
-              intersecting.push(*j);
+              matched[(*j)/8] |= 1<<((*j)%8);
+              intersecting[*i].1.push(*j);
             }
           }
         }
@@ -66,14 +75,68 @@ T: PartialOrd+Copy+Debug+From<u8>+Div<T,Output=T>+Add<T,Output=T> {
         if *Self::upper(&row) < pivot { break }
         j += 1;
       }
-      buckets[j].push(*i);
+      buckets[j].1.push(*i);
     }
     Self {
+      branch_factor,
+      level,
+      offset,
       sorted,
       intersecting,
       pivots,
       buckets
     }
+  }
+  pub fn frame_size<A,B,C> (count: usize, branch_factor: usize) -> PSIZE where
+  A: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
+  B: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
+  C: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C> {
+    if count <= Self::MAX_DATA_SIZE {
+      return (size_of::<u32>() + size_of::<(A,B,C)>() * count) as PSIZE;
+    }
+    let npivots = branch_factor*2-1;
+    let nbuckets = branch_factor+1;
+    ((size_of::<T>() + size_of::<PSIZE>()) * npivots
+      + size_of::<PSIZE>() * nbuckets) as PSIZE
+  }
+  pub fn write<S,U,A,B,C,V> (&mut self, tree: &mut Tree<S,A,B,C,V>, level: u32,
+  rows: &Vec<((Coord<A>,Coord<B>,Coord<C>),V)>) -> Result<(),Error> where
+  A: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
+  B: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
+  C: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C>,
+  U: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<U,Output=U>+Add<U,Output=U>,
+  V: Serialize,
+  S: Debug+RandomAccess<Error=Error> {
+    let intersecting = &mut self.intersecting;
+    let buckets = &mut self.buckets;
+    for i in 0..intersecting.len() {
+      let len = intersecting[i].1.len();
+      intersecting[i].0 = tree.allocate(<Branch<U>>::frame_size::<A,B,C>(
+        len, self.branch_factor));
+    }
+    for i in 0..buckets.len() {
+      let len = buckets[i].1.len();
+      buckets[i].0 = tree.allocate(<Branch<U>>::frame_size::<A,B,C>(
+        len, self.branch_factor));
+    }
+    let size = self.pivots.len()*size_of::<T>()
+      + intersecting.len()*size_of::<PSIZE>()
+      + buckets.len()*size_of::<PSIZE>()
+    ;
+    let mut data = Vec::with_capacity(size);
+    // strip off the leading usize from pivots (constant value)
+    // to save bytes
+    data.extend_from_slice(
+      &serialize(&self.pivots).unwrap()[size_of::<usize>()..]);
+    let iaddrs: Vec<PSIZE> = intersecting.iter()
+      .map(|b| { b.0 as PSIZE }).collect();
+    data.extend_from_slice(
+      &serialize(&iaddrs).unwrap()[size_of::<usize>()..]);
+    let baddrs: Vec<PSIZE> = buckets.iter()
+      .map(|b| { b.0 as PSIZE }).collect();
+    data.extend_from_slice(
+      &serialize(&baddrs).unwrap()[size_of::<usize>()..]);
+    tree.store.write(self.offset as usize, &data)
   }
   fn cmp (a: &Coord<T>, b: &Coord<T>) -> std::cmp::Ordering {
     match (a,b) {
@@ -101,12 +164,13 @@ T: PartialOrd+Copy+Debug+From<u8>+Div<T,Output=T>+Add<T,Output=T> {
 }
 
 struct Tree<S,A,B,C,V> where
-A: PartialOrd+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
-B: PartialOrd+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
-C: PartialOrd+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C>,
+A: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
+B: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
+C: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C>,
 S: Debug+RandomAccess<Error=Error> {
   branch_factor: usize,
   store: S,
+  size: u64,
   _marker0: PhantomData<A>,
   _marker1: PhantomData<B>,
   _marker2: PhantomData<C>,
@@ -114,12 +178,13 @@ S: Debug+RandomAccess<Error=Error> {
 }
 
 impl<S,A,B,C,V> Tree<S,A,B,C,V> where
-A: PartialOrd+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
-B: PartialOrd+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
-C: PartialOrd+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C>,
+A: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
+B: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
+C: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C>,
 S: Debug+RandomAccess<Error=Error> {
   pub fn new (branch_factor: usize, store: S) -> Self {
     Self {
+      size: 0,
       branch_factor,
       store,
       _marker0: PhantomData,
@@ -129,53 +194,68 @@ S: Debug+RandomAccess<Error=Error> {
     }
   }
   pub fn build(&mut self, rows: &Vec<((Coord<A>,Coord<B>,Coord<C>),V)>)
-  -> Result<(),Error> {
-    let nlevels = ((rows.len() as f32).log(self.branch_factor as f32)) as u32;
-    let order = Self::pivot_order(2*self.branch_factor-1);
+  -> Result<(),Error> where
+  A: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
+  B: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
+  C: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C>,
+  V: Serialize {
+    let bf = self.branch_factor;
+    let nlevels = ((rows.len() as f32).log(bf as f32)) as u32;
+    let order = Self::pivot_order(2*bf-1);
+    let offset = self.allocate(
+      <Branch<A>>::frame_size::<A,B,C>(rows.len(),bf)
+    );
     let first_branch = Branch::new(
-      self.branch_factor, &order, &rows.iter().map(|r| { &(r.0).0 }).collect()
+      offset, bf, 0, &order,
+      &rows.iter().map(|r| { &(r.0).0 }).collect()
     );
     let mut branches0 = vec![first_branch];
     let mut branches1 = vec![];
     let mut branches2 = vec![];
 
-    for i in 0..nlevels {
-      match i%3 {
+    for level in 0..nlevels {
+      match level%3 {
         0 => {
-          for b in branches0.iter() {
-            println!("0: {} {}", b.buckets.len(), b.intersecting.len());
-            for bs in b.buckets.iter() {
-              if bs.len() < 50 {
+          for i in 0..branches0.len() {
+            branches0[i].write::<S,B,A,B,C,V>(self, level, rows)?;
+            for bu in branches0[i].buckets.iter() {
+              if bu.1.len() <= <Branch<B>>::MAX_DATA_SIZE {
                 continue;
               }
-              branches1.push(Branch::new(self.branch_factor, &order,
-                &bs.iter().map(|b| { &(rows[*b].0).1 }).collect()));
+              branches1.push(Branch::new(
+                bu.0, bf, level+1, &order,
+                &bu.1.iter().map(|b| { &(rows[*b].0).1 }).collect())
+              );
             }
           }
           branches0.clear();
         },
         1 => {
-          for b in branches1.iter() {
-            println!("1: {} {}", b.buckets.len(), b.intersecting.len());
-            for bs in b.buckets.iter() {
-              if bs.len() < 50 {
+          for i in 0..branches1.len() {
+            branches1[i].write::<S,C,A,B,C,V>(self, level, rows)?;
+            for bu in branches1[i].buckets.iter() {
+              if bu.1.len() <= <Branch<C>>::MAX_DATA_SIZE {
                 continue;
               }
-              branches2.push(Branch::new(self.branch_factor, &order,
-                &bs.iter().map(|b| { &(rows[*b].0).2 }).collect()));
+              branches2.push(Branch::new(
+                bu.0, bf, level+1, &order,
+                &bu.1.iter().map(|b| { &(rows[*b].0).2 }).collect())
+              );
             }
           }
           branches1.clear();
         },
         _ => {
-          for b in branches2.iter() {
-            println!("2: {} {}", b.buckets.len(), b.intersecting.len());
-            for bs in b.buckets.iter() {
-              if bs.len() < 50 {
+          for i in 0..branches2.len() {
+            branches2[i].write::<S,A,A,B,C,V>(self, level, rows)?;
+            for bu in branches2[i].buckets.iter() {
+              if bu.1.len() <= <Branch<A>>::MAX_DATA_SIZE {
                 continue;
               }
-              branches0.push(Branch::new(self.branch_factor, &order,
-                  &bs.iter().map(|b| { &(rows[*b].0).0 }).collect()));
+              branches0.push(Branch::new(
+                bu.0, bf, level+1, &order,
+                &bu.1.iter().map(|b| { &(rows[*b].0).0 }).collect())
+              );
             }
           }
           branches2.clear();
@@ -194,12 +274,17 @@ S: Debug+RandomAccess<Error=Error> {
     }
     order
   }
+  pub fn allocate (&mut self, size: PSIZE) -> PSIZE {
+    let i = self.size;
+    self.size += size;
+    i
+  }
 }
 
 pub struct DB3<S,U,A,B,C,V> where
-A: PartialOrd+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
-B: PartialOrd+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
-C: PartialOrd+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C>,
+A: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
+B: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
+C: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C>,
 S: Debug+RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>) {
   open_store: U,
@@ -209,9 +294,10 @@ U: (Fn(&str) -> Result<S,Error>) {
 }
 
 impl<S,U,A,B,C,V> DB3<S,U,A,B,C,V> where
-A: PartialOrd+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
-B: PartialOrd+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
-C: PartialOrd+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C>,
+A: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
+B: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
+C: PartialOrd+Serialize+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C>,
+V: Serialize,
 S: Debug+RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>) {
   pub fn open(open_store: U) -> Result<Self,Error> {
