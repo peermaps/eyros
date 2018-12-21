@@ -218,6 +218,9 @@ S: Debug+RandomAccess<Error=Error> {
         0 => {
           for i in 0..branches0.len() {
             branches0[i].write::<S,B,A,B,C,V>(self, level, rows)?;
+
+            branches0[i].buckets.iter()
+
             for bu in branches0[i].buckets.iter() {
               if bu.1.len() <= <Branch<B>>::MAX_DATA_SIZE {
                 continue;
