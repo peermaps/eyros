@@ -116,8 +116,17 @@ T: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<T,Output=T>+Add<T,Output=T> {
     }
     for i in 0..buckets.len() {
       let len = buckets[i].1.len();
-      buckets[i].0 = tree.allocate(<Branch<U>>::frame_size::<A,B,C>(
-        len, self.branch_factor));
+      let fsize = <Branch<U>>::frame_size::<A,B,C>(len, self.branch_factor);
+      buckets[i].0 = tree.allocate(fsize);
+      if buckets[i].1.len() <= Self::MAX_DATA_SIZE {
+        let bdata: Vec<u8> = Vec::with_capacity(fsize as usize);
+        let features = vec![];
+        for j in self.buckets[i].1.iter() {
+          features.push(Self::serialize_row(rows[*j]));
+        }
+        bdata.extend_from_slice(&serialize(features)?[size_of::<usize>()..]);
+        tree.store.write(buckets[i].0 as usize, &bdata);
+      }
     }
     let size = self.pivots.len()*size_of::<T>()
       + intersecting.len()*size_of::<PSIZE>()
@@ -127,16 +136,35 @@ T: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<T,Output=T>+Add<T,Output=T> {
     // strip off the leading usize from pivots (constant value)
     // to save bytes
     data.extend_from_slice(
-      &serialize(&self.pivots).unwrap()[size_of::<usize>()..]);
+      &serialize(&self.pivots)?[size_of::<usize>()..]);
     let iaddrs: Vec<PSIZE> = intersecting.iter()
       .map(|b| { b.0 as PSIZE }).collect();
     data.extend_from_slice(
-      &serialize(&iaddrs).unwrap()[size_of::<usize>()..]);
+      &serialize(&iaddrs)?[size_of::<usize>()..]);
     let baddrs: Vec<PSIZE> = buckets.iter()
       .map(|b| { b.0 as PSIZE }).collect();
     data.extend_from_slice(
-      &serialize(&baddrs).unwrap()[size_of::<usize>()..]);
+      &serialize(&baddrs)?[size_of::<usize>()..]);
     tree.store.write(self.offset as usize, &data)
+  }
+  pub fn next_level<U,A,B,C,V> (&self, level: u32, order: &Vec<usize>,
+  rows: &Vec<((Coord<A>,Coord<B>,Coord<C>),V)>,
+  get: &Fn ((Coord<A>,Coord<B>,Coord<C>)) -> U) -> Vec<Branch<U>> where
+  A: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
+  B: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<B,Output=B>+Add<B,Output=B>,
+  C: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<C,Output=C>+Add<C,Output=C>,
+  U: Serialize+PartialOrd+Copy+Debug+From<u8>+Div<U,Output=U>+Add<U,Output=U> {
+    let branches: Vec<Branch<U>> = vec![];
+    for bu in self.buckets.iter() {
+      if bu.1.len() <= Self::MAX_DATA_SIZE {
+        continue;
+      }
+      branches.push(Branch::new(
+        bu.0, self.branch_factor, level+1, &order,
+        &bu.1.iter().map(|b| { &get(rows[*b].0) }).collect())
+      );
+    }
+    branches
   }
   fn cmp (a: &Coord<T>, b: &Coord<T>) -> std::cmp::Ordering {
     match (a,b) {
@@ -218,48 +246,24 @@ S: Debug+RandomAccess<Error=Error> {
         0 => {
           for i in 0..branches0.len() {
             branches0[i].write::<S,B,A,B,C,V>(self, level, rows)?;
-
-            branches0[i].buckets.iter()
-
-            for bu in branches0[i].buckets.iter() {
-              if bu.1.len() <= <Branch<B>>::MAX_DATA_SIZE {
-                continue;
-              }
-              branches1.push(Branch::new(
-                bu.0, bf, level+1, &order,
-                &bu.1.iter().map(|b| { &(rows[*b].0).1 }).collect())
-              );
-            }
+            branches1.extend(branches0[i].next_level(
+              level+1, &order, rows, &Self::get1));
           }
           branches0.clear();
         },
         1 => {
           for i in 0..branches1.len() {
             branches1[i].write::<S,C,A,B,C,V>(self, level, rows)?;
-            for bu in branches1[i].buckets.iter() {
-              if bu.1.len() <= <Branch<C>>::MAX_DATA_SIZE {
-                continue;
-              }
-              branches2.push(Branch::new(
-                bu.0, bf, level+1, &order,
-                &bu.1.iter().map(|b| { &(rows[*b].0).2 }).collect())
-              );
-            }
+            branches2.extend(branches1[i].next_level(
+              level+1, &order, rows, &Self::get2));
           }
           branches1.clear();
         },
         _ => {
           for i in 0..branches2.len() {
             branches2[i].write::<S,A,A,B,C,V>(self, level, rows)?;
-            for bu in branches2[i].buckets.iter() {
-              if bu.1.len() <= <Branch<A>>::MAX_DATA_SIZE {
-                continue;
-              }
-              branches0.push(Branch::new(
-                bu.0, bf, level+1, &order,
-                &bu.1.iter().map(|b| { &(rows[*b].0).0 }).collect())
-              );
-            }
+            branches0.extend(branches2[i].next_level(
+              level+1, &order, rows, &Self::get0));
           }
           branches2.clear();
         }
@@ -282,6 +286,9 @@ S: Debug+RandomAccess<Error=Error> {
     self.size += size;
     i
   }
+  fn get0 (pt: &(Coord<A>,Coord<B>,Coord<C>)) -> &Coord<A> { &pt.0 }
+  fn get1 (pt: &(Coord<A>,Coord<B>,Coord<C>)) -> &Coord<B> { &pt.1 }
+  fn get2 (pt: &(Coord<A>,Coord<B>,Coord<C>)) -> &Coord<C> { &pt.2 }
 }
 
 pub struct DB3<S,U,A,B,C,V> where
