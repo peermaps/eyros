@@ -13,9 +13,12 @@ pub trait Point {
   fn deserialize (&[u8]) -> Result<Self,Error> where Self: Sized;
 }
 
-impl<A,B> Point for ((A,A),(B,B)) where
-A: PartialOrd+Copy+Serialize+DeserializeOwned+From<u8>+Div<A,Output=A>+Add<A,Output=A>,
-B: PartialOrd+Copy+Serialize+DeserializeOwned+From<u8>+Div<B,Output=B>+Add<B,Output=B> {
+trait Coord<T>: PartialOrd+Copy+Serialize+DeserializeOwned
++ From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
+impl<T> Coord<T> for T where T: PartialOrd+Copy+Serialize+DeserializeOwned
++ From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
+
+impl<A,B> Point for ((A,A),(B,B)) where A: Coord<A>, B: Coord<B> {
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%2 {
       0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
