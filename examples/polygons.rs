@@ -3,7 +3,7 @@ extern crate failure;
 extern crate rand;
 extern crate random_access_disk;
 
-use eyros::{DB,Point};
+use eyros::{DB,Row};
 use rand::random;
 use failure::Error;
 use random_access_disk::RandomAccessDisk;
@@ -21,7 +21,7 @@ fn main() -> Result<(),Error> {
     let value: u32 = random();
     //let point = (Range(xmin,xmax),Range(ymin,ymax),Point(time));
     let point = ((xmin,xmax),(ymin,ymax));
-    (point, value)
+    Row::Insert(point, value)
   }).collect();
   db.batch(&polygons)?;
   Ok(())
