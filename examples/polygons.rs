@@ -17,10 +17,9 @@ fn main() -> Result<(),Error> {
     let xmax: f32 = xmin + random::<f32>().powf(16.0)*(1.0-xmin);
     let ymin: f32 = random::<f32>()*2.0-1.0;
     let ymax: f32 = ymin + random::<f32>().powf(16.0)*(1.0-ymin);
-    //let time: f32 = random::<f32>()*1000.0;
+    let time: f32 = random::<f32>()*1000.0;
     let value: u32 = random();
-    //let point = (Range(xmin,xmax),Range(ymin,ymax),Point(time));
-    let point = ((xmin,xmax),(ymin,ymax));
+    let point = ((xmin,xmax),(ymin,ymax),time);
     Row::Insert(point, value)
   }).collect();
   db.batch(&polygons)?;

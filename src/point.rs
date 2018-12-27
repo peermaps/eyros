@@ -4,17 +4,18 @@ use std::mem::transmute;
 use failure::Error;
 use bincode::{serialize,deserialize};
 use serde::{Serialize,de::DeserializeOwned};
+use std::fmt::Debug;
 
-pub trait Point: Copy {
+pub trait Point: Copy+Debug {
   fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
   fn midpoint_upper (&self, &Self) -> Self where Self: Sized;
   fn serialize_at (&self, usize) -> Result<Vec<u8>,Error>;
 }
 
 pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
-+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
++Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
 impl<T> Num<T> for T where T: PartialOrd+Copy+Serialize+DeserializeOwned
-+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
++Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
 
 pub trait Scalar: Copy+Sized+'static {}
 impl Scalar for f32 {}
