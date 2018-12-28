@@ -48,7 +48,8 @@ P: Point, V: Value {
   }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     let store = (self.open_store)("tree0")?;
-    let order = <Tree<S,P,V>>::pivot_order(5);
+    let bf = 8;
+    let order = <Tree<S,P,V>>::pivot_order(bf);
     let inserts = rows.iter()
       .filter(|row| {
         match row { Row::Insert(p,v) => true, _ => false }
@@ -61,7 +62,7 @@ P: Point, V: Value {
       })
       .collect()
     ;
-    let mut tree = Tree::open(store, 5, &order);
+    let mut tree = Tree::open(store, bf, 100, &order);
     tree.build(&inserts)?;
     Ok(())
   }

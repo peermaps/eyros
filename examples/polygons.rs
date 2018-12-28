@@ -11,12 +11,11 @@ use std::path::PathBuf;
 
 fn main() -> Result<(),Error> {
   let mut db = DB::open(storage)?;
-  let polygons = (0..8_u32.pow(4)).map(|_| {
-  //let polygons = (0..8_u32.pow(1)).map(|_| {
+  let polygons = (0..8_u32.pow(4)-1).map(|_| {
     let xmin: f32 = random::<f32>()*2.0-1.0;
-    let xmax: f32 = xmin + random::<f32>().powf(16.0)*(1.0-xmin);
+    let xmax: f32 = xmin + random::<f32>().powf(8.0)*(1.0-xmin);
     let ymin: f32 = random::<f32>()*2.0-1.0;
-    let ymax: f32 = ymin + random::<f32>().powf(16.0)*(1.0-ymin);
+    let ymax: f32 = ymin + random::<f32>().powf(8.0)*(1.0-ymin);
     let time: f32 = random::<f32>()*1000.0;
     let value: u32 = random();
     let point = ((xmin,xmax),(ymin,ymax),time);
