@@ -6,6 +6,7 @@ extern crate serde;
 mod meta;
 mod point;
 mod tree;
+mod branch;
 pub use point::{Point,Scalar};
 pub use tree::Tree;
 
@@ -47,7 +48,7 @@ P: Point, V: Value {
     })
   }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
-    let store = (self.open_store)("tree0")?;
+    let mut store = (self.open_store)("tree0")?;
     let bf = 8;
     let order = <Tree<S,P,V>>::pivot_order(bf);
     let inserts = rows.iter()
@@ -62,7 +63,7 @@ P: Point, V: Value {
       })
       .collect()
     ;
-    let mut tree = Tree::open(store, bf, 100, &order);
+    let mut tree = Tree::open(&mut store, bf, 100, &order)?;
     tree.build(&inserts)?;
     Ok(())
   }
