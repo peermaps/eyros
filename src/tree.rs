@@ -40,26 +40,29 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       bail!("tree must have at least {} records", bf*2-1);
     }
     let rrows = rows.iter().map(|row| row).collect();
-    let b = Branch::new(0, &self.order, &rrows);
-    let mut branches = vec![Node::Branch(b)];
-
+    let bucket = (0..rows.len()).collect();
+    let b = Branch::new(0, self.max_data_size, &self.order, bucket, &rrows);
     let n = self.branch_factor*2-1;
-    for level in 0.. {
-      if branches.is_empty() { break }
-      let mut nbranches = vec![];
-      for branch in branches.iter() {
-        match branch {
-          Node::Data(d) => {
-            println!("todo: data");
-          },
-          Node::Branch(b) => {
-            let (data,nb) = b.build();
-            nbranches.extend(nb);
+    let mut branches = vec![Node::Branch(b)];
+    {
+      let alloc = &mut {|bytes| self.alloc(bytes) };
+      for level in 0.. {
+        if branches.is_empty() { break }
+        let mut nbranches = vec![];
+        for mut branch in branches {
+          match branch {
+            Node::Data(d) => {
+              println!("todo: data");
+            },
+            Node::Branch(ref mut b) => {
+              let (data,nb) = b.build(alloc);
+              nbranches.extend(nb);
+            }
           }
         }
+        branches = nbranches;
       }
-      branches = nbranches;
-    }
+    };
     self.flush()?;
     Ok(())
   }
