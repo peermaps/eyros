@@ -1,9 +1,13 @@
 use point::Point;
 use ::{Value};
 use std::cmp::Ordering;
+use std::mem::size_of;
+use bincode::{serialize};
+use failure::Error;
 
 #[derive(Clone)]
 pub enum Node<'a,P,V> where P: Point, V: Value {
+  Empty,
   Branch(Branch<'a,P,V>),
   Data(Data<'a,P,V>)
 }
@@ -14,7 +18,7 @@ pub trait Bytes {
 
 #[derive(Clone)]
 pub struct Data<'a,P,V> where P: Point, V: Value {
-  offset: u64,
+  pub offset: u64,
   bucket: Vec<usize>,
   rows: &'a Vec<&'a (P,V)>
 }
@@ -26,20 +30,27 @@ impl<'a,P,V> Data<'a,P,V> where P: Point, V: Value {
   pub fn alloc (&mut self, alloc: &mut FnMut (usize) -> u64) -> () {
     self.offset = alloc(self.bytes());
   }
-  pub fn data (&self) -> Vec<u8> {
-    vec![]
+  pub fn build (&self) -> Result<Vec<u8>,Error> {
+    let rdata: Vec<&'a (P,V)> = self.bucket.iter().map(|i| {
+      self.rows[*i]
+    }).collect();
+    let mut data = Vec::with_capacity(self.bytes());
+    data.extend(serialize(&(self.bucket.len() as u32))?);
+    data.extend_from_slice(&serialize(&rdata)?[size_of::<usize>()..]);
+    Ok(data)
   }
 }
 
 impl<'a,P,V> Bytes for Data<'a,P,V> where P: Point, V: Value {
   fn bytes (&self) -> usize {
-    50
+    size_of::<u32>() + self.bucket.len() * (size_of::<P>() + size_of::<V>())
   }
 }
 
 impl<'a,P,V> Bytes for Branch<'a,P,V> where P: Point, V: Value {
   fn bytes (&self) -> usize {
-    50
+    let n = self.pivots.len();
+    size_of::<P>() * n + size_of::<u64>() * (2*n+1)
   }
 }
 
@@ -47,7 +58,8 @@ impl<'a,P,V> Bytes for Node<'a,P,V> where P: Point, V: Value {
   fn bytes (&self) -> usize {
     match self {
       Node::Branch(b) => b.bytes(),
-      Node::Data(d) => d.bytes()
+      Node::Data(d) => d.bytes(),
+      Node::Empty => 0
     }
   }
 }
@@ -113,7 +125,7 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
     self.offset = alloc(self.bytes());
   }
   pub fn build (&mut self, alloc: &mut FnMut (usize) -> u64)
-  -> (Vec<u8>,Vec<Node<'a,P,V>>) {
+  -> Result<(Vec<u8>,Vec<Node<'a,P,V>>),Error> {
     let n = self.order.len();
     self.buckets = vec![vec![];n];
     let bf = (n+1)/2;
@@ -131,22 +143,37 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
       }
       self.buckets[j].push(*i);
     }
-    let mut nodes = Vec::with_capacity(self.buckets.len());
-    for bucket in self.buckets.iter() {
-      if bucket.len() < self.max_data_size {
-        let mut d = Data::new(bucket.clone(), self.rows);
-        d.alloc(alloc);
-        nodes.push(Node::Data(d));
-      } else {
-        let mut b = Branch::new(
-          self.level+1, self.max_data_size, self.order,
-          bucket.clone(), self.rows
-        );
-        b.alloc(alloc);
-        nodes.push(Node::Branch(b));
+    let mut nodes = Vec::with_capacity(
+      self.buckets.len() + self.intersecting.len());
+    for ref buckets in [&self.buckets,&self.intersecting].iter() {
+      for bucket in buckets.iter() {
+        if bucket.is_empty() {
+          nodes.push(Node::Empty);
+        } else if bucket.len() < self.max_data_size {
+          let mut d = Data::new(bucket.clone(), self.rows);
+          d.alloc(alloc);
+          nodes.push(Node::Data(d));
+        } else {
+          let mut b = Branch::new(
+            self.level+1, self.max_data_size, self.order,
+            bucket.clone(), self.rows
+          );
+          b.alloc(alloc);
+          nodes.push(Node::Branch(b));
+        }
       }
     }
-    let data: Vec<u8> = vec![];
-    (data,nodes)
+    let mut data: Vec<u8> = Vec::with_capacity(self.bytes());
+    for pivot in self.pivots.iter() {
+      data.extend(pivot.serialize_at(self.level % pivot.dim())?);
+    }
+    for node in nodes.iter() {
+      data.extend(serialize(&match node {
+        Node::Branch(b) => b.offset,
+        Node::Data(d) => d.offset,
+        Node::Empty => 0
+      })?);
+    }
+    Ok((data,nodes))
   }
 }

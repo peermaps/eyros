@@ -6,10 +6,11 @@ use bincode::{serialize,deserialize};
 use serde::{Serialize,de::DeserializeOwned};
 use std::fmt::Debug;
 
-pub trait Point: Copy+Debug {
+pub trait Point: Copy+Debug+Serialize {
   fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
   fn midpoint_upper (&self, &Self) -> Self where Self: Sized;
   fn serialize_at (&self, usize) -> Result<Vec<u8>,Error>;
+  fn dim (&self) -> usize;
 }
 
 pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
@@ -51,6 +52,7 @@ impl<A,B> Point for (A,B) where A: Num<A>, B: Num<B> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 2 }
 }
 
 impl<A,B> Point for (A,(B,B)) where A: Num<A>, B: Num<B> {
@@ -75,6 +77,7 @@ impl<A,B> Point for (A,(B,B)) where A: Num<A>, B: Num<B> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 2 }
 }
 
 impl<A,B> Point for ((A,A),B) where A: Num<A>, B: Num<B> {
@@ -99,6 +102,7 @@ impl<A,B> Point for ((A,A),B) where A: Num<A>, B: Num<B> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 2 }
 }
 
 impl<A,B> Point for ((A,A),(B,B)) where A: Num<A>, B: Num<B> {
@@ -123,6 +127,7 @@ impl<A,B> Point for ((A,A),(B,B)) where A: Num<A>, B: Num<B> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 2 }
 }
 
 impl<A,B,C> Point for (A,B,C) where A: Num<A>, B: Num<B>, C: Num<C> {
@@ -151,6 +156,7 @@ impl<A,B,C> Point for (A,B,C) where A: Num<A>, B: Num<B>, C: Num<C> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 3 }
 }
 
 impl<A,B,C> Point for (A,(B,B),C) where A: Num<A>, B: Num<B>, C: Num<C> {
@@ -179,6 +185,7 @@ impl<A,B,C> Point for (A,(B,B),C) where A: Num<A>, B: Num<B>, C: Num<C> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 3 }
 }
 
 impl<A,B,C> Point for ((A,A),B,C) where A: Num<A>, B: Num<B>, C: Num<C> {
@@ -207,6 +214,7 @@ impl<A,B,C> Point for ((A,A),B,C) where A: Num<A>, B: Num<B>, C: Num<C> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 3 }
 }
 
 impl<A,B,C> Point for ((A,A),(B,B),C)
@@ -236,6 +244,7 @@ where A: Num<A>, B: Num<B>, C: Num<C> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 3 }
 }
 
 impl<A,B,C> Point for (A,B,(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
@@ -264,6 +273,7 @@ impl<A,B,C> Point for (A,B,(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 3 }
 }
 
 impl<A,B,C> Point for (A,(B,B),(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
@@ -292,6 +302,7 @@ impl<A,B,C> Point for (A,(B,B),(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 3 }
 }
 
 impl<A,B,C> Point for ((A,A),B,(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
@@ -320,6 +331,7 @@ impl<A,B,C> Point for ((A,A),B,(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 3 }
 }
 
 impl<A,B,C> Point for ((A,A),(B,B),(C,C))
@@ -349,4 +361,5 @@ where A: Num<A>, B: Num<B>, C: Num<C> {
     };
     Ok(buf)
   }
+  fn dim (&self) -> usize { 3 }
 }
