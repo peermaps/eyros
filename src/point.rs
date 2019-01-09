@@ -1,16 +1,17 @@
 use std::cmp::Ordering;
 use std::ops::{Div,Add};
-use std::mem::transmute;
 use failure::Error;
-use bincode::{serialize,deserialize};
+use bincode::{serialize};
 use serde::{Serialize,de::DeserializeOwned};
 use std::fmt::Debug;
 
 pub trait Point: Copy+Debug+Serialize {
+  type BBox;
   fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
   fn midpoint_upper (&self, &Self) -> Self where Self: Sized;
   fn serialize_at (&self, usize) -> Result<Vec<u8>,Error>;
   fn dim (&self) -> usize;
+  fn overlaps (&self, &Self::BBox) -> bool;
 }
 
 pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
@@ -30,7 +31,18 @@ impl Scalar for i16 {}
 impl Scalar for i32 {}
 impl Scalar for i64 {}
 
+#[inline]
+fn overlap_pt<T> (pt: &T, min: &T, max: &T) -> bool where T: PartialOrd {
+  *min <= *pt && *pt <= *max
+}
+#[inline]
+fn overlap_iv<T> (iv: &(T,T), min: &T, max: &T) -> bool where T: PartialOrd {
+  overlap_pt(&iv.0,min,max) || overlap_pt(&iv.1,min,max)
+    || overlap_pt(min, &iv.0, &iv.1) || overlap_pt(max, &iv.0, &iv.1)
+}
+
 impl<A,B> Point for (A,B) where A: Num<A>, B: Num<B> {
+  type BBox = ((A,B),(A,B));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%2 {
       0 => if self.0 == other.0
@@ -53,9 +65,14 @@ impl<A,B> Point for (A,B) where A: Num<A>, B: Num<B> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 2 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
+  }
 }
 
 impl<A,B> Point for (A,(B,B)) where A: Num<A>, B: Num<B> {
+  type BBox = ((A,B),(A,B));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%2 {
       0 => if self.0 == other.0
@@ -78,9 +95,14 @@ impl<A,B> Point for (A,(B,B)) where A: Num<A>, B: Num<B> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 2 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
+  }
 }
 
 impl<A,B> Point for ((A,A),B) where A: Num<A>, B: Num<B> {
+  type BBox = ((A,B),(A,B));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%2 {
       0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
@@ -103,9 +125,14 @@ impl<A,B> Point for ((A,A),B) where A: Num<A>, B: Num<B> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 2 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
+  }
 }
 
 impl<A,B> Point for ((A,A),(B,B)) where A: Num<A>, B: Num<B> {
+  type BBox = ((A,B),(A,B));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%2 {
       0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
@@ -128,9 +155,14 @@ impl<A,B> Point for ((A,A),(B,B)) where A: Num<A>, B: Num<B> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 2 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
+  }
 }
 
 impl<A,B,C> Point for (A,B,C) where A: Num<A>, B: Num<B>, C: Num<C> {
+  type BBox = ((A,B,C),(A,B,C));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%2 {
       0 => if self.0 == other.0
@@ -157,9 +189,15 @@ impl<A,B,C> Point for (A,B,C) where A: Num<A>, B: Num<B>, C: Num<C> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 3 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
+    && overlap_pt(&self.2, &(bbox.0).2, &(bbox.1).2)
+  }
 }
 
 impl<A,B,C> Point for (A,(B,B),C) where A: Num<A>, B: Num<B>, C: Num<C> {
+  type BBox = ((A,B,C),(A,B,C));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%2 {
       0 => if self.0 == other.0
@@ -186,9 +224,15 @@ impl<A,B,C> Point for (A,(B,B),C) where A: Num<A>, B: Num<B>, C: Num<C> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 3 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
+    && overlap_pt(&self.2, &(bbox.0).2, &(bbox.1).2)
+  }
 }
 
 impl<A,B,C> Point for ((A,A),B,C) where A: Num<A>, B: Num<B>, C: Num<C> {
+  type BBox = ((A,B,C),(A,B,C));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%2 {
       0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
@@ -215,10 +259,16 @@ impl<A,B,C> Point for ((A,A),B,C) where A: Num<A>, B: Num<B>, C: Num<C> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 3 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
+    && overlap_pt(&self.2, &(bbox.0).2, &(bbox.1).2)
+  }
 }
 
 impl<A,B,C> Point for ((A,A),(B,B),C)
 where A: Num<A>, B: Num<B>, C: Num<C> {
+  type BBox = ((A,B,C),(A,B,C));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%3 {
       0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
@@ -245,9 +295,15 @@ where A: Num<A>, B: Num<B>, C: Num<C> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 3 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
+    && overlap_pt(&self.2, &(bbox.0).2, &(bbox.1).2)
+  }
 }
 
 impl<A,B,C> Point for (A,B,(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
+  type BBox = ((A,B,C),(A,B,C));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%2 {
       0 => if self.0 == other.0
@@ -274,9 +330,15 @@ impl<A,B,C> Point for (A,B,(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 3 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
+    && overlap_iv(&self.2, &(bbox.0).2, &(bbox.1).2)
+  }
 }
 
 impl<A,B,C> Point for (A,(B,B),(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
+  type BBox = ((A,B,C),(A,B,C));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%2 {
       0 => if self.0 == other.0
@@ -303,9 +365,15 @@ impl<A,B,C> Point for (A,(B,B),(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 3 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
+    && overlap_iv(&self.2, &(bbox.0).2, &(bbox.1).2)
+  }
 }
 
 impl<A,B,C> Point for ((A,A),B,(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
+  type BBox = ((A,B,C),(A,B,C));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%2 {
       0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
@@ -332,10 +400,16 @@ impl<A,B,C> Point for ((A,A),B,(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 3 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
+    && overlap_iv(&self.2, &(bbox.0).2, &(bbox.1).2)
+  }
 }
 
 impl<A,B,C> Point for ((A,A),(B,B),(C,C))
 where A: Num<A>, B: Num<B>, C: Num<C> {
+  type BBox = ((A,B,C),(A,B,C));
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
     let order = match level%3 {
       0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
@@ -362,4 +436,9 @@ where A: Num<A>, B: Num<B>, C: Num<C> {
     Ok(buf)
   }
   fn dim (&self) -> usize { 3 }
+  fn overlaps (&self, bbox: &Self::BBox) -> bool {
+    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
+    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
+    && overlap_iv(&self.2, &(bbox.0).2, &(bbox.1).2)
+  }
 }

@@ -7,6 +7,7 @@ mod meta;
 mod point;
 mod tree;
 mod branch;
+//mod staging;
 pub use point::{Point,Scalar};
 pub use tree::Tree;
 
@@ -67,8 +68,27 @@ P: Point, V: Value {
     tree.build(&inserts)?;
     Ok(())
   }
-  pub fn query (&mut self, query: (P,P)) -> Result<(),Error> {
-    // todo: iterator return type
-    unimplemented!();
+  pub fn query (&mut self, bbox: P::BBox) -> QueryIterator<S,P,V> {
+    QueryIterator::new(bbox)
+  }
+}
+
+pub struct QueryIterator<S,P,V>
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  _marker: PhantomData<(S,P,V)>
+}
+
+impl<S,P,V> QueryIterator<S,P,V>
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  pub fn new (bbox: P::BBox) -> Self {
+    Self { _marker: PhantomData }
+  }
+}
+
+impl<S,P,V> Iterator for QueryIterator<S,P,V>
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  type Item = Result<(P,V),Error>;
+  fn next (&mut self) -> Option<Self::Item> {
+    None
   }
 }

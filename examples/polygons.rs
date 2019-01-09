@@ -22,6 +22,11 @@ fn main() -> Result<(),Error> {
     Row::Insert(point, value)
   }).collect();
   db.batch(&polygons)?;
+
+  let bbox = ((-1.0,-1.0,-1.0),(1.0,1.0,1.0));
+  for result in db.query(bbox) {
+    println!("{:?}", result?);
+  }
   Ok(())
 }
 

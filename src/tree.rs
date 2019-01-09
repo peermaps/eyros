@@ -1,14 +1,31 @@
 use random_access_storage::RandomAccess;
 use failure::{Error,bail};
 use std::marker::PhantomData;
-use std::mem::size_of;
-use std::cmp::Ordering;
-use bincode::{serialize,deserialize};
 
-use point::Point;
-use ::{Row,Value};
+use ::{Point,Value};
 
 use branch::{Branch,Node};
+
+pub struct TreeQuery<'a,S,P,V>
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  tree: &'a Tree<'a,S,P,V>,
+  bbox: P::BBox
+}
+
+impl<'a,S,P,V> TreeQuery<'a,S,P,V>
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  pub fn new (tree: &'a Tree<'a,S,P,V>, bbox: P::BBox) -> Self {
+    Self { tree, bbox }
+  }
+}
+
+impl<'a,S,P,V> Iterator for TreeQuery<'a,S,P,V>
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  type Item = (P,V);
+  fn next (&mut self) -> Option<Self::Item> {
+    None
+  }
+}
 
 pub struct Tree<'a,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
@@ -36,6 +53,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   pub fn build (&mut self, rows: &Vec<(P,V)>) -> Result<(),Error> {
     let bf = self.branch_factor;
+    if self.size > 0 {
+      self.size = 0;
+      self.store.truncate(0);
+    }
     if rows.len() < bf*2-1 {
       bail!("tree must have at least {} records", bf*2-1);
     }
@@ -87,9 +108,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     order
   }
+  pub fn query (&'a self, bbox: P::BBox) -> Result<TreeQuery<'a,S,P,V>,Error> {
+    let q = TreeQuery::new(self, bbox);
+    Ok(q)
+  }
   fn alloc (&mut self, bytes: usize) -> u64 {
     let addr = self.size;
-    self.size += (bytes as u64);
+    self.size += bytes as u64;
     addr
   }
   fn write_frame (&mut self, offset: u64, buf: Vec<u8>) -> Result<(),Error> {
