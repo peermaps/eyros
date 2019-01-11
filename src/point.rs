@@ -31,414 +31,84 @@ impl Scalar for i16 {}
 impl Scalar for i32 {}
 impl Scalar for i64 {}
 
-#[inline]
-fn overlap_pt<T> (pt: &T, min: &T, max: &T) -> bool where T: PartialOrd {
-  *min <= *pt && *pt <= *max
-}
-#[inline]
-fn overlap_iv<T> (iv: &(T,T), min: &T, max: &T) -> bool where T: PartialOrd {
-  overlap_pt(&iv.0,min,max) || overlap_pt(&iv.1,min,max)
-    || overlap_pt(min, &iv.0, &iv.1) || overlap_pt(max, &iv.0, &iv.1)
+trait Coord<T> {
+  fn cmp (&self, &Self) -> Option<Ordering>;
+  fn midpoint_upper (&self, &Self) -> Self;
+  fn overlaps (&self, &T, &T) -> bool;
 }
 
-impl<A,B> Point for (A,B) where A: Num<A>, B: Num<B> {
-  type BBox = ((A,B),(A,B));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%2 {
-      0 => if self.0 == other.0
-        { Some(Ordering::Equal) } else { self.0.partial_cmp(&other.0) }
-      _ => if self.1 == other.1
-        { Some(Ordering::Equal) } else { self.1.partial_cmp(&other.1) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
+impl<T> Coord<T> for T where T: Scalar+PartialOrd+Num<T> {
+  fn cmp (&self, other: &T) -> Option<Ordering> {
+    self.partial_cmp(&other)
   }
   fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = (self.0 + other.0) / 2.into();
-    let b = (self.1 + other.1) / 2.into();
-    (a,b)
+    (*self + *other) / 2.into()
   }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%2 {
-      0 => serialize(&self.0)?,
-      _ => serialize(&self.1)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 2 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
+  fn overlaps (&self, min: &T, max: &T) -> bool {
+    *min <= *self && *self <= *max
   }
 }
 
-impl<A,B> Point for (A,(B,B)) where A: Num<A>, B: Num<B> {
-  type BBox = ((A,B),(A,B));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%2 {
-      0 => if self.0 == other.0
-        { Some(Ordering::Equal) } else { self.0.partial_cmp(&other.0) }
-      _ => if (self.1).0 <= (other.1).1 && (other.1).0 <= (self.1).1
-        { Some(Ordering::Equal) } else { (self.1).0.partial_cmp(&(other.1).0) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
+impl<T> Coord<T> for (T,T) where T: Scalar+PartialOrd+Num<T> {
+  fn cmp (&self, other: &Self) -> Option<Ordering> {
+    if self.0 <= other.1 && other.0 <= self.1 {
+      Some(Ordering::Equal)
+    } else {
+      self.0.partial_cmp(&other.0)
+    }
   }
   fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = (self.0 + other.0) / 2.into();
-    let b = ((self.1).1 + (other.1).1) / 2.into();
-    (a,(b,b))
+    let x = (self.1 + other.1) / 2.into();
+    (x,x)
   }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%2 {
-      0 => serialize(&self.0)?,
-      _ => serialize(&self.1)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 2 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
+  fn overlaps (&self, min: &T, max: &T) -> bool {
+    self.0.overlaps(min,max) || self.1.overlaps(min,max)
+    || min.overlaps(&self.0, &self.1) || max.overlaps(&self.0, &self.1)
   }
 }
 
-impl<A,B> Point for ((A,A),B) where A: Num<A>, B: Num<B> {
-  type BBox = ((A,B),(A,B));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%2 {
-      0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
-        { Some(Ordering::Equal) } else { (self.0).0.partial_cmp(&(other.0).0) }
-      _ => if self.1 == other.1
-        { Some(Ordering::Equal) } else { self.1.partial_cmp(&other.1) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
-  }
-  fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = ((self.0).1 + (other.0).1) / 2.into();
-    let b = (self.1 + other.1) / 2.into();
-    ((a,a),b)
-  }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%2 {
-      0 => serialize(&self.0)?,
-      _ => serialize(&self.1)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 2 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
-  }
-}
-
-impl<A,B> Point for ((A,A),(B,B)) where A: Num<A>, B: Num<B> {
-  type BBox = ((A,B),(A,B));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%2 {
-      0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
-        { Some(Ordering::Equal) } else { (self.0).0.partial_cmp(&(other.0).0) },
-      _ => if (self.1).0 <= (other.1).1 && (other.1).0 <= (self.1).1
-        { Some(Ordering::Equal) } else { (self.1).0.partial_cmp(&(other.1).0) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
-  }
-  fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = ((self.0).1 + (other.0).1) / 2.into();
-    let b = ((self.1).1 + (other.1).1) / 2.into();
-    ((a,a),(b,b))
-  }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%2 {
-      0 => serialize(&self.0)?,
-      _ => serialize(&self.1)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 2 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
+macro_rules! impl_point {
+  (($($T:tt),+),($($U:tt),+),($($i:tt),+),$dim:expr) => {
+    impl<$($T),+> Point for ($($U),+)
+    where $($T: Num<$T>),+ {
+      type BBox = (($($T,)+),($($T,)+));
+      fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
+        let order = match level%self.dim() {
+          $($i => Coord::cmp(&self.$i, &other.$i),)+
+          _ => panic!("match case beyond dimension")
+        };
+        match order { Some(x) => x, None => Ordering::Less }
+      }
+      fn midpoint_upper (&self, other: &Self) -> Self {
+        ($(
+          Coord::midpoint_upper(&self.$i, &other.$i)
+        ),+)
+      }
+      fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
+        let buf: Vec<u8> = match level%self.dim() {
+          $($i => serialize(&self.$i)?,)+
+          _ => panic!("match case beyond dimension")
+        };
+        Ok(buf)
+      }
+      fn dim (&self) -> usize { $dim }
+      fn overlaps (&self, bbox: &Self::BBox) -> bool {
+        $(Coord::overlaps(&self.$i, &(bbox.0).$i, &(bbox.1).$i) &&)+ true
+      }
+    }
   }
 }
 
-impl<A,B,C> Point for (A,B,C) where A: Num<A>, B: Num<B>, C: Num<C> {
-  type BBox = ((A,B,C),(A,B,C));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%2 {
-      0 => if self.0 == other.0
-        { Some(Ordering::Equal) } else { self.0.partial_cmp(&other.0) }
-      1 => if self.1 == other.1
-        { Some(Ordering::Equal) } else { self.1.partial_cmp(&other.1) }
-      _ => if self.2 == other.2
-        { Some(Ordering::Equal) } else { self.2.partial_cmp(&other.2) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
-  }
-  fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = (self.0 + other.0) / 2.into();
-    let b = (self.1 + other.1) / 2.into();
-    let c = (self.2 + other.2) / 2.into();
-    (a,b,c)
-  }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%2 {
-      0 => serialize(&self.0)?,
-      1 => serialize(&self.1)?,
-      _ => serialize(&self.2)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 3 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
-    && overlap_pt(&self.2, &(bbox.0).2, &(bbox.1).2)
-  }
-}
+impl_point![(A,B),(A,B),(0,1),2];
+impl_point![(A,B),((A,A),B),(0,1),2];
+impl_point![(A,B),(A,(B,B)),(0,1),2];
+impl_point![(A,B),((A,A),(B,B)),(0,1),2];
 
-impl<A,B,C> Point for (A,(B,B),C) where A: Num<A>, B: Num<B>, C: Num<C> {
-  type BBox = ((A,B,C),(A,B,C));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%2 {
-      0 => if self.0 == other.0
-        { Some(Ordering::Equal) } else { self.0.partial_cmp(&other.0) },
-      1 => if (self.1).0 <= (other.1).1 && (other.1).0 <= (self.1).1
-        { Some(Ordering::Equal) } else { (self.1).0.partial_cmp(&(other.1).0) },
-      _ => if self.2 == other.2
-        { Some(Ordering::Equal) } else { self.2.partial_cmp(&other.2) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
-  }
-  fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = (self.0 + other.0) / 2.into();
-    let b = ((self.1).1 + (other.1).1) / 2.into();
-    let c = (self.2 + other.2) / 2.into();
-    (a,(b,b),c)
-  }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%2 {
-      0 => serialize(&self.0)?,
-      1 => serialize(&self.1)?,
-      _ => serialize(&self.2)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 3 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
-    && overlap_pt(&self.2, &(bbox.0).2, &(bbox.1).2)
-  }
-}
-
-impl<A,B,C> Point for ((A,A),B,C) where A: Num<A>, B: Num<B>, C: Num<C> {
-  type BBox = ((A,B,C),(A,B,C));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%2 {
-      0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
-        { Some(Ordering::Equal) } else { (self.0).0.partial_cmp(&(other.0).0) },
-      1 => if self.1 == other.1
-        { Some(Ordering::Equal) } else { self.1.partial_cmp(&other.1) },
-      _ => if self.2 == other.2
-        { Some(Ordering::Equal) } else { self.2.partial_cmp(&other.2) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
-  }
-  fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = ((self.0).1 + (other.0).1) / 2.into();
-    let b = (self.1 + other.1) / 2.into();
-    let c = (self.2 + other.2) / 2.into();
-    ((a,a),b,c)
-  }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%2 {
-      0 => serialize(&self.0)?,
-      1 => serialize(&self.1)?,
-      _ => serialize(&self.2)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 3 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
-    && overlap_pt(&self.2, &(bbox.0).2, &(bbox.1).2)
-  }
-}
-
-impl<A,B,C> Point for ((A,A),(B,B),C)
-where A: Num<A>, B: Num<B>, C: Num<C> {
-  type BBox = ((A,B,C),(A,B,C));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%3 {
-      0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
-        { Some(Ordering::Equal) } else { (self.0).0.partial_cmp(&(other.0).0) },
-      1 => if (self.1).0 <= (other.1).1 && (other.1).0 <= (self.1).1
-        { Some(Ordering::Equal) } else { (self.1).0.partial_cmp(&(other.1).0) },
-      _ => if self.2 == other.2
-        { Some(Ordering::Equal) } else { self.2.partial_cmp(&other.2) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
-  }
-  fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = ((self.0).1 + (other.0).1) / 2.into();
-    let b = ((self.1).1 + (other.1).1) / 2.into();
-    let c = (self.2 + other.2) / 2.into();
-    ((a,a),(b,b),c)
-  }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%3 {
-      0 => serialize(&self.0)?,
-      1 => serialize(&self.1)?,
-      _ => serialize(&self.2)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 3 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
-    && overlap_pt(&self.2, &(bbox.0).2, &(bbox.1).2)
-  }
-}
-
-impl<A,B,C> Point for (A,B,(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
-  type BBox = ((A,B,C),(A,B,C));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%2 {
-      0 => if self.0 == other.0
-        { Some(Ordering::Equal) } else { self.0.partial_cmp(&other.0) },
-      1 => if self.1 == other.1
-        { Some(Ordering::Equal) } else { self.1.partial_cmp(&other.1) },
-      _ => if (self.2).0 <= (other.2).1 && (other.2).0 <= (self.2).1
-        { Some(Ordering::Equal) } else { (self.2).0.partial_cmp(&(other.2).0) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
-  }
-  fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = (self.0 + other.0) / 2.into();
-    let b = (self.1 + other.1) / 2.into();
-    let c = ((self.2).1 + (other.2).1) / 2.into();
-    (a,b,(c,c))
-  }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%2 {
-      0 => serialize(&self.0)?,
-      1 => serialize(&self.1)?,
-      _ => serialize(&self.2)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 3 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
-    && overlap_iv(&self.2, &(bbox.0).2, &(bbox.1).2)
-  }
-}
-
-impl<A,B,C> Point for (A,(B,B),(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
-  type BBox = ((A,B,C),(A,B,C));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%2 {
-      0 => if self.0 == other.0
-        { Some(Ordering::Equal) } else { self.0.partial_cmp(&other.0) },
-      1 => if (self.1).0 <= (other.1).1 && (other.1).0 <= (self.1).1
-        { Some(Ordering::Equal) } else { (self.1).0.partial_cmp(&(other.1).0) },
-      _ => if (self.2).0 <= (other.2).1 && (other.2).0 <= (self.2).1
-        { Some(Ordering::Equal) } else { (self.2).0.partial_cmp(&(other.2).0) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
-  }
-  fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = (self.0 + other.0) / 2.into();
-    let b = ((self.1).1 + (other.1).1) / 2.into();
-    let c = ((self.2).1 + (other.2).1) / 2.into();
-    (a,(b,b),(c,c))
-  }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%2 {
-      0 => serialize(&self.0)?,
-      1 => serialize(&self.1)?,
-      _ => serialize(&self.2)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 3 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_pt(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
-    && overlap_iv(&self.2, &(bbox.0).2, &(bbox.1).2)
-  }
-}
-
-impl<A,B,C> Point for ((A,A),B,(C,C)) where A: Num<A>, B: Num<B>, C: Num<C> {
-  type BBox = ((A,B,C),(A,B,C));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%2 {
-      0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
-        { Some(Ordering::Equal) } else { (self.0).0.partial_cmp(&(other.0).0) }
-      1 => if self.1 == other.1
-        { Some(Ordering::Equal) } else { self.1.partial_cmp(&other.1) },
-      _ => if (self.2).0 <= (other.2).1 && (other.2).0 <= (self.2).1
-        { Some(Ordering::Equal) } else { (self.2).0.partial_cmp(&(other.2).0) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
-  }
-  fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = ((self.0).1 + (other.0).1) / 2.into();
-    let b = (self.1 + other.1) / 2.into();
-    let c = ((self.2).1 + (other.2).1) / 2.into();
-    ((a,a),b,(c,c))
-  }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%2 {
-      0 => serialize(&self.0)?,
-      1 => serialize(&self.1)?,
-      _ => serialize(&self.2)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 3 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_pt(&self.1, &(bbox.0).1, &(bbox.1).1)
-    && overlap_iv(&self.2, &(bbox.0).2, &(bbox.1).2)
-  }
-}
-
-impl<A,B,C> Point for ((A,A),(B,B),(C,C))
-where A: Num<A>, B: Num<B>, C: Num<C> {
-  type BBox = ((A,B,C),(A,B,C));
-  fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-    let order = match level%3 {
-      0 => if (self.0).0 <= (other.0).1 && (other.0).0 <= (self.0).1
-        { Some(Ordering::Equal) } else { (self.0).0.partial_cmp(&(other.0).0) },
-      1 => if (self.1).0 <= (other.1).1 && (other.1).0 <= (self.1).1
-        { Some(Ordering::Equal) } else { (self.1).0.partial_cmp(&(other.1).0) },
-      _ => if (self.2).0 <= (other.2).1 && (other.2).0 <= (self.2).1
-        { Some(Ordering::Equal) } else { (self.2).0.partial_cmp(&(other.2).0) }
-    };
-    match order { Some(x) => x, None => Ordering::Less }
-  }
-  fn midpoint_upper (&self, other: &Self) -> Self {
-    let a = ((self.0).1 + (other.0).1) / 2.into();
-    let b = ((self.1).1 + (other.1).1) / 2.into();
-    let c = ((self.2).1 + (other.2).1) / 2.into();
-    ((a,a),(b,b),(c,c))
-  }
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match level%3 {
-      0 => serialize(&self.0)?,
-      1 => serialize(&self.1)?,
-      _ => serialize(&self.2)?
-    };
-    Ok(buf)
-  }
-  fn dim (&self) -> usize { 3 }
-  fn overlaps (&self, bbox: &Self::BBox) -> bool {
-    overlap_iv(&self.0, &(bbox.0).0, &(bbox.1).0)
-    && overlap_iv(&self.1, &(bbox.0).1, &(bbox.1).1)
-    && overlap_iv(&self.2, &(bbox.0).2, &(bbox.1).2)
-  }
-}
+impl_point![(A,B,C),(A,B,C),(0,1,2),3];
+impl_point![(A,B,C),((A,A),B,C),(0,1,2),3];
+impl_point![(A,B,C),(A,(B,B),C),(0,1,2),3];
+impl_point![(A,B,C),((A,A),(B,B),C),(0,1,2),3];
+impl_point![(A,B,C),(A,B,(C,C)),(0,1,2),3];
+impl_point![(A,B,C),((A,A),B,(C,C)),(0,1,2),3];
+impl_point![(A,B,C),(A,(B,B),(C,C)),(0,1,2),3];
+impl_point![(A,B,C),((A,A),(B,B),(C,C)),(0,1,2),3];
