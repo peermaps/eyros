@@ -99,16 +99,25 @@ macro_rules! impl_point {
   }
 }
 
-impl_point![(A,B),(A,B),(0,1),2];
-impl_point![(A,B),((A,A),B),(0,1),2];
-impl_point![(A,B),(A,(B,B)),(0,1),2];
-impl_point![(A,B),((A,A),(B,B)),(0,1),2];
+macro_rules! impl_comb {
+  ($types:tt, ($H:ty,$($T:ty),*), $ix:tt, $dim:expr, ($($x:tt),*)) => {
+    impl_comb!($types, ($($T),*), $ix, $dim, ($($x,)*$H));
+    impl_comb!($types, ($($T),*), $ix, $dim, ($($x,)*($H,$H)));
+  };
+  ($types:tt, ($H:ty), $ix:tt, $dim:expr, ($($x:tt),*)) => {
+    impl_point!($types, ($($x),*,$H), $ix, $dim);
+    impl_point!($types, ($($x),*,($H,$H)), $ix, $dim);
+  };
+}
 
-impl_point![(A,B,C),(A,B,C),(0,1,2),3];
-impl_point![(A,B,C),((A,A),B,C),(0,1,2),3];
-impl_point![(A,B,C),(A,(B,B),C),(0,1,2),3];
-impl_point![(A,B,C),((A,A),(B,B),C),(0,1,2),3];
-impl_point![(A,B,C),(A,B,(C,C)),(0,1,2),3];
-impl_point![(A,B,C),((A,A),B,(C,C)),(0,1,2),3];
-impl_point![(A,B,C),(A,(B,B),(C,C)),(0,1,2),3];
-impl_point![(A,B,C),((A,A),(B,B),(C,C)),(0,1,2),3];
+macro_rules! impl_dim {
+  ($t:tt,$i:tt,$dim:expr) => {
+    impl_comb![$t,$t,$i,$dim,()];
+  }
+}
+
+impl_dim![(A,B),(0,1),2];
+impl_dim![(A,B,C),(0,1,2),3];
+impl_dim![(A,B,C,D),(0,1,2,3),4];
+impl_dim![(A,B,C,D,E),(0,1,2,3,4),5];
+impl_dim![(A,B,C,D,E,F),(0,1,2,3,4,5),6];
