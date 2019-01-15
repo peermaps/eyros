@@ -6,22 +6,22 @@ use ::{Point,Value};
 
 use branch::{Branch,Node};
 
-pub struct TreeQuery<'a,S,P,V>
+pub struct TreeQuery<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   tree: &'a Tree<'a,S,P,V>,
-  bbox: P::BBox
+  bbox: &'b P::BBox
 }
 
-impl<'a,S,P,V> TreeQuery<'a,S,P,V>
+impl<'a,'b,S,P,V> TreeQuery<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new (tree: &'a Tree<'a,S,P,V>, bbox: P::BBox) -> Self {
+  pub fn new (tree: &'a Tree<'a,S,P,V>, bbox: &'b P::BBox) -> Self {
     Self { tree, bbox }
   }
 }
 
-impl<'a,S,P,V> Iterator for TreeQuery<'a,S,P,V>
+impl<'a,'b,S,P,V> Iterator for TreeQuery<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  type Item = (P,V);
+  type Item = Result<(P,V),Error>;
   fn next (&mut self) -> Option<Self::Item> {
     None
   }
@@ -108,9 +108,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     order
   }
-  pub fn query (&'a self, bbox: P::BBox) -> Result<TreeQuery<'a,S,P,V>,Error> {
-    let q = TreeQuery::new(self, bbox);
-    Ok(q)
+  pub fn query<'b> (&'a self, bbox: &'b P::BBox) -> TreeQuery<'a,'b,S,P,V> {
+    TreeQuery::new(self, bbox)
   }
   fn alloc (&mut self, bytes: usize) -> u64 {
     let addr = self.size;

@@ -24,7 +24,7 @@ fn main() -> Result<(),Error> {
   db.batch(&polygons)?;
 
   let bbox = ((-1.0,-1.0,-1.0),(1.0,1.0,1.0));
-  for result in db.query(bbox) {
+  for result in db.query(&bbox) {
     println!("{:?}", result?);
   }
   Ok(())

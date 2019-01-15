@@ -9,7 +9,7 @@ mod tree;
 mod branch;
 //mod staging;
 pub use point::{Point,Scalar};
-pub use tree::Tree;
+pub use tree::{Tree,TreeQuery};
 
 use random_access_storage::RandomAccess;
 use failure::Error;
@@ -31,7 +31,7 @@ U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   open_store: U,
   trees: Vec<Tree<'a,S,P,V>>,
-  meta: &'a Meta<'a,S>,
+  meta: Meta<'a,S>,
   _marker: PhantomData<(P,V)>,
 }
 
@@ -43,7 +43,7 @@ P: Point, V: Value {
     let meta = Meta::open(Box::leak(Box::new(open_store("meta")?)))?;
     Ok(Self {
       open_store,
-      meta: Box::leak(Box::new(meta)),
+      meta: meta,
       trees: vec![],
       _marker: PhantomData
     })
@@ -68,27 +68,49 @@ P: Point, V: Value {
     tree.build(&inserts)?;
     Ok(())
   }
-  pub fn query (&mut self, bbox: P::BBox) -> QueryIterator<S,P,V> {
-    QueryIterator::new(bbox)
+  pub fn query<'b> (&'a self, bbox: &'b P::BBox) -> QueryIterator<'a,'b,S,P,V> {
+    QueryIterator::new(self, bbox)
   }
 }
 
-pub struct QueryIterator<S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  _marker: PhantomData<(S,P,V)>
+pub struct QueryIterator<'a,'b,S,P,V> where
+S: RandomAccess<Error=Error>, P: Point, V: Value {
+  index: usize,
+  queries: Vec<TreeQuery<'a,'b,S,P,V>>
 }
 
-impl<S,P,V> QueryIterator<S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new (bbox: P::BBox) -> Self {
-    Self { _marker: PhantomData }
+impl<'a,'b,S,P,V> QueryIterator<'a,'b,S,P,V> where
+S: RandomAccess<Error=Error>, P: Point, V: Value {
+  pub fn new<U> (db: &'a DB<'a,S,U,P,V>, bbox: &'b P::BBox) -> Self
+  where U: (Fn(&str) -> Result<S,Error>) {
+    let mut queries: Vec<TreeQuery<'a,'b,S,P,V>> = vec![];
+    for i in 0..db.meta.mask.len() {
+      if !db.meta.mask[i] { continue }
+      queries.push(db.trees[i].query(bbox));
+    }
+    Self { queries, index: 0 }
   }
 }
 
-impl<S,P,V> Iterator for QueryIterator<S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
+impl<'a,'b,S,P,V> Iterator for QueryIterator<'a,'b,S,P,V> where
+S: RandomAccess<Error=Error>, P: Point, V: Value {
   type Item = Result<(P,V),Error>;
   fn next (&mut self) -> Option<Self::Item> {
+    while !self.queries.is_empty() {
+      let len = self.queries.len();
+      {
+        let q = &mut self.queries[self.index];
+        match q.next() {
+          Some(result) => {
+            self.index = (self.index+1) % len;
+            return Some(result);
+          },
+          None => {}
+        }
+      }
+      self.queries.remove(self.index);
+      self.index = self.index % len;
+    }
     None
   }
 }
