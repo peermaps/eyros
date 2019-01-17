@@ -5,7 +5,7 @@ use bincode::{serialize};
 use serde::{Serialize,de::DeserializeOwned};
 use std::fmt::Debug;
 
-pub trait Point: Copy+Debug+Serialize {
+pub trait Point: Copy+Debug+Serialize+DeserializeOwned {
   type BBox;
   fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
   fn midpoint_upper (&self, &Self) -> Self where Self: Sized;
@@ -119,5 +119,5 @@ macro_rules! impl_dim {
 impl_dim![(A,B),(0,1),2];
 impl_dim![(A,B,C),(0,1,2),3];
 impl_dim![(A,B,C,D),(0,1,2,3),4];
-impl_dim![(A,B,C,D,E),(0,1,2,3,4),5];
-impl_dim![(A,B,C,D,E,F),(0,1,2,3,4,5),6];
+//impl_dim![(A,B,C,D,E),(0,1,2,3,4),5];
+//impl_dim![(A,B,C,D,E,F),(0,1,2,3,4,5),6];

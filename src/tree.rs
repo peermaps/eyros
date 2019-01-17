@@ -6,23 +6,25 @@ use ::{Point,Value};
 
 use branch::{Branch,Node};
 
-pub struct TreeQuery<'a,'b,S,P,V>
+pub struct TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  tree: &'a Tree<'a,S,P,V>,
+  tree: &'a mut Tree<'a,S,P,V>,
   bbox: &'b P::BBox
 }
 
-impl<'a,'b,S,P,V> TreeQuery<'a,'b,S,P,V>
+impl<'a,'b,S,P,V> TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new (tree: &'a Tree<'a,S,P,V>, bbox: &'b P::BBox) -> Self {
+  pub fn new (tree: &'a mut Tree<'a,S,P,V>, bbox: &'b P::BBox) -> Self {
     Self { tree, bbox }
   }
 }
 
-impl<'a,'b,S,P,V> Iterator for TreeQuery<'a,'b,S,P,V>
+impl<'a,'b,S,P,V> Iterator for TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   type Item = Result<(P,V),Error>;
   fn next (&mut self) -> Option<Self::Item> {
+    let store = &mut self.tree.store;
+    println!("{:?}", store.read(0,64));
     None
   }
 }
@@ -63,7 +65,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let rrows = rows.iter().map(|row| row).collect();
     let bucket = (0..rows.len()).collect();
     let b = Branch::new(0, self.max_data_size, &self.order, bucket, &rrows);
-    let n = self.branch_factor*2-1;
     let mut branches = vec![Node::Branch(b)];
     match branches[0] {
       Node::Branch(ref mut b) => {
@@ -72,7 +73,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       },
       _ => panic!("unexpected initial node type")
     };
-    for level in 0.. {
+    for _level in 0.. {
       if branches.is_empty() { break }
       let mut nbranches = vec![];
       for mut branch in branches {
@@ -108,8 +109,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     order
   }
-  pub fn query<'b> (&'a self, bbox: &'b P::BBox) -> TreeQuery<'a,'b,S,P,V> {
-    TreeQuery::new(self, bbox)
+  pub fn query<'b> (&'a mut self, bbox: &'b P::BBox) -> TreeIterator<'a,'b,S,P,V> {
+    TreeIterator::new(self, bbox)
   }
   fn alloc (&mut self, bytes: usize) -> u64 {
     let addr = self.size;
