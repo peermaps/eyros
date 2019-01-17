@@ -28,6 +28,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 pub trait Value: Copy+Serialize+DeserializeOwned+'static {}
 impl<T> Value for T where T: Copy+Serialize+DeserializeOwned+'static {}
 
+#[derive(Clone)]
 pub enum Row<P,V> where P: Point, V: Value {
   Insert(P,V),
   Delete(P,V)

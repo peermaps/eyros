@@ -89,6 +89,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       buf.extend(bytes);
     }
     self.store.write(offset,&buf)?;
+    self.rows.extend_from_slice(rows);
     Ok(())
   }
   pub fn query<'a,'b> (&'a mut self, bbox: &'b P::BBox)
