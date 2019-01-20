@@ -9,9 +9,11 @@ mod tree;
 mod branch;
 mod staging;
 mod planner;
+mod bits;
 
 use staging::{Staging,StagingIterator};
-use planner::Planner;
+use planner::plan;
+use bits::num_to_bits;
 pub use point::{Point,Scalar};
 pub use tree::{Tree,TreeIterator};
 
@@ -84,9 +86,22 @@ P: Point, V: Value {
     let mut tree = Tree::open(&mut store, bf, 100, &order)?;
     tree.build(&inserts)?;
     */
-    let base = 8_u32.pow(4);
-    let n = self.staging.len()? + rows.len();
-    if n > base as usize {
+    //let base = 8_u64.pow(4);
+    let base = 8_u64.pow(2);
+    let n = (self.staging.len()? + rows.len()) as u64;
+    if n > base {
+      let remainder = n - (n/base)*base;
+      let mut mask = vec![];
+      for mut tree in self.trees.iter_mut() {
+        mask.push(tree.is_empty()?);
+      }
+      /*
+      let p = Planner::new(n/base, mask);
+      println!("outputs={:?}", p.outputs);
+      println!("inputs={:?}", p.inputs);
+      println!("merges={:?}", p.merges);
+      println!("remainder={}", remainder);
+      */
       unimplemented![];
     } else {
       self.staging.batch(rows)?;
