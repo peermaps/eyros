@@ -8,8 +8,10 @@ mod point;
 mod tree;
 mod branch;
 mod staging;
+mod planner;
 
 use staging::{Staging,StagingIterator};
+use planner::Planner;
 pub use point::{Point,Scalar};
 pub use tree::{Tree,TreeIterator};
 
@@ -39,6 +41,7 @@ S: RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   open_store: U,
+  order: Vec<usize>,
   trees: Vec<Tree<'a,S,P,V>>,
   staging: Staging<S,P,V>,
   meta: Meta<'a,S>,
@@ -52,9 +55,12 @@ P: Point, V: Value {
   pub fn open(open_store: U) -> Result<Self,Error> {
     let meta = Meta::open(Box::leak(Box::new(open_store("meta")?)))?;
     let staging = Staging::open(open_store("staging")?)?;
+    let bf = 8;
+    let order = <Tree<S,P,V>>::pivot_order(bf);
     Ok(Self {
       open_store,
       staging,
+      order,
       meta: meta,
       trees: vec![],
       _marker: PhantomData
@@ -63,8 +69,6 @@ P: Point, V: Value {
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     /*
     let mut store = (self.open_store)("tree0")?;
-    let bf = 8;
-    let order = <Tree<S,P,V>>::pivot_order(bf);
     let inserts = rows.iter()
       .filter(|row| {
         match row { Row::Insert(_p,_v) => true, _ => false }
@@ -80,10 +84,24 @@ P: Point, V: Value {
     let mut tree = Tree::open(&mut store, bf, 100, &order)?;
     tree.build(&inserts)?;
     */
-    self.staging.batch(rows)?;
+    let base = 8_u32.pow(4);
+    let n = self.staging.len()? + rows.len();
+    if n > base as usize {
+      unimplemented![];
+    } else {
+      self.staging.batch(rows)?;
+    }
     Ok(())
   }
-  pub fn query<'b> (&'a mut self, bbox: &'b P::BBox) -> QueryIterator<'a,'b,S,P,V> {
+  fn get_tree (&'a mut self, index: usize) -> Result<&Tree<'a,S,P,V>,Error> {
+    for i in self.trees.len()..index+1 {
+      let store = (self.open_store)(&format!("tree{}",i))?;
+      self.trees.push(Tree::open(store, 8, 100, &self.order)?);
+    }
+    Ok(&self.trees[index])
+  }
+  pub fn query<'b> (&'a mut self, bbox: &'b P::BBox)
+  -> Result<QueryIterator<'a,'b,S,P,V>,Error> {
     QueryIterator::new(self, bbox)
   }
 }
@@ -96,9 +114,13 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 impl<'a,'b,S,P,V> QueryIterator<'a,'b,S,P,V> where
 S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new<U> (db: &'a mut DB<'a,S,U,P,V>, bbox: &'b P::BBox) -> Self
+  pub fn new<U> (db: &'a mut DB<'a,S,U,P,V>, bbox: &'b P::BBox)
+  -> Result<Self,Error>
   where U: (Fn(&str) -> Result<S,Error>) {
-    let mask = &db.meta.mask;
+    let mut mask: Vec<bool> = vec![];
+    for tree in db.trees.iter_mut() {
+      mask.push(tree.is_empty()?);
+    }
     let mut queries: Vec<SubIterator<'a,'b,S,P,V>>
       = Vec::with_capacity(1+db.trees.len());
     queries.push(SubIterator::Staging(db.staging.query(bbox)));
@@ -108,7 +130,7 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
         .map(|(_i,tree)| { SubIterator::Tree(tree.query(bbox)) })
         .collect();
     queries.extend(exq);
-    Self { queries, index: 0 }
+    Ok(Self { queries, index: 0 })
   }
 }
 

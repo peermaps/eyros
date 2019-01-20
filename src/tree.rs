@@ -31,7 +31,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 pub struct Tree<'a,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  store: &'a mut S,
+  store: S,
   branch_factor: usize,
   size: u64,
   max_data_size: usize,
@@ -41,7 +41,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 impl<'a,S,P,V> Tree<'a,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (store: &'a mut S, branch_factor: usize,
+  pub fn open (mut store: S, branch_factor: usize,
   max_data_size: usize, order: &'a Vec<usize>) -> Result<Self,Error> {
     let size = store.len()? as u64;
     Ok(Self {
@@ -53,11 +53,19 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       _marker: PhantomData
     })
   }
+  pub fn clear (&mut self) -> Result<(),Error> {
+    self.store.truncate(0)?;
+    Ok(())
+  }
+  pub fn is_empty (&mut self) -> Result<bool,Error> {
+    let r = self.store.is_empty()?;
+    Ok(r)
+  }
   pub fn build (&mut self, rows: &Vec<(P,V)>) -> Result<(),Error> {
     let bf = self.branch_factor;
     if self.size > 0 {
       self.size = 0;
-      self.store.truncate(0);
+      self.store.truncate(0)?;
     }
     if rows.len() < bf*2-1 {
       bail!("tree must have at least {} records", bf*2-1);
@@ -123,5 +131,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   fn flush (&mut self) -> Result<(),Error> {
     Ok(())
+  }
+  pub fn merge (trees: Vec<&Self>) -> Result<Self,Error> {
+    unimplemented!();
   }
 }

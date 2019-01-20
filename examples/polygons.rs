@@ -23,8 +23,8 @@ fn main() -> Result<(),Error> {
   }).collect();
   db.batch(&polygons)?;
 
-  let bbox = ((-1.0,-1.0,-1.0),(1.0,1.0,1.0));
-  for result in db.query(&bbox) {
+  let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
+  for result in db.query(&bbox)? {
     println!("{:?}", result?);
   }
   Ok(())

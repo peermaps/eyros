@@ -77,6 +77,11 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.store.truncate(0)?;
     Ok(())
   }
+  pub fn len (&mut self) -> Result<usize,Error> {
+    let len = self.store.len()?;
+    let n = 1+size_of::<P>() + size_of::<V>();
+    Ok(len/n)
+  }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     let offset = self.store.len()?;
     let n = 1+size_of::<P>() + size_of::<V>();
