@@ -1,20 +1,21 @@
 use random_access_storage::RandomAccess;
 use failure::{Error,bail};
 use std::marker::PhantomData;
+use std::cell::RefCell;
 
-use ::{Point,Value};
+use ::{Row,Point,Value};
 
 use branch::{Branch,Node};
 
 pub struct TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  tree: &'a mut Tree<'a,S,P,V>,
+  tree: &'a mut Tree<S,P,V>,
   bbox: &'b P::BBox
 }
 
 impl<'a,'b,S,P,V> TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new (tree: &'a mut Tree<'a,S,P,V>, bbox: &'b P::BBox) -> Self {
+  pub fn new (tree: &'a mut Tree<S,P,V>, bbox: &'b P::BBox) -> Self {
     Self { tree, bbox }
   }
 }
@@ -29,20 +30,20 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
 }
 
-pub struct Tree<'a,S,P,V>
+pub struct Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: S,
   branch_factor: usize,
   size: u64,
   max_data_size: usize,
-  order: &'a Vec<usize>,
+  order: RefCell<Vec<usize>>,
   _marker: PhantomData<(P,V)>
 }
 
-impl<'a,S,P,V> Tree<'a,S,P,V>
+impl<S,P,V> Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn open (mut store: S, branch_factor: usize,
-  max_data_size: usize, order: &'a Vec<usize>) -> Result<Self,Error> {
+  max_data_size: usize, order: RefCell<Vec<usize>>) -> Result<Self,Error> {
     let size = store.len()? as u64;
     Ok(Self {
       store,
@@ -72,7 +73,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     let rrows = rows.iter().map(|row| row).collect();
     let bucket = (0..rows.len()).collect();
-    let b = Branch::new(0, self.max_data_size, &self.order, bucket, &rrows);
+    let b = Branch::new(0, self.max_data_size,
+      &self.order, bucket, &rrows);
     let mut branches = vec![Node::Branch(b)];
     match branches[0] {
       Node::Branch(ref mut b) => {
@@ -106,18 +108,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.flush()?;
     Ok(())
   }
-  pub fn pivot_order (bf: usize) -> Vec<usize> {
-    let n = bf*2-1;
-    let mut order = Vec::with_capacity(n);
-    for i in 0..((((n+1) as f32).log2()) as usize) {
-      let m = 2usize.pow(i as u32);
-      for j in 0..m {
-        order.push(n/(m*2) + j*(n+1)/m);
-      }
-    }
-    order
-  }
-  pub fn query<'b> (&'a mut self, bbox: &'b P::BBox) -> TreeIterator<'a,'b,S,P,V> {
+  pub fn query<'a,'b> (&'a mut self, bbox: &'b P::BBox) -> TreeIterator<'a,'b,S,P,V> {
     TreeIterator::new(self, bbox)
   }
   fn alloc (&mut self, bytes: usize) -> u64 {
@@ -132,7 +123,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   fn flush (&mut self) -> Result<(),Error> {
     Ok(())
   }
-  pub fn merge (trees: Vec<&Self>) -> Result<Self,Error> {
+  pub fn merge (&mut self, rows: &Vec<Row<P,V>>, trees: Vec<&mut Self>)
+  -> Result<Self,Error> {
     unimplemented!();
   }
 }

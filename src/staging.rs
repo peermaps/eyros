@@ -40,7 +40,7 @@ where P: Point, V: Value {
 pub struct Staging<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: S,
-  rows: Vec<Row<P,V>>
+  pub rows: Vec<Row<P,V>>
 }
 
 impl<S,P,V> Staging<S,P,V>

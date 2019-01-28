@@ -2,6 +2,7 @@ use point::Point;
 use ::{Value};
 use std::cmp::Ordering;
 use std::mem::size_of;
+use std::cell::RefCell;
 use bincode::{serialize};
 use failure::Error;
 
@@ -69,7 +70,7 @@ pub struct Branch<'a,P,V> where P: Point, V: Value {
   pub offset: u64,
   level: usize,
   max_data_size: usize,
-  order: &'a Vec<usize>,
+  order: RefCell<Vec<usize>>,
   bucket: Vec<usize>,
   buckets: Vec<Vec<usize>>,
   rows: &'a Vec<&'a (P,V)>,
@@ -80,8 +81,10 @@ pub struct Branch<'a,P,V> where P: Point, V: Value {
 }
 
 impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
-  pub fn new (level: usize, max_data_size: usize, order: &'a Vec<usize>,
-  bucket: Vec<usize>, rows: &'a Vec<&(P,V)>) -> Self {
+  pub fn new (level: usize, max_data_size: usize,
+  order_rc: &RefCell<Vec<usize>>, bucket: Vec<usize>, rows: &'a Vec<&(P,V)>)
+  -> Self {
+    let order = order_rc.borrow();
     let n = order.len();
     let mut sorted: Vec<usize> = (0..bucket.len()).collect();
     sorted.sort_unstable_by(|a,b| {
@@ -106,12 +109,11 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
         }
       }
     }
-    let n = order.len();
     Self {
       offset: 0,
       max_data_size,
       level,
-      order,
+      order: order_rc.clone(),
       bucket,
       buckets: Vec::with_capacity(n),
       rows,
@@ -126,11 +128,12 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
   }
   pub fn build (&mut self, alloc: &mut FnMut (usize) -> u64)
   -> Result<(Vec<u8>,Vec<Node<'a,P,V>>),Error> {
-    let n = self.order.len();
+    let order = self.order.borrow();
+    let n = order.len();
     self.buckets = vec![vec![];n];
     let bf = (n+1)/2;
     let mut j = 0;
-    let mut pivot = self.pivots[self.order[bf-1]];
+    let mut pivot = self.pivots[order[bf-1]];
     for i in self.sorted.iter() {
       if self.matched[*i] { continue }
       let row = self.rows[self.bucket[*i]];
@@ -138,7 +141,7 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
       && row.0.cmp_at(&pivot, self.level as usize) != Ordering::Less {
         j = (j+1).min(bf-1);
         if j < bf-1 {
-          pivot = self.pivots[self.order[j+bf-1]];
+          pivot = self.pivots[order[j+bf-1]];
         }
       }
       self.buckets[j].push(*i);
@@ -155,7 +158,7 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
           nodes.push(Node::Data(d));
         } else {
           let mut b = Branch::new(
-            self.level+1, self.max_data_size, self.order,
+            self.level+1, self.max_data_size, &self.order,
             bucket.clone(), self.rows
           );
           b.alloc(alloc);
