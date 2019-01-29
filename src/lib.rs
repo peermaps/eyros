@@ -1,3 +1,5 @@
+#![feature(int_to_from_bytes)]
+
 extern crate random_access_storage;
 extern crate failure;
 extern crate bincode;
@@ -59,14 +61,18 @@ P: Point, V: Value {
     let meta = Meta::open(open_store("meta")?)?;
     let staging = Staging::open(open_store("staging")?)?;
     let bf = 8;
-    Ok(Self {
+    let mut db = Self {
       open_store,
       staging,
       order: RefCell::new(pivot_order(bf)),
       meta: meta,
       trees: vec![],
       _marker: PhantomData
-    })
+    };
+    for i in 0..db.meta.mask.len() {
+      db.create_tree(i)?;
+    }
+    Ok(db)
   }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     let base = 8_u64.pow(2);
@@ -78,6 +84,7 @@ P: Point, V: Value {
       for mut tree in self.trees.iter_mut() {
         mask.push(tree.is_empty()?);
       }
+      println!("mask={:?}", mask);
       let p = plan(
         &bits::num_to_bits(n/base),
         &mask
@@ -110,7 +117,19 @@ P: Point, V: Value {
           self.create_tree(*t)?;
         }
         self.create_tree(i)?;
-        // trees[i].merge(...)
+        for j in self.meta.mask.len()..i+1 {
+          self.meta.mask.push(false);
+        }
+        if trees.is_empty() {
+          self.meta.mask[i] = true;
+          self.trees[i].build(&srows)?;
+        } else {
+          self.meta.mask[i] = true;
+          for t in trees.iter() {
+            self.meta.mask[*t] = false;
+          }
+          Tree::merge(&mut self.trees, i, trees, &srows)?;
+        }
       }
       let mut rem_rows = vec![];
       if last_staging < self.staging.rows.len() && self.staging.rows.len() > 0 {
@@ -123,6 +142,7 @@ P: Point, V: Value {
         "expected number of remaining rows");
       self.staging.clear()?;
       self.staging.batch(&rem_rows)?;
+      self.meta.save()?;
     } else {
       self.staging.batch(rows)?;
     }
@@ -190,7 +210,9 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
         }
       }
       self.queries.remove(self.index);
-      self.index = self.index % len;
+      if self.queries.len() > 0 {
+        self.index = self.index % self.queries.len();
+      }
     }
     None
   }

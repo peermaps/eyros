@@ -21,18 +21,18 @@ pub trait Bytes {
 pub struct Data<'a,P,V> where P: Point, V: Value {
   pub offset: u64,
   bucket: Vec<usize>,
-  rows: &'a Vec<&'a (P,V)>
+  rows: &'a Vec<(P,V)>
 }
 
 impl<'a,P,V> Data<'a,P,V> where P: Point, V: Value {
-  pub fn new (bucket: Vec<usize>, rows: &'a Vec<&'a (P,V)>) -> Self {
+  pub fn new (bucket: Vec<usize>, rows: &'a Vec<(P,V)>) -> Self {
     Self { offset: 0, bucket, rows }
   }
   pub fn alloc (&mut self, alloc: &mut FnMut (usize) -> u64) -> () {
     self.offset = alloc(self.bytes());
   }
   pub fn build (&self) -> Result<Vec<u8>,Error> {
-    let rdata: Vec<&'a (P,V)> = self.bucket.iter().map(|i| {
+    let rdata: Vec<(P,V)> = self.bucket.iter().map(|i| {
       self.rows[*i]
     }).collect();
     let mut data = Vec::with_capacity(self.bytes());
@@ -73,7 +73,7 @@ pub struct Branch<'a,P,V> where P: Point, V: Value {
   order: RefCell<Vec<usize>>,
   bucket: Vec<usize>,
   buckets: Vec<Vec<usize>>,
-  rows: &'a Vec<&'a (P,V)>,
+  rows: &'a Vec<(P,V)>,
   pivots: Vec<P>,
   sorted: Vec<usize>,
   intersecting: Vec<Vec<usize>>,
@@ -82,7 +82,7 @@ pub struct Branch<'a,P,V> where P: Point, V: Value {
 
 impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
   pub fn new (level: usize, max_data_size: usize,
-  order_rc: &RefCell<Vec<usize>>, bucket: Vec<usize>, rows: &'a Vec<&(P,V)>)
+  order_rc: &RefCell<Vec<usize>>, bucket: Vec<usize>, rows: &'a Vec<(P,V)>)
   -> Self {
     let order = order_rc.borrow();
     let n = order.len();

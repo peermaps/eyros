@@ -25,7 +25,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   type Item = Result<(P,V),Error>;
   fn next (&mut self) -> Option<Self::Item> {
     let store = &mut self.tree.store;
-    println!("{:?}", store.read(0,64));
+    // TODO
     None
   }
 }
@@ -62,7 +62,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let r = self.store.is_empty()?;
     Ok(r)
   }
-  pub fn build (&mut self, rows: &Vec<(P,V)>) -> Result<(),Error> {
+  pub fn build (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     let bf = self.branch_factor;
     if self.size > 0 {
       self.size = 0;
@@ -71,10 +71,16 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     if rows.len() < bf*2-1 {
       bail!("tree must have at least {} records", bf*2-1);
     }
-    let rrows = rows.iter().map(|row| row).collect();
+    let irows: Vec<(P,V)> = rows.iter()
+      .filter(|row| { match row { Row::Insert(_,_) => true, _ => false } })
+      .map(|row| { match row {
+        Row::Insert(p,v) => (*p,*v),
+        _ => panic!("unexpected")
+      } })
+      .collect();
     let bucket = (0..rows.len()).collect();
     let b = Branch::new(0, self.max_data_size,
-      &self.order, bucket, &rrows);
+      &self.order, bucket, &irows);
     let mut branches = vec![Node::Branch(b)];
     match branches[0] {
       Node::Branch(ref mut b) => {
@@ -123,8 +129,12 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   fn flush (&mut self) -> Result<(),Error> {
     Ok(())
   }
-  pub fn merge (&mut self, rows: &Vec<Row<P,V>>, trees: Vec<&mut Self>)
-  -> Result<Self,Error> {
-    unimplemented!();
+  pub fn merge (trees: &mut Vec<Self>, dst: usize, src: Vec<usize>,
+  rows: &Vec<Row<P,V>>) -> Result<(),Error> {
+    println!("MERGE {} {:?} {}", dst, src, rows.len());
+    // TODO
+    for i in src { trees[i].clear()? }
+    trees[dst].clear()?;
+    Ok(())
   }
 }
