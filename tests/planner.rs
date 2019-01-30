@@ -51,6 +51,24 @@ fn planner () {
     (14,vec![8,9,10,12],vec![8,11,13])
   ]);
   check_sums(p3);
+
+  let p4 = plan(
+    &bits![1,0,1,1],
+    &bits![1,1,0,0]
+  );
+  assert_eq!(p4, vec![
+    (4,vec![0,2,3],vec![0,1])
+  ]);
+  check_sums(p4);
+
+  let p5 = plan(
+    &bits![1,1,1,1,1,1],
+    &bits![1,1,1,1,1,1]
+  );
+  assert_eq!(p5, vec![
+    (6,vec![0,1,2,3,4,5],vec![0])
+  ]);
+  check_sums(p5);
 }
 
 #[test]
