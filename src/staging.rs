@@ -20,6 +20,8 @@ impl<'a,'b,P,V> Iterator for StagingIterator<'a,'b,P,V>
 where P: Point, V: Value {
   type Item = Result<(P,V),Error>;
   fn next (&mut self) -> Option<Self::Item> {
+    return None; // TODO: remove me
+
     let len = self.rows.len();
     while self.index < len {
       let i = self.index;

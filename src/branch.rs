@@ -168,7 +168,7 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
     }
     let mut data: Vec<u8> = Vec::with_capacity(self.bytes());
     for pivot in self.pivots.iter() {
-      data.extend(pivot.serialize_at(self.level % pivot.dim())?);
+      data.extend(pivot.serialize_at(self.level % P::dim())?);
     }
     for node in nodes.iter() {
       data.extend(serialize(&match node {

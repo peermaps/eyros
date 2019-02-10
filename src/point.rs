@@ -1,16 +1,18 @@
 use std::cmp::Ordering;
 use std::ops::{Div,Add};
 use failure::Error;
-use bincode::{serialize};
+use bincode::{serialize,deserialize};
 use serde::{Serialize,de::DeserializeOwned};
 use std::fmt::Debug;
+use std::mem::size_of;
 
 pub trait Point: Copy+Debug+Serialize+DeserializeOwned {
   type BBox;
   fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
+  fn cmp_buf (&[u8], &Self::BBox, usize) -> Result<(bool,bool,bool),Error>;
   fn midpoint_upper (&self, &Self) -> Self where Self: Sized;
   fn serialize_at (&self, usize) -> Result<Vec<u8>,Error>;
-  fn dim (&self) -> usize;
+  fn dim () -> usize;
   fn overlaps (&self, &Self::BBox) -> bool;
 }
 
@@ -73,11 +75,28 @@ macro_rules! impl_point {
     where $($T: Num<$T>),+ {
       type BBox = (($($T,)+),($($T,)+));
       fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
-        let order = match level%self.dim() {
+        let order = match level%Self::dim() {
           $($i => Coord::cmp(&self.$i, &other.$i),)+
           _ => panic!("match case beyond dimension")
         };
         match order { Some(x) => x, None => Ordering::Less }
+      }
+      fn cmp_buf (buf: &[u8], bbox: &Self::BBox, level: usize)
+      -> Result<(bool,bool,bool),Error> {
+        let psize = match level % $dim {
+          $($i => size_of::<$T>(),)+
+          _ => panic!("level out of bounds")
+        };
+        let mut offset = 0;
+        $(if $i < level { offset += size_of::<$T>() })+;
+        match level % $dim {
+          $($i => {
+            let point: $T = deserialize(&buf[offset..offset+psize])?;
+            println!("point={:?}", point);
+          },)+
+          _ => panic!("level out of bounds")
+        };
+        Ok((true,true,true))
       }
       fn midpoint_upper (&self, other: &Self) -> Self {
         ($(
@@ -85,13 +104,13 @@ macro_rules! impl_point {
         ),+)
       }
       fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-        let buf: Vec<u8> = match level%self.dim() {
+        let buf: Vec<u8> = match level%Self::dim() {
           $($i => serialize(&self.$i)?,)+
           _ => panic!("match case beyond dimension")
         };
         Ok(buf)
       }
-      fn dim (&self) -> usize { $dim }
+      fn dim () -> usize { $dim }
       fn overlaps (&self, bbox: &Self::BBox) -> bool {
         $(Coord::overlaps(&self.$i, &(bbox.0).$i, &(bbox.1).$i) &&)+ true
       }

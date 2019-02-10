@@ -84,7 +84,6 @@ P: Point, V: Value {
       for mut tree in self.trees.iter_mut() {
         mask.push(tree.is_empty()?);
       }
-      println!("mask={:?}", mask);
       let p = plan(
         &bits::num_to_bits(n/base),
         &mask
@@ -139,7 +138,8 @@ P: Point, V: Value {
         rem_rows.extend_from_slice(&rows[last_rows..]);
       }
       assert!(rem_rows.len() == rem as usize,
-        "expected number of remaining rows");
+        "unexpected number of remaining rows (expected {}, actual {})",
+        rem, rem_rows.len());
       self.staging.clear()?;
       self.staging.batch(&rem_rows)?;
       self.meta.save()?;
@@ -174,17 +174,15 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
   where U: (Fn(&str) -> Result<S,Error>) {
     let mut mask: Vec<bool> = vec![];
     for tree in db.trees.iter_mut() {
-      mask.push(tree.is_empty()?);
+      mask.push(!tree.is_empty()?);
     }
     let mut queries: Vec<SubIterator<'a,'b,S,P,V>>
       = Vec::with_capacity(1+db.trees.len());
     queries.push(SubIterator::Staging(db.staging.query(bbox)));
-    let exq: Vec<SubIterator<'a,'b,S,P,V>>
-      = db.trees.iter_mut().enumerate()
-        .filter(|(i,_tree)| { mask[*i] })
-        .map(|(_i,tree)| { SubIterator::Tree(tree.query(bbox)) })
-        .collect();
-    queries.extend(exq);
+    for (i,tree) in db.trees.iter_mut().enumerate() {
+      if !mask[i] { continue }
+      queries.push(SubIterator::Tree(tree.query(bbox)?));
+    }
     Ok(Self { queries, index: 0 })
   }
 }
