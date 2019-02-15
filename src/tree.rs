@@ -60,9 +60,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
           &self.bbox,
           depth % P::dim()
         )];
-        if cmp.0 { println!("LEFT") }
-        if cmp.1 { println!("CENTER") }
-        if cmp.2 { println!("RIGHT") }
+        if cmp.0 { println!("{} LEFT", i) }
+        if cmp.1 { println!("{} RIGHT", i) }
       }
       println!("PIVOTS: {:?}", pivots);
     }

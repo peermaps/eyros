@@ -9,7 +9,7 @@ use std::mem::size_of;
 pub trait Point: Copy+Debug+Serialize+DeserializeOwned {
   type BBox;
   fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
-  fn cmp_buf (&[u8], &Self::BBox, usize) -> Result<(bool,bool,bool),Error>;
+  fn cmp_buf (&[u8], &Self::BBox, usize) -> Result<(bool,bool),Error>;
   fn midpoint_upper (&self, &Self) -> Self where Self: Sized;
   fn serialize_at (&self, usize) -> Result<Vec<u8>,Error>;
   fn dim () -> usize;
@@ -82,7 +82,7 @@ macro_rules! impl_point {
         match order { Some(x) => x, None => Ordering::Less }
       }
       fn cmp_buf (buf: &[u8], bbox: &Self::BBox, level: usize)
-      -> Result<(bool,bool,bool),Error> {
+      -> Result<(bool,bool),Error> {
         let psize = match level % $dim {
           $($i => size_of::<$T>(),)+
           _ => panic!("level out of bounds")
@@ -93,10 +93,13 @@ macro_rules! impl_point {
           $($i => {
             let point: $T = deserialize(&buf[offset..offset+psize])?;
             println!("point={:?}", point);
+            Ok((
+              (bbox.0).$i <= point,
+             (bbox.1).$i >= point
+            ))
           },)+
           _ => panic!("level out of bounds")
-        };
-        Ok((true,true,true))
+        }
       }
       fn midpoint_upper (&self, other: &Self) -> Self {
         ($(

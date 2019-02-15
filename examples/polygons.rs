@@ -10,8 +10,8 @@ use random_access_disk::RandomAccessDisk;
 use std::path::PathBuf;
 
 fn main() -> Result<(),Error> {
-  let mut db = DB::open(storage)?;
-  //let polygons = (0..8_u32.pow(5)).map(|_| {
+  let mut db: DB<_,_,((f32,f32),(f32,f32),f32),u32> = DB::open(storage)?;
+  /*
   let polygons = (0..800).map(|_| {
     let xmin: f32 = random::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + random::<f32>().powf(64.0)*(1.0-xmin);
@@ -23,6 +23,7 @@ fn main() -> Result<(),Error> {
     Row::Insert(point, value)
   }).collect();
   db.batch(&polygons)?;
+  */
 
   let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
   for result in db.query(&bbox)? {
