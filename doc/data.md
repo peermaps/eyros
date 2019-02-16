@@ -55,7 +55,7 @@ during the course of the program.
 ## data
 
 During the batch construction, data points are written when the number of points
-in a branch drops below the branch threshold.
+in a branch drops below the max data threshold.
 
 Each point is composed of interval and scalar components, but the entire data
 block also has an interval that represents the boudning extents of all of its
@@ -87,14 +87,14 @@ file at the leaf nodes.
 
 Each block in the tree (documented below) has an implicit dimension based on the
 depth of its position in the tree. The dimension is the depth modulo the
-dimension of the point type. The pivot type `T` is the type of the point at
-the implicit block dimension.
+dimension of the point type, just like with k-d trees. The pivot type `T` is the
+type of the point at the implicit block dimension.
 
 Each block exists at an byte offset and refers to other blocks at byte offsets
 in the same tree file or to byte offsets in the data store if the data bit for
 that offset pointer is set.
 
-The branch factor (BF) determines the number of pivots N: `N = pow(2,BF-1)`.
+The branch factor (BF) determines the number of pivots N: `N=2*BF-3`.
 
 The data bitfield determines whether the corresponding u64 offset is in the
 intersecting or buckets array. Each bit in the data bitfield maps to the
@@ -108,4 +108,52 @@ indexed bytes, from lower to higher bits.
 [intersecting: u64[N]]
 [buckets: u64[BF]]
 ```
+
+The purpose of the fields in these blocks is to batch together several layers of
+the interval tree structure in order to reduce the number of storage reads. A
+similar idea is used by B-trees where blocks contain a list of pivots bounded on
+each side by a bucket. The B-tree technique must be adapted somewhat here
+because an interval could be intersected by more than one pivot, which would
+render the tree structure unsuitable for partitioning the space at each level.
+
+To achieve the performance gains of the B-tree technique on an interval tree,
+we can calculate a sweep of `N` pivot points where `N=BF*2-3` which attempt to
+balance the bucket allocation. These pivot points are sorted in ascending order
+based on the point data for the dimension under consideration for the given
+level of the tree. This collection of pivots comprise a binary interval tree
+with pointers to sets of intersecting intervals at each pivot, but with buckets
+connected only to the final level of the tree.
+
+Here is an example for `BF=5` with pivots (P) intersecting pointers (I) and
+bucket pointers (B):
+
+```
+             P3
+           _/ | \_
+         _/   |   \_
+        /    I3     \
+       P1            P5
+     /  | \        /  | \
+   P0  I1  P2    P4  I5 P6
+ / | \   / | \  / | \  / | \
+B0 I0  B1 I2  B2 I4  B3 I6 B4
+
+```
+
+The serialization for this example tree from top to bottom, left to right,
+assuming that I1,I3,I4,B1 and B3 fall below the max data threshold and point to
+data blocks:
+
+```
+[block length in bytes as u32]
+[P0] [P1] [P2] [P3] [P4] [P5] [P6]
+[0b00011010 = 0x1a (byte)]
+[0b00000101 = 0x05 (byte)]
+[I0] [I1] [I2] [I3] [I4] [I5] [I6]
+[B0] [B1] [B2] [B4]
+```
+
+The block length is included to keep open the option to have variable-sized
+pivot values or pointers. Without those considerations, the length field could
+be omitted.
 
