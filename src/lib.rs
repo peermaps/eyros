@@ -13,12 +13,14 @@ mod staging;
 mod planner;
 mod bits;
 mod order;
+mod data;
 
 use staging::{Staging,StagingIterator};
 use planner::plan;
 pub use point::{Point,Scalar};
 pub use tree::{Tree,TreeIterator};
 use order::pivot_order;
+use data::DataStore;
 
 use random_access_storage::RandomAccess;
 use failure::Error;
@@ -51,6 +53,7 @@ P: Point, V: Value {
   trees: Vec<Tree<S,P,V>>,
   order: RefCell<Vec<usize>>,
   staging: Staging<S,P,V>,
+  data: DataStore<S,P,V>,
   meta: Meta<S>,
   _marker: PhantomData<(P,V)>,
 }
@@ -62,10 +65,12 @@ P: Point, V: Value {
   pub fn open(open_store: U) -> Result<Self,Error> {
     let meta = Meta::open(open_store("meta")?)?;
     let staging = Staging::open(open_store("staging")?)?;
-    let bf = 8;
+    let data = DataStore::open(open_store("data")?)?;
+    let bf = 9;
     let mut db = Self {
       open_store,
       staging,
+      data,
       order: RefCell::new(pivot_order(bf)),
       meta: meta,
       trees: vec![],
@@ -77,7 +82,7 @@ P: Point, V: Value {
     Ok(db)
   }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
-    let base = 8_u64.pow(2);
+    let base = 9_u64.pow(2);
     let n = (self.staging.len()? + rows.len()) as u64;
     if n > base {
       let count = (n/base)*base;
@@ -123,7 +128,7 @@ P: Point, V: Value {
         }
         if trees.is_empty() {
           self.meta.mask[i] = true;
-          self.trees[i].build(&srows)?;
+          self.trees[i].build(&srows, &mut self.data)?;
         } else {
           self.meta.mask[i] = true;
           for t in trees.iter() {

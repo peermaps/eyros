@@ -7,6 +7,7 @@ use std::mem::size_of;
 use ::{Row,Point,Value};
 
 use branch::{Branch,Node};
+use data::DataStore;
 
 pub struct TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
@@ -45,7 +46,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   fn next (&mut self) -> Option<Self::Item> {
     let store = &mut self.tree.store;
     let bf = self.tree.branch_factor;
-    let n = bf*2-1;
+    let n = bf*2-3;
     let psize = size_of::<P>();
     let size = size_of::<u32>() + n * (psize + size_of::<V>());
     while !self.cursors.is_empty() {
@@ -101,14 +102,15 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let r = self.store.is_empty()?;
     Ok(r)
   }
-  pub fn build (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
+  pub fn build (&mut self, rows: &Vec<Row<P,V>>,
+  dataStore: &mut DataStore<S,P,V>) -> Result<(),Error> {
     let bf = self.branch_factor;
     if self.size > 0 {
       self.size = 0;
       self.store.truncate(0)?;
     }
-    if rows.len() < bf*2-1 {
-      bail!("tree must have at least {} records", bf*2-1);
+    if rows.len() < bf*2-3 {
+      bail!("tree must have at least {} records", bf*2-3);
     }
     let irows: Vec<(P,V)> = rows.iter()
       .filter(|row| { match row { Row::Insert(_,_) => true, _ => false } })
@@ -134,14 +136,11 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       for mut branch in branches {
         match branch {
           Node::Empty => {},
-          Node::Data(d) => {
-            let data = d.build()?;
-            self.store.write(d.offset as usize, &data)?;
-          },
+          Node::Data(d) => {},
           Node::Branch(ref mut b) => {
             let (data,nb) = {
               let alloc = &mut {|bytes| self.alloc(bytes) };
-              b.build(alloc)?
+              b.build(alloc, dataStore)?
             };
             self.store.write(b.offset as usize, &data)?;
             nbranches.extend(nb);

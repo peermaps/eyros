@@ -1,16 +1,18 @@
 use point::Point;
+use data::DataStore;
 use ::{Value};
 use std::cmp::Ordering;
 use std::mem::size_of;
 use std::cell::RefCell;
 use bincode::{serialize};
 use failure::Error;
+use random_access_storage::RandomAccess;
 
 #[derive(Clone)]
 pub enum Node<'a,P,V> where P: Point, V: Value {
   Empty,
   Branch(Branch<'a,P,V>),
-  Data(Data<'a,P,V>)
+  Data(u64)
 }
 
 pub trait Bytes {
@@ -24,44 +26,10 @@ pub struct Data<'a,P,V> where P: Point, V: Value {
   rows: &'a Vec<(P,V)>
 }
 
-impl<'a,P,V> Data<'a,P,V> where P: Point, V: Value {
-  pub fn new (bucket: Vec<usize>, rows: &'a Vec<(P,V)>) -> Self {
-    Self { offset: 0, bucket, rows }
-  }
-  pub fn alloc (&mut self, alloc: &mut FnMut (usize) -> u64) -> () {
-    self.offset = alloc(self.bytes());
-  }
-  pub fn build (&self) -> Result<Vec<u8>,Error> {
-    let rdata: Vec<(P,V)> = self.bucket.iter().map(|i| {
-      self.rows[*i]
-    }).collect();
-    let mut data = Vec::with_capacity(self.bytes());
-    data.extend(serialize(&(self.bucket.len() as u32))?);
-    data.extend_from_slice(&serialize(&rdata)?[size_of::<usize>()..]);
-    Ok(data)
-  }
-}
-
-impl<'a,P,V> Bytes for Data<'a,P,V> where P: Point, V: Value {
-  fn bytes (&self) -> usize {
-    size_of::<u32>() + self.bucket.len() * (size_of::<P>() + size_of::<V>())
-  }
-}
-
 impl<'a,P,V> Bytes for Branch<'a,P,V> where P: Point, V: Value {
   fn bytes (&self) -> usize {
     let n = self.pivots.len();
     size_of::<P>() * n + size_of::<u64>() * (2*n+1)
-  }
-}
-
-impl<'a,P,V> Bytes for Node<'a,P,V> where P: Point, V: Value {
-  fn bytes (&self) -> usize {
-    match self {
-      Node::Branch(b) => b.bytes(),
-      Node::Data(d) => d.bytes(),
-      Node::Empty => 0
-    }
   }
 }
 
@@ -126,22 +94,24 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
   pub fn alloc (&mut self, alloc: &mut FnMut (usize) -> u64) -> () {
     self.offset = alloc(self.bytes());
   }
-  pub fn build (&mut self, alloc: &mut FnMut (usize) -> u64)
-  -> Result<(Vec<u8>,Vec<Node<'a,P,V>>),Error> {
+  pub fn build<S> (&mut self, alloc: &mut FnMut (usize) -> u64,
+  data_store: &mut DataStore<S,P,V>)
+  -> Result<(Vec<u8>,Vec<Node<'a,P,V>>),Error>
+  where S: RandomAccess<Error=Error> {
     let order = self.order.borrow();
     let n = order.len();
     self.buckets = vec![vec![];n];
-    let bf = (n+1)/2;
+    let bf = (n+3)/2;
     let mut j = 0;
-    let mut pivot = self.pivots[order[bf-1]];
+    let mut pivot = self.pivots[order[bf-2]];
     for i in self.sorted.iter() {
       if self.matched[*i] { continue }
       let row = self.rows[self.bucket[*i]];
-      while j < bf-1
+      while j < bf-2
       && row.0.cmp_at(&pivot, self.level as usize) != Ordering::Less {
-        j = (j+1).min(bf-1);
-        if j < bf-1 {
-          pivot = self.pivots[order[j+bf-1]];
+        j = (j+1).min(bf-2);
+        if j < bf-2 {
+          pivot = self.pivots[order[j+bf-2]];
         }
       }
       self.buckets[j].push(*i);
@@ -153,9 +123,10 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
         if bucket.is_empty() {
           nodes.push(Node::Empty);
         } else if bucket.len() < self.max_data_size {
-          let mut d = Data::new(bucket.clone(), self.rows);
-          d.alloc(alloc);
-          nodes.push(Node::Data(d));
+          nodes.push(Node::Data(
+            data_store.batch(&bucket.iter()
+              .map(|b| { &self.rows[*b] }).collect())?
+          ));
         } else {
           let mut b = Branch::new(
             self.level+1, self.max_data_size, &self.order,
@@ -173,7 +144,7 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
     for node in nodes.iter() {
       data.extend(serialize(&match node {
         Node::Branch(b) => b.offset,
-        Node::Data(d) => d.offset,
+        Node::Data(d) => *d,
         Node::Empty => 0
       })?);
     }

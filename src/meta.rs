@@ -14,7 +14,7 @@ impl<S> Meta<S> where S: RandomAccess<Error=Error> {
     let mut meta = Self {
       store,
       mask: vec![],
-      branch_factor: 5
+      branch_factor: 9
     };
     if !meta.store.is_empty()? {
       let len = meta.store.len()?;
