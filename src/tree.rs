@@ -103,7 +103,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(r)
   }
   pub fn build (&mut self, rows: &Vec<Row<P,V>>,
-  dataStore: &mut DataStore<S,P,V>) -> Result<(),Error> {
+  data_store: &mut DataStore<S,P,V>) -> Result<(),Error> {
     let bf = self.branch_factor;
     if self.size > 0 {
       self.size = 0;
@@ -140,7 +140,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
           Node::Branch(ref mut b) => {
             let (data,nb) = {
               let alloc = &mut {|bytes| self.alloc(bytes) };
-              b.build(alloc, dataStore)?
+              b.build(alloc, data_store)?
             };
             self.store.write(b.offset as usize, &data)?;
             nbranches.extend(nb);

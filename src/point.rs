@@ -14,6 +14,7 @@ pub trait Point: Copy+Debug+Serialize+DeserializeOwned {
   fn serialize_at (&self, usize) -> Result<Vec<u8>,Error>;
   fn dim () -> usize;
   fn overlaps (&self, &Self::BBox) -> bool;
+  fn bytes_at (&self, usize) -> usize;
 }
 
 pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
@@ -88,11 +89,10 @@ macro_rules! impl_point {
           _ => panic!("level out of bounds")
         };
         let mut offset = 0;
-        $(if $i < level { offset += size_of::<$T>() })+;
+        $(if $i < level { offset += size_of::<$U>() })+;
         match level % $dim {
           $($i => {
             let point: $T = deserialize(&buf[offset..offset+psize])?;
-            println!("point={:?}", point);
             Ok((
               (bbox.0).$i <= point,
              (bbox.1).$i >= point
@@ -116,6 +116,12 @@ macro_rules! impl_point {
       fn dim () -> usize { $dim }
       fn overlaps (&self, bbox: &Self::BBox) -> bool {
         $(Coord::overlaps(&self.$i, &(bbox.0).$i, &(bbox.1).$i) &&)+ true
+      }
+      fn bytes_at (&self, i: usize) -> usize {
+        match i % $dim {
+          $($i => size_of::<$U>(),)+
+          _ => panic!("dimension out of bounds")
+        }
       }
     }
   }
