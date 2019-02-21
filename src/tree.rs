@@ -2,7 +2,9 @@ use random_access_storage::RandomAccess;
 use failure::{Error,bail};
 use std::marker::PhantomData;
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::mem::size_of;
+use std::cmp::Ordering;
 
 use ::{Row,Point,Value};
 
@@ -14,6 +16,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   tree: &'a mut Tree<S,P,V>,
   bbox: &'b P::BBox,
   cursors: Vec<(u64,usize)>,
+  blocks: Vec<u64>,
+  queue: Vec<(P,V)>,
   tree_size: u64
 }
 
@@ -26,7 +30,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       tree,
       tree_size,
       bbox,
-      cursors: vec![(0,0)]
+      cursors: vec![(0,0)],
+      blocks: vec![],
+      queue: vec![]
     })
   }
 }
@@ -45,26 +51,98 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   type Item = Result<(P,V),Error>;
   fn next (&mut self) -> Option<Self::Item> {
     let store = &mut self.tree.store;
+    let order = &self.tree.order;
     let bf = self.tree.branch_factor;
     let n = bf*2-3;
-    let psize = size_of::<P>();
-    let size = size_of::<u32>() + n * (psize + size_of::<V>());
-    while !self.cursors.is_empty() {
+
+    // todo: used cached size or rolling max to implicitly read an appropriate
+    // amount of data
+    while !self.cursors.is_empty() || !self.blocks.is_empty() {
+      if !self.queue.is_empty() {
+        return Some(Ok(self.queue.pop().unwrap()))
+      }
+      if !self.blocks.is_empty() { // data block:
+        let offset = self.blocks.pop().unwrap();
+        //let dlen = iwrap![data_store.len()];
+        //let size_guess = 1024.min(dlen-offset);
+        //data_store.read(offset, size_guess);
+        continue
+      }
+      // branch block:
       let (cursor,depth) = self.cursors.pop().unwrap();
-      println!("cursor={} tree_size={}", cursor, self.tree_size);
+      println!("cursor={} depth={}", cursor, depth);
       if cursor >= self.tree_size { continue }
-      let buf = iwrap![store.read(cursor as usize, (cursor as usize)+size)];
-      let mut pivots: Vec<P> = vec![];
-      for i in 0..n {
+      let size_guess = 1024.min(self.tree_size-cursor);
+      let fbuf = iwrap![
+        store.read(cursor as usize, (cursor+size_guess) as usize)
+      ];
+      let len = u32::from_be_bytes([fbuf[0],fbuf[1],fbuf[2],fbuf[3]]) as u64;
+      let mut buf = Vec::with_capacity(len as usize);
+      match size_guess.cmp(&len) {
+        Ordering::Equal => {
+          buf = fbuf;
+        },
+        Ordering::Greater => {
+          buf.extend_from_slice(&fbuf[0..len as usize])
+        },
+        Ordering::Less => {
+          buf.extend(fbuf);
+          buf.extend(iwrap![store.read(
+            (cursor+len) as usize,
+            (cursor+len-size_guess) as usize
+          )]);
+        }
+      };
+      let psize = P::pivot_size_at(depth % P::dim());
+      let p_start = size_of::<u32>();
+      let d_start = p_start + n*psize;
+      let i_start = d_start + (n+7)/8;
+      let b_start = i_start + n*size_of::<u64>();
+
+      let mut bcursors = vec![0];
+      while !bcursors.is_empty() {
+        let c = bcursors.pop().unwrap();
+        if c >= n {
+          let j = order[c-n];
+          let is_data = ((buf[d_start+(j+7)/8]>>(j%8))&1) == 1;
+          let offset = u64::from_be_bytes([
+            buf[b_start+j+0], buf[b_start+j+1],
+            buf[b_start+j+2], buf[b_start+j+3],
+            buf[b_start+j+4], buf[b_start+j+5],
+            buf[b_start+j+6], buf[b_start+j+7]
+          ]);
+          if is_data {
+            self.blocks.push(offset);
+          } else {
+            println!("PUSH {}",offset);
+            self.cursors.push((offset,depth+1));
+          }
+          continue
+        }
+        let i = order[c];
         let cmp = iwrap![P::cmp_buf(
-          &buf[i*psize..(i+1)*psize],
+          &buf[p_start+i*psize..p_start+(i+1)*psize],
           &self.bbox,
           depth % P::dim()
         )];
-        if cmp.0 { println!("{} LEFT", i) }
-        if cmp.1 { println!("{} RIGHT", i) }
+        let is_data = ((buf[d_start+(i+7)/8]>>(i%8))&1) == 1;
+        let i_offset = i_start + size_of::<u64>()*i;
+        if cmp.0 && cmp.1 && is_data { // intersection
+          let offset = u64::from_be_bytes([
+            buf[i_offset+i*8+0], buf[i_offset+1],
+            buf[i_offset+i*8+2], buf[i_offset+3],
+            buf[i_offset+i*8+4], buf[i_offset+5],
+            buf[i_offset+i*8+6], buf[i_offset+7],
+          ]);
+          self.blocks.push(offset);
+        }
+        if cmp.0 { // left
+          bcursors.push(c*2+1);
+        }
+        if cmp.1 { // right
+          bcursors.push(c*2+2);
+        }
       }
-      println!("PIVOTS: {:?}", pivots);
     }
     None
   }
@@ -73,20 +151,23 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 pub struct Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub store: S,
+  data_store: Rc<RefCell<DataStore<S,P,V>>>,
   branch_factor: usize,
   size: u64,
   max_data_size: usize,
-  order: RefCell<Vec<usize>>,
+  order: Rc<Vec<usize>>,
   _marker: PhantomData<(P,V)>
 }
 
 impl<S,P,V> Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (mut store: S, branch_factor: usize,
-  max_data_size: usize, order: RefCell<Vec<usize>>) -> Result<Self,Error> {
+  pub fn open (mut store: S, data_store: Rc<RefCell<DataStore<S,P,V>>>,
+  branch_factor: usize, max_data_size: usize,
+  order: Rc<Vec<usize>>) -> Result<Self,Error> {
     let size = store.len()? as u64;
     Ok(Self {
       store,
+      data_store,
       size,
       order,
       branch_factor,
@@ -102,8 +183,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let r = self.store.is_empty()?;
     Ok(r)
   }
-  pub fn build (&mut self, rows: &Vec<Row<P,V>>,
-  data_store: &mut DataStore<S,P,V>) -> Result<(),Error> {
+  pub fn build (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     let bf = self.branch_factor;
     if self.size > 0 {
       self.size = 0;
@@ -121,7 +201,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       .collect();
     let bucket = (0..rows.len()).collect();
     let b = Branch::new(0, self.max_data_size,
-      &self.order, bucket, &irows);
+      Rc::clone(&self.order),
+      Rc::clone(&self.data_store),
+      bucket, &irows
+    );
     let mut branches = vec![Node::Branch(b)];
     match branches[0] {
       Node::Branch(ref mut b) => {
@@ -140,7 +223,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
           Node::Branch(ref mut b) => {
             let (data,nb) = {
               let alloc = &mut {|bytes| self.alloc(bytes) };
-              b.build(alloc, data_store)?
+              b.build(alloc)?
             };
             self.store.write(b.offset as usize, &data)?;
             nbranches.extend(nb);
@@ -160,10 +243,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let addr = self.size;
     self.size += bytes as u64;
     addr
-  }
-  fn write_frame (&mut self, offset: u64, buf: Vec<u8>) -> Result<(),Error> {
-    println!("FRAME {:?}", buf);
-    Ok(())
   }
   fn flush (&mut self) -> Result<(),Error> {
     Ok(())

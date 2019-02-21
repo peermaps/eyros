@@ -3,15 +3,17 @@ use data::DataStore;
 use ::{Value};
 use std::cmp::Ordering;
 use std::mem::size_of;
+use std::rc::Rc;
 use std::cell::RefCell;
 use bincode::{serialize};
 use failure::Error;
 use random_access_storage::RandomAccess;
 
 #[derive(Clone)]
-pub enum Node<'a,P,V> where P: Point, V: Value {
+pub enum Node<'a,S,P,V> where
+S: RandomAccess<Error=Error>, P: Point, V: Value {
   Empty,
-  Branch(Branch<'a,P,V>),
+  Branch(Branch<'a,S,P,V>),
   Data(u64)
 }
 
@@ -23,11 +25,13 @@ pub struct Data<'a,P,V> where P: Point, V: Value {
 }
 
 #[derive(Clone)]
-pub struct Branch<'a,P,V> where P: Point, V: Value {
+pub struct Branch<'a,S,P,V> where
+S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub offset: u64,
   level: usize,
   max_data_size: usize,
-  order: RefCell<Vec<usize>>,
+  order: Rc<Vec<usize>>,
+  data_store: Rc<RefCell<DataStore<S,P,V>>>,
   bucket: Vec<usize>,
   buckets: Vec<Vec<usize>>,
   rows: &'a Vec<(P,V)>,
@@ -37,11 +41,12 @@ pub struct Branch<'a,P,V> where P: Point, V: Value {
   matched: Vec<bool>
 }
 
-impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
+impl<'a,S,P,V> Branch<'a,S,P,V> where
+S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn new (level: usize, max_data_size: usize,
-  order_rc: &RefCell<Vec<usize>>, bucket: Vec<usize>, rows: &'a Vec<(P,V)>)
+  order: Rc<Vec<usize>>, data_store: Rc<RefCell<DataStore<S,P,V>>>,
+  bucket: Vec<usize>, rows: &'a Vec<(P,V)>)
   -> Self {
-    let order = order_rc.borrow();
     let n = order.len();
     let bf = (n+3)/2;
     let mut sorted: Vec<usize> = (0..bucket.len()).collect();
@@ -71,7 +76,8 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
       offset: 0,
       max_data_size,
       level,
-      order: order_rc.clone(),
+      order,
+      data_store,
       bucket,
       buckets: Vec::with_capacity(bf),
       rows,
@@ -87,18 +93,20 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
   fn bytes (&self) -> usize {
     let n = self.pivots.len();
     let bf = (n+3)/2;
-    let mut sum = 4 + (n+bf+7)/8 + (n+bf)*size_of::<u64>();
+    let mut sum = 4 // len
+      + n*P::pivot_size_at(self.level % P::dim()) // P
+      + (n+bf+7)/8 // D
+      + (n+bf)*size_of::<u64>() // I+B
+    ;
     let dim = self.level % P::dim();
     for pivot in self.pivots.iter() {
-      sum += pivot.bytes_at(dim);
+      sum += P::pivot_size_at(dim);
     }
     sum
   }
-  pub fn build<S> (&mut self, alloc: &mut FnMut (usize) -> u64,
-  data_store: &mut DataStore<S,P,V>)
-  -> Result<(Vec<u8>,Vec<Node<'a,P,V>>),Error>
-  where S: RandomAccess<Error=Error> {
-    let order = self.order.borrow();
+  pub fn build (&mut self, alloc: &mut FnMut (usize) -> u64)
+  -> Result<(Vec<u8>,Vec<Node<'a,S,P,V>>),Error> {
+    let order = &self.order;
     let n = order.len();
     let bf = (n+3)/2;
     self.buckets = vec![vec![];bf];
@@ -126,14 +134,17 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
           nodes.push(Node::Empty);
           bitfield.push(false);
         } else if bucket.len() < self.max_data_size {
+          let mut dstore = self.data_store.try_borrow_mut()?;
           nodes.push(Node::Data(
-            data_store.batch(&bucket.iter()
+            dstore.batch(&bucket.iter()
               .map(|b| { &self.rows[*b] }).collect())?
           ));
           bitfield.push(true);
         } else {
           let mut b = Branch::new(
-            self.level+1, self.max_data_size, &self.order,
+            self.level+1, self.max_data_size,
+            Rc::clone(&self.order),
+            Rc::clone(&self.data_store),
             bucket.clone(), self.rows
           );
           b.alloc(alloc);
@@ -142,7 +153,6 @@ impl<'a,P,V> Branch<'a,P,V> where P: Point, V: Value {
         }
       }
     }
-    println!("n={} bf={}", n, bf);
     assert_eq!(nodes.len(), n+bf, "incorrect number of nodes");
     let len = self.bytes();
     let mut data: Vec<u8> = Vec::with_capacity(len);

@@ -6,7 +6,7 @@ use serde::{Serialize,de::DeserializeOwned};
 use std::fmt::Debug;
 use std::mem::size_of;
 
-pub trait Point: Copy+Debug+Serialize+DeserializeOwned {
+pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
   type BBox;
   fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
   fn cmp_buf (&[u8], &Self::BBox, usize) -> Result<(bool,bool),Error>;
@@ -14,7 +14,7 @@ pub trait Point: Copy+Debug+Serialize+DeserializeOwned {
   fn serialize_at (&self, usize) -> Result<Vec<u8>,Error>;
   fn dim () -> usize;
   fn overlaps (&self, &Self::BBox) -> bool;
-  fn bytes_at (&self, usize) -> usize;
+  fn pivot_size_at (usize) -> usize;
 }
 
 pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
@@ -84,15 +84,9 @@ macro_rules! impl_point {
       }
       fn cmp_buf (buf: &[u8], bbox: &Self::BBox, level: usize)
       -> Result<(bool,bool),Error> {
-        let psize = match level % $dim {
-          $($i => size_of::<$T>(),)+
-          _ => panic!("level out of bounds")
-        };
-        let mut offset = 0;
-        $(if $i < level { offset += size_of::<$U>() })+;
         match level % $dim {
           $($i => {
-            let point: $T = deserialize(&buf[offset..offset+psize])?;
+            let point: $T = deserialize(&buf)?;
             Ok((
               (bbox.0).$i <= point,
              (bbox.1).$i >= point
@@ -117,9 +111,9 @@ macro_rules! impl_point {
       fn overlaps (&self, bbox: &Self::BBox) -> bool {
         $(Coord::overlaps(&self.$i, &(bbox.0).$i, &(bbox.1).$i) &&)+ true
       }
-      fn bytes_at (&self, i: usize) -> usize {
+      fn pivot_size_at (i: usize) -> usize {
         match i % $dim {
-          $($i => size_of::<$U>(),)+
+          $($i => size_of::<$T>(),)+
           _ => panic!("dimension out of bounds")
         }
       }

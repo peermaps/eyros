@@ -5,6 +5,7 @@ use random_access_storage::RandomAccess;
 use failure::Error;
 use std::marker::PhantomData;
 
+#[derive(Debug,Clone,Copy)]
 pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: S,
@@ -54,5 +55,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       )?);
     }
     Ok(data)
+  }
+  pub fn len (&mut self) -> Result<u64,Error> {
+    Ok(self.store.len()? as u64)
   }
 }

@@ -29,6 +29,7 @@ use meta::Meta;
 use std::marker::PhantomData;
 use std::fmt::Debug;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 enum SubIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
@@ -51,9 +52,9 @@ U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   open_store: U,
   trees: Vec<Tree<S,P,V>>,
-  order: RefCell<Vec<usize>>,
+  order: Rc<Vec<usize>>,
   staging: Staging<S,P,V>,
-  data: DataStore<S,P,V>,
+  data_store: Rc<RefCell<DataStore<S,P,V>>>,
   meta: Meta<S>,
   _marker: PhantomData<(P,V)>,
 }
@@ -65,13 +66,13 @@ P: Point, V: Value {
   pub fn open(open_store: U) -> Result<Self,Error> {
     let meta = Meta::open(open_store("meta")?)?;
     let staging = Staging::open(open_store("staging")?)?;
-    let data = DataStore::open(open_store("data")?)?;
+    let data_store = DataStore::open(open_store("data")?)?;
     let bf = 9;
     let mut db = Self {
       open_store,
       staging,
-      data,
-      order: RefCell::new(pivot_order(bf)),
+      data_store: Rc::new(RefCell::new(data_store)),
+      order: Rc::new(pivot_order(bf)),
       meta: meta,
       trees: vec![],
       _marker: PhantomData
@@ -128,7 +129,7 @@ P: Point, V: Value {
         }
         if trees.is_empty() {
           self.meta.mask[i] = true;
-          self.trees[i].build(&srows, &mut self.data)?;
+          self.trees[i].build(&srows)?;
         } else {
           self.meta.mask[i] = true;
           for t in trees.iter() {
@@ -158,7 +159,8 @@ P: Point, V: Value {
   fn create_tree (&mut self, index: usize) -> Result<(),Error> {
     for i in self.trees.len()..index+1 {
       let store = (self.open_store)(&format!("tree{}",i))?;
-      self.trees.push(Tree::open(store, 8, 100, self.order.clone())?);
+      self.trees.push(Tree::open(store, Rc::clone(&self.data_store),
+        8, 100, Rc::clone(&self.order))?);
     }
     Ok(())
   }
