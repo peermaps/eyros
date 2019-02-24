@@ -64,7 +64,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       if !self.blocks.is_empty() { // data block:
         let offset = self.blocks.pop().unwrap();
-        println!("BLOCK {}", offset);
+        //println!("BLOCK {}", offset);
         let mut dstore = iwrap![
           self.tree.data_store.try_borrow_mut()
         ];
@@ -75,8 +75,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let (cursor,depth) = self.cursors.pop().unwrap();
       if cursor >= self.tree_size { continue }
 
+      println!("cursor={}", cursor);
       let buf = iwrap![read_block(store, cursor, self.tree_size, 1024)];
-      println!("{}:buf={:?}", cursor, buf);
       let psize = P::pivot_size_at(depth % P::dim());
       let p_start = 0;
       let d_start = p_start + n*psize;
@@ -86,11 +86,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       assert_eq!(b_end, buf.len(), "unexpected block length");
 
       let mut bcursors = vec![0];
+      let mut slots: Vec<bool> = vec![false;bf];
       while !bcursors.is_empty() {
         let c = bcursors.pop().unwrap();
-        if c >= n {
-          continue;
-        }
         let i = order[c];
         let cmp: (bool,bool) = iwrap![P::cmp_buf(
           &buf[p_start+i*psize..p_start+(i+1)*psize],
@@ -110,34 +108,33 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
             self.blocks.push(offset-1);
           }
         }
-        if cmp.0 { // left
+        if cmp.0 && c*2+1 < n { // left internal
           bcursors.push(c*2+1);
+        } else if cmp.0 { // left branch
+          slots[i/2] = true;
         }
-        if cmp.1 { // right
+        if cmp.1 && c*2+2 < n { // right internal
           bcursors.push(c*2+2);
+        } else if cmp.1 { // right branch
+          slots[i/2+1] = true;
         }
-
-        /*
-        if c >= bf+n { continue }
-        if c >= n {
-          let j = order[(c-1)/2];
-          let is_data = ((buf[d_start+(j+7)/8]>>(j%8))&1) == 1;
-          let offset = u64::from_be_bytes([
-            buf[b_start+j*8+0], buf[b_start+j*8+1],
-            buf[b_start+j*8+2], buf[b_start+j*8+3],
-            buf[b_start+j*8+4], buf[b_start+j*8+5],
-            buf[b_start+j*8+6], buf[b_start+j*8+7]
-          ]);
-          if offset > 0 && is_data {
-            println!("BLOCK={} j={}", offset, j);
-            self.blocks.push(offset-1);
-          } else if offset > 0 {
-            println!("BRANCH={} j={}", offset, j);
-            self.cursors.push((offset-1,depth+1));
-          }
-          continue
+      }
+      //println!("slots={:?}", slots);
+      for (i,s) in slots.iter().enumerate() {
+        if !s { continue }
+        let is_data = ((buf[d_start+(i+7)/8]>>(i%8))&1) == 1;
+        let offset = u64::from_be_bytes([
+          buf[b_start+i*8+0], buf[b_start+i*8+1],
+          buf[b_start+i*8+2], buf[b_start+i*8+3],
+          buf[b_start+i*8+4], buf[b_start+i*8+5],
+          buf[b_start+i*8+6], buf[b_start+i*8+7]
+        ]);
+        println!("offset={} i={} data:{}", offset, i, is_data);
+        if offset > 0 && is_data {
+          self.blocks.push(offset-1);
+        } else if offset > 0 {
+          self.cursors.push((offset-1,depth+1));
         }
-        */
       }
     }
     None
@@ -221,7 +218,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
               let alloc = &mut {|bytes| self.alloc(bytes) };
               b.build(alloc)?
             };
-            println!("WRITE {}", b.offset);
             self.store.write(b.offset as usize, &data)?;
             nbranches.extend(nb);
           }
@@ -238,6 +234,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   fn alloc (&mut self, bytes: usize) -> u64 {
     let addr = self.size;
+    println!("ALLOC {}: addr={}",bytes, addr);
     self.size += bytes as u64;
     addr
   }
