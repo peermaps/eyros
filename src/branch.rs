@@ -93,16 +93,10 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
   fn bytes (&self) -> usize {
     let n = self.pivots.len();
     let bf = (n+3)/2;
-    let mut sum = 4 // len
+    4 // len
       + n*P::pivot_size_at(self.level % P::dim()) // P
       + (n+bf+7)/8 // D
       + (n+bf)*size_of::<u64>() // I+B
-    ;
-    let dim = self.level % P::dim();
-    for pivot in self.pivots.iter() {
-      sum += P::pivot_size_at(dim);
-    }
-    sum
   }
   pub fn build (&mut self, alloc: &mut FnMut (usize) -> u64)
   -> Result<(Vec<u8>,Vec<Node<'a,S,P,V>>),Error> {
@@ -154,10 +148,11 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
     }
     assert_eq!(nodes.len(), n+bf, "incorrect number of nodes");
+    assert_eq!(self.pivots.len(), n, "incorrect number of pivots");
     let len = self.bytes();
     let mut data: Vec<u8> = Vec::with_capacity(len);
     // length
-    data.extend_from_slice(&((len-4) as u32).to_be_bytes());
+    data.extend_from_slice(&(len as u32).to_be_bytes());
     // pivots
     for pivot in self.pivots.iter() {
       data.extend(pivot.serialize_at(self.level % P::dim())?);
@@ -172,12 +167,13 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     // intersecting + buckets
     for node in nodes.iter() {
-      data.extend(serialize(&match node {
-        Node::Branch(b) => b.offset,
-        Node::Data(d) => *d,
+      data.extend(&(match node {
+        Node::Branch(b) => b.offset+1,
+        Node::Data(d) => *d+1,
         Node::Empty => 0u64
-      })?);
+      }).to_be_bytes());
     }
+    assert_eq!(data.len(), len, "incorrect data length");
     Ok((data,nodes))
   }
 }

@@ -27,7 +27,9 @@ provided by the point and value types with some default implementations for
 common types such as floating point numbers, integers, and byte arrays.
 
 All offset pointer types are stored as unsigned 64-bit integers in big endian
-format.
+format. An offset pointer of `0` means that there is no further data. If the
+offset pointer is greater than 0, it should be decremented by `1` to get the
+file offset.
 
 ## meta
 
@@ -108,6 +110,13 @@ indexed bytes, from lower to higher bits.
 [intersecting: u64[N]]
 [buckets: u64[BF]]
 ```
+
+Note that the u64 offsets are set to `0` to indicate there is no further data.
+If an offset is greater than `0`, the value read from the structure should be
+subtracted by `1` to get the correct file offset.
+
+The length of the block in bytes refers to the whole block, which includes the
+4-byte u32 length property itself.
 
 The purpose of the fields in these blocks is to batch together several layers of
 the interval tree structure in order to reduce the number of storage reads. A

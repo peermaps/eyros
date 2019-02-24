@@ -37,6 +37,7 @@ impl Scalar for i64 {}
 trait Coord<T> {
   fn cmp (&self, &Self) -> Option<Ordering>;
   fn midpoint_upper (&self, &Self) -> Self;
+  fn upper (&self) -> T;
   fn overlaps (&self, &T, &T) -> bool;
 }
 
@@ -47,6 +48,7 @@ impl<T> Coord<T> for T where T: Scalar+PartialOrd+Num<T> {
   fn midpoint_upper (&self, other: &Self) -> Self {
     (*self + *other) / 2.into()
   }
+  fn upper (&self) -> T { *self }
   fn overlaps (&self, min: &T, max: &T) -> bool {
     *min <= *self && *self <= *max
   }
@@ -64,6 +66,7 @@ impl<T> Coord<T> for (T,T) where T: Scalar+PartialOrd+Num<T> {
     let x = (self.1 + other.1) / 2.into();
     (x,x)
   }
+  fn upper (&self) -> T { self.1 }
   fn overlaps (&self, min: &T, max: &T) -> bool {
     self.0.overlaps(min,max) || self.1.overlaps(min,max)
     || min.overlaps(&self.0, &self.1) || max.overlaps(&self.0, &self.1)
@@ -102,7 +105,7 @@ macro_rules! impl_point {
       }
       fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
         let buf: Vec<u8> = match level%Self::dim() {
-          $($i => serialize(&self.$i)?,)+
+          $($i => serialize(&self.$i.upper())?,)+
           _ => panic!("match case beyond dimension")
         };
         Ok(buf)

@@ -40,7 +40,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 macro_rules! iwrap {
   ($x:expr) => {
     match $x {
-      Err(e) => { return Some(Err(e)) },
+      Err(e) => { return Some(Err(Error::from(e))) },
       Ok(b) => { b }
     }
   };
@@ -63,18 +63,19 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       if !self.blocks.is_empty() { // data block:
         let offset = self.blocks.pop().unwrap();
-        //let dlen = iwrap![data_store.len()];
-        //let size_guess = 1024.min(dlen-offset);
-        //data_store.read(offset, size_guess);
+        println!("BLOCK {}", offset);
+        let mut dstore = iwrap![
+          self.tree.data_store.try_borrow_mut()
+        ];
+        self.queue.extend(iwrap![dstore.query(offset, self.bbox)]);
         continue
       }
       // branch block:
       let (cursor,depth) = self.cursors.pop().unwrap();
-      println!("cursor={} depth={}", cursor, depth);
       if cursor >= self.tree_size { continue }
       let size_guess = 1024.min(self.tree_size-cursor);
-      let fbuf = iwrap![
-        store.read(cursor as usize, (cursor+size_guess) as usize)
+      let fbuf: Vec<u8> = iwrap![
+        store.read(cursor as usize, size_guess as usize)
       ];
       let len = u32::from_be_bytes([fbuf[0],fbuf[1],fbuf[2],fbuf[3]]) as u64;
       let mut buf = Vec::with_capacity(len as usize);
@@ -89,52 +90,43 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
           buf.extend(fbuf);
           buf.extend(iwrap![store.read(
             (cursor+len) as usize,
-            (cursor+len-size_guess) as usize
+            (len-size_guess) as usize
           )]);
         }
       };
+      println!("{}:buf={:?}", cursor, buf);
       let psize = P::pivot_size_at(depth % P::dim());
       let p_start = size_of::<u32>();
       let d_start = p_start + n*psize;
-      let i_start = d_start + (n+7)/8;
+      let i_start = d_start + (n+bf+7)/8;
       let b_start = i_start + n*size_of::<u64>();
+      let b_end = b_start+bf*size_of::<u64>();
+      assert_eq!(b_end as u64,len, "unexpected block length");
 
       let mut bcursors = vec![0];
       while !bcursors.is_empty() {
         let c = bcursors.pop().unwrap();
         if c >= n {
-          let j = order[c-n];
-          let is_data = ((buf[d_start+(j+7)/8]>>(j%8))&1) == 1;
-          let offset = u64::from_be_bytes([
-            buf[b_start+j+0], buf[b_start+j+1],
-            buf[b_start+j+2], buf[b_start+j+3],
-            buf[b_start+j+4], buf[b_start+j+5],
-            buf[b_start+j+6], buf[b_start+j+7]
-          ]);
-          if is_data {
-            self.blocks.push(offset);
-          } else {
-            println!("PUSH {}",offset);
-            self.cursors.push((offset,depth+1));
-          }
-          continue
+          continue;
         }
         let i = order[c];
-        let cmp = iwrap![P::cmp_buf(
+        let cmp: (bool,bool) = iwrap![P::cmp_buf(
           &buf[p_start+i*psize..p_start+(i+1)*psize],
           &self.bbox,
           depth % P::dim()
         )];
         let is_data = ((buf[d_start+(i+7)/8]>>(i%8))&1) == 1;
-        let i_offset = i_start + size_of::<u64>()*i;
+        let i_offset = i_start + i*8;
         if cmp.0 && cmp.1 && is_data { // intersection
           let offset = u64::from_be_bytes([
-            buf[i_offset+i*8+0], buf[i_offset+1],
-            buf[i_offset+i*8+2], buf[i_offset+3],
-            buf[i_offset+i*8+4], buf[i_offset+5],
-            buf[i_offset+i*8+6], buf[i_offset+7],
+            buf[i_offset+0], buf[i_offset+1],
+            buf[i_offset+2], buf[i_offset+3],
+            buf[i_offset+4], buf[i_offset+5],
+            buf[i_offset+6], buf[i_offset+7],
           ]);
-          self.blocks.push(offset);
+          if offset > 0 {
+            self.blocks.push(offset-1);
+          }
         }
         if cmp.0 { // left
           bcursors.push(c*2+1);
@@ -142,6 +134,28 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         if cmp.1 { // right
           bcursors.push(c*2+2);
         }
+
+        /*
+        if c >= bf+n { continue }
+        if c >= n {
+          let j = order[(c-1)/2];
+          let is_data = ((buf[d_start+(j+7)/8]>>(j%8))&1) == 1;
+          let offset = u64::from_be_bytes([
+            buf[b_start+j*8+0], buf[b_start+j*8+1],
+            buf[b_start+j*8+2], buf[b_start+j*8+3],
+            buf[b_start+j*8+4], buf[b_start+j*8+5],
+            buf[b_start+j*8+6], buf[b_start+j*8+7]
+          ]);
+          if offset > 0 && is_data {
+            println!("BLOCK={} j={}", offset, j);
+            self.blocks.push(offset-1);
+          } else if offset > 0 {
+            println!("BRANCH={} j={}", offset, j);
+            self.cursors.push((offset-1,depth+1));
+          }
+          continue
+        }
+        */
       }
     }
     None
@@ -225,6 +239,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
               let alloc = &mut {|bytes| self.alloc(bytes) };
               b.build(alloc)?
             };
+            println!("WRITE {}", b.offset);
             self.store.write(b.offset as usize, &data)?;
             nbranches.extend(nb);
           }

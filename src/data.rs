@@ -4,6 +4,7 @@ use std::mem::size_of;
 use random_access_storage::RandomAccess;
 use failure::Error;
 use std::marker::PhantomData;
+use read_block::read_block;
 
 #[derive(Debug,Clone,Copy)]
 pub struct DataStore<S,P,V>
@@ -28,9 +29,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.store.write(offset, &data)?;
     Ok(offset as u64)
   }
-  pub fn query (&mut self, offset: usize, bbox: &P::BBox)
+  pub fn query (&mut self, offset: u64, bbox: &P::BBox)
   -> Result<Vec<(P,V)>,Error> {
-    let rows = Self::parse(&self.read(offset as u32)?)?;
+    let rows = Self::parse(&self.read(offset)?)?;
     Ok(rows.iter().filter(|row| {
       row.0.overlaps(bbox)
     }).map(|row| { *row }).collect())
@@ -43,18 +44,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     Ok(results)
   }
-  pub fn read (&mut self, offset: u32) -> Result<Vec<u8>,Error> {
-    let len = self.store.len()? as u32;
-    let flen = 1024.min(len-offset);
-    let mut data = self.store.read(offset as usize, flen as usize)?;
-    if len > 1024 {
-      let slen = u32::from_be_bytes([data[0],data[1],data[2],data[3]]);
-      data.extend(self.store.read(
-        (offset + flen) as usize,
-        (slen - flen) as usize
-      )?);
-    }
-    Ok(data)
+  pub fn read (&mut self, offset: u64) -> Result<Vec<u8>,Error> {
+    let len = self.store.len()? as u64;
+    read_block(&mut self.store, offset, len, 1024)
   }
   pub fn len (&mut self) -> Result<u64,Error> {
     Ok(self.store.len()? as u64)

@@ -14,6 +14,7 @@ mod planner;
 mod bits;
 mod order;
 mod data;
+mod read_block;
 
 use staging::{Staging,StagingIterator};
 use planner::plan;
@@ -51,6 +52,7 @@ S: RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   open_store: U,
+  branch_factor: usize,
   trees: Vec<Tree<S,P,V>>,
   order: Rc<Vec<usize>>,
   staging: Staging<S,P,V>,
@@ -70,6 +72,7 @@ P: Point, V: Value {
     let bf = 9;
     let mut db = Self {
       open_store,
+      branch_factor: bf,
       staging,
       data_store: Rc::new(RefCell::new(data_store)),
       order: Rc::new(pivot_order(bf)),
@@ -160,7 +163,7 @@ P: Point, V: Value {
     for i in self.trees.len()..index+1 {
       let store = (self.open_store)(&format!("tree{}",i))?;
       self.trees.push(Tree::open(store, Rc::clone(&self.data_store),
-        8, 100, Rc::clone(&self.order))?);
+        self.branch_factor, 100, Rc::clone(&self.order))?);
     }
     Ok(())
   }
