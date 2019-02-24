@@ -10,6 +10,7 @@ use ::{Row,Point,Value};
 
 use branch::{Branch,Node};
 use data::DataStore;
+use read_block::read_block;
 
 pub struct TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
@@ -73,35 +74,16 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       // branch block:
       let (cursor,depth) = self.cursors.pop().unwrap();
       if cursor >= self.tree_size { continue }
-      let size_guess = 1024.min(self.tree_size-cursor);
-      let fbuf: Vec<u8> = iwrap![
-        store.read(cursor as usize, size_guess as usize)
-      ];
-      let len = u32::from_be_bytes([fbuf[0],fbuf[1],fbuf[2],fbuf[3]]) as u64;
-      let mut buf = Vec::with_capacity(len as usize);
-      match size_guess.cmp(&len) {
-        Ordering::Equal => {
-          buf = fbuf;
-        },
-        Ordering::Greater => {
-          buf.extend_from_slice(&fbuf[0..len as usize])
-        },
-        Ordering::Less => {
-          buf.extend(fbuf);
-          buf.extend(iwrap![store.read(
-            (cursor+len) as usize,
-            (len-size_guess) as usize
-          )]);
-        }
-      };
+
+      let buf = iwrap![read_block(store, cursor, self.tree_size, 1024)];
       println!("{}:buf={:?}", cursor, buf);
       let psize = P::pivot_size_at(depth % P::dim());
-      let p_start = size_of::<u32>();
+      let p_start = 0;
       let d_start = p_start + n*psize;
       let i_start = d_start + (n+bf+7)/8;
       let b_start = i_start + n*size_of::<u64>();
       let b_end = b_start+bf*size_of::<u64>();
-      assert_eq!(b_end as u64,len, "unexpected block length");
+      assert_eq!(b_end, buf.len(), "unexpected block length");
 
       let mut bcursors = vec![0];
       while !bcursors.is_empty() {
