@@ -23,9 +23,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     for row in rows.iter() {
       data.extend(serialize(row)?);
     }
-    let len = (data.len()-4) as u32;
+    let len = data.len() as u32;
     data[0..4].copy_from_slice(&len.to_be_bytes());
     let offset = self.store.len()?;
+    //println!("BATCH {}:{}", offset, len);
     self.store.write(offset, &data)?;
     Ok(offset as u64)
   }

@@ -98,10 +98,12 @@ that offset pointer is set.
 
 The branch factor (BF) determines the number of pivots N: `N=2*BF-3`.
 
-The data bitfield determines whether the corresponding u64 offset is in the
-intersecting or buckets array. Each bit in the data bitfield maps to the
-concatenation of the intersecting and bucket lists, from lower indexed to higher
-indexed bytes, from lower to higher bits.
+The data bitfield determines whether the corresponding u64 offset in the
+intersecting or buckets array points to a location in the data store (`true`),
+or to an offset into current tree (`false`) or if the pointer is empty
+(`false`). Each bit in the data bitfield maps to the concatenation of the
+intersecting and bucket lists, from lower indexed to higher indexed bytes, from
+lower to higher bits.
 
 ```
 [length: u32 (bytes)]

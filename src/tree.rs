@@ -75,7 +75,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let (cursor,depth) = self.cursors.pop().unwrap();
       if cursor >= self.tree_size { continue }
 
-      println!("cursor={}", cursor);
       let buf = iwrap![read_block(store, cursor, self.tree_size, 1024)];
       let psize = P::pivot_size_at(depth % P::dim());
       let p_start = 0;
@@ -86,7 +85,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       assert_eq!(b_end, buf.len(), "unexpected block length");
 
       let mut bcursors = vec![0];
-      let mut slots: Vec<bool> = vec![false;bf];
+      let mut bitfield: Vec<bool> = vec![false;bf];
       while !bcursors.is_empty() {
         let c = bcursors.pop().unwrap();
         let i = order[c];
@@ -111,25 +110,23 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         if cmp.0 && c*2+1 < n { // left internal
           bcursors.push(c*2+1);
         } else if cmp.0 { // left branch
-          slots[i/2] = true;
+          bitfield[c/2] = true;
         }
         if cmp.1 && c*2+2 < n { // right internal
           bcursors.push(c*2+2);
         } else if cmp.1 { // right branch
-          slots[i/2+1] = true;
+          bitfield[c/2+1] = true;
         }
       }
-      //println!("slots={:?}", slots);
-      for (i,s) in slots.iter().enumerate() {
-        if !s { continue }
-        let is_data = ((buf[d_start+(i+7)/8]>>(i%8))&1) == 1;
+      for (i,b) in bitfield.iter().enumerate() {
+        if !b { continue }
+        let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
         let offset = u64::from_be_bytes([
           buf[b_start+i*8+0], buf[b_start+i*8+1],
           buf[b_start+i*8+2], buf[b_start+i*8+3],
           buf[b_start+i*8+4], buf[b_start+i*8+5],
           buf[b_start+i*8+6], buf[b_start+i*8+7]
         ]);
-        println!("offset={} i={} data:{}", offset, i, is_data);
         if offset > 0 && is_data {
           self.blocks.push(offset-1);
         } else if offset > 0 {
@@ -234,7 +231,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   fn alloc (&mut self, bytes: usize) -> u64 {
     let addr = self.size;
-    println!("ALLOC {}: addr={}",bytes, addr);
+    //println!("ALLOC {}: addr={}",bytes, addr);
     self.size += bytes as u64;
     addr
   }
