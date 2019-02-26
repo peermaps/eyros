@@ -122,6 +122,8 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
       self.buckets.len() + self.intersecting.len());
     let mut bitfield: Vec<bool> = vec![];
 
+    assert_eq!(self.intersecting.len(), n, "unexpected intersecting length");
+    assert_eq!(self.buckets.len(), bf, "unexpected bucket length");
     for ref buckets in [&self.intersecting,&self.buckets].iter() {
       for bucket in buckets.iter() {
         if bucket.is_empty() {

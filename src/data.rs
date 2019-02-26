@@ -25,9 +25,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     let len = data.len() as u32;
     data[0..4].copy_from_slice(&len.to_be_bytes());
-    let offset = self.store.len()?;
-    //println!("BATCH {}:{}", offset, len);
-    self.store.write(offset, &data)?;
+    let offset = self.store.len()? as u64;
+    self.store.write(offset as usize, &data)?;
     Ok(offset as u64)
   }
   pub fn query (&mut self, offset: u64, bbox: &P::BBox)

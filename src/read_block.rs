@@ -10,9 +10,11 @@ where S: RandomAccess<Error=Error> {
   let fbuf: Vec<u8> = store.read(offset as usize, size_guess as usize)?;
   let len = u32::from_be_bytes([fbuf[0],fbuf[1],fbuf[2],fbuf[3]]) as u64;
   if len < 4 { bail!["length field must be at least 4"] }
-  if offset + len > max_size { bail!["length exceeds end of file"] }
+  if offset + len > max_size {
+    bail!["offset+length ({}+{}={}) exceeds end of file ({})",
+      offset, len, offset+len, max_size ];
+  }
   let mut buf = Vec::with_capacity((len-4) as usize);
-  //println!("READ offset={} len={}", offset, len);
   match size_guess.cmp(&len) {
     Ordering::Equal => {
       buf.extend_from_slice(&fbuf[4..]);

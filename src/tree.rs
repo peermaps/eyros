@@ -64,7 +64,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       if !self.blocks.is_empty() { // data block:
         let offset = self.blocks.pop().unwrap();
-        //println!("BLOCK {}", offset);
         let mut dstore = iwrap![
           self.tree.data_store.try_borrow_mut()
         ];
@@ -85,7 +84,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       assert_eq!(b_end, buf.len(), "unexpected block length");
 
       let mut bcursors = vec![0];
-      let mut bitfield: Vec<bool> = vec![false;bf];
+      let mut bitfield: Vec<bool> = vec![false;bf]; // which buckets
       while !bcursors.is_empty() {
         let c = bcursors.pop().unwrap();
         let i = order[c];
@@ -94,7 +93,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
           &self.bbox,
           depth % P::dim()
         )];
-        let is_data = ((buf[d_start+(i+7)/8]>>(i%8))&1) == 1;
+        let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
         let i_offset = i_start + i*8;
         if cmp.0 && cmp.1 && is_data { // intersection
           let offset = u64::from_be_bytes([
@@ -110,17 +109,28 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         if cmp.0 && c*2+1 < n { // left internal
           bcursors.push(c*2+1);
         } else if cmp.0 { // left branch
-          bitfield[c/2] = true;
+          bitfield[i/2] = true;
         }
         if cmp.1 && c*2+2 < n { // right internal
           bcursors.push(c*2+2);
         } else if cmp.1 { // right branch
-          bitfield[c/2+1] = true;
+          bitfield[i/2+1] = true;
         }
+        // internal leaves are even integers in (0..n)
+        // which map to buckets `i/2+0` and/or `i/2+1`
+        // depending on left/right comparisons
+        // diagram:
+        /*                7
+                   3             11
+                1     5       9      13
+              0   2 4  6    8  10  12  14
+          B: 0  1  2  3   4  5   6   7   8
+        */
       }
       for (i,b) in bitfield.iter().enumerate() {
+        let j = i+n;
+        let is_data = (buf[d_start+j/8]>>(j%8))&1 == 1;
         if !b { continue }
-        let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
         let offset = u64::from_be_bytes([
           buf[b_start+i*8+0], buf[b_start+i*8+1],
           buf[b_start+i*8+2], buf[b_start+i*8+3],
@@ -240,10 +250,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   pub fn merge (trees: &mut Vec<Self>, dst: usize, src: Vec<usize>,
   rows: &Vec<Row<P,V>>) -> Result<(),Error> {
-    println!("MERGE {} {:?} {}", dst, src, rows.len());
+    //println!("MERGE {} {:?} {}", dst, src, rows.len());
     // TODO
-    for i in src { trees[i].clear()? }
-    trees[dst].clear()?;
+    //for i in src { trees[i].clear()? }
+    //trees[dst].clear()?;
     Ok(())
   }
 }
