@@ -88,75 +88,76 @@ P: Point, V: Value {
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     let base = 9_u64.pow(2);
     let n = (self.staging.len()? + rows.len()) as u64;
-    if n > base {
-      let count = (n/base)*base;
-      let rem = n - count;
-      let mut mask = vec![];
-      for mut tree in self.trees.iter_mut() {
-        mask.push(tree.is_empty()?);
-      }
-      let p = plan(
-        &bits::num_to_bits(n/base),
-        &mask
-      );
-      let mut offset = 0;
-      let mut last_staging = 0;
-      let mut last_rows = 0;
-      for (i,staging,trees) in p {
-        let slen = self.staging.rows.len();
-        let mut srows = vec![];
-        for j in staging {
-          let size = (2u64.pow(j as u32) * base) as usize;
-          let start = offset;
-          let end = start + size;
-          offset = end;
-          if end <= slen {
-            srows.extend_from_slice(&self.staging.rows[start..end]);
-            last_staging = last_staging.max(end);
-          } else if start >= slen {
-            srows.extend_from_slice(&rows[start-slen..end-slen]);
-            last_rows = last_rows.max(end-slen);
-          } else {
-            srows.extend_from_slice(&self.staging.rows[start..slen]);
-            srows.extend_from_slice(&rows[0..end-slen]);
-            last_staging = last_staging.max(slen);
-            last_rows = last_rows.max(slen);
-          }
-        }
-        for t in trees.iter() {
-          self.create_tree(*t)?;
-        }
-        self.create_tree(i)?;
-        for j in self.meta.mask.len()..i+1 {
-          self.meta.mask.push(false);
-        }
-        if trees.is_empty() {
-          self.meta.mask[i] = true;
-          self.trees[i].build(&srows)?;
-        } else {
-          self.meta.mask[i] = true;
-          for t in trees.iter() {
-            self.meta.mask[*t] = false;
-          }
-          Tree::merge(&mut self.trees, i, trees, &srows)?;
-        }
-      }
-      let mut rem_rows = vec![];
-      if last_staging < self.staging.rows.len() && self.staging.rows.len() > 0 {
-        rem_rows.extend_from_slice(&self.staging.rows[last_staging..]);
-      }
-      if last_rows < rows.len() && rows.len() > 0 {
-        rem_rows.extend_from_slice(&rows[last_rows..]);
-      }
-      assert!(rem_rows.len() == rem as usize,
-        "unexpected number of remaining rows (expected {}, actual {})",
-        rem, rem_rows.len());
-      self.staging.clear()?;
-      self.staging.batch(&rem_rows)?;
-      self.meta.save()?;
-    } else {
+    if n <= base {
       self.staging.batch(rows)?;
+      return Ok(())
     }
+    let count = (n/base)*base;
+    let rem = n - count;
+    let mut mask = vec![];
+    for mut tree in self.trees.iter_mut() {
+      mask.push(tree.is_empty()?);
+    }
+    let p = plan(
+      &bits::num_to_bits(n/base),
+      &mask
+    );
+    let mut offset = 0;
+    let mut last_staging = 0;
+    let mut last_rows = 0;
+    for (i,staging,trees) in p {
+      let slen = self.staging.rows.len();
+      let mut srows = vec![];
+      for j in staging {
+        let size = (2u64.pow(j as u32) * base) as usize;
+        let start = offset;
+        let end = start + size;
+        offset = end;
+        if end <= slen {
+          srows.extend_from_slice(&self.staging.rows[start..end]);
+          last_staging = last_staging.max(end);
+        } else if start >= slen {
+          srows.extend_from_slice(&rows[start-slen..end-slen]);
+          last_rows = last_rows.max(end-slen);
+        } else {
+          srows.extend_from_slice(&self.staging.rows[start..slen]);
+          srows.extend_from_slice(&rows[0..end-slen]);
+          last_staging = last_staging.max(slen);
+          last_rows = last_rows.max(slen);
+        }
+      }
+      eprintln!("srows.len()={}", srows.len());
+      for t in trees.iter() {
+        self.create_tree(*t)?;
+      }
+      self.create_tree(i)?;
+      for j in self.meta.mask.len()..i+1 {
+        self.meta.mask.push(false);
+      }
+      if trees.is_empty() {
+        self.meta.mask[i] = true;
+        self.trees[i].build(&srows)?;
+      } else {
+        self.meta.mask[i] = true;
+        for t in trees.iter() {
+          self.meta.mask[*t] = false;
+        }
+        Tree::merge(&mut self.trees, i, trees, &srows)?;
+      }
+    }
+    let mut rem_rows = vec![];
+    if last_staging < self.staging.rows.len() && self.staging.rows.len() > 0 {
+      rem_rows.extend_from_slice(&self.staging.rows[last_staging..]);
+    }
+    if last_rows < rows.len() && rows.len() > 0 {
+      rem_rows.extend_from_slice(&rows[last_rows..]);
+    }
+    assert!(rem_rows.len() == rem as usize,
+      "unexpected number of remaining rows (expected {}, actual {})",
+      rem, rem_rows.len());
+    self.staging.clear()?;
+    self.staging.batch(&rem_rows)?;
+    self.meta.save()?;
     Ok(())
   }
   fn create_tree (&mut self, index: usize) -> Result<(),Error> {

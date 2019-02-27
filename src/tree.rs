@@ -119,7 +119,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         // internal leaves are even integers in (0..n)
         // which map to buckets `i/2+0` and/or `i/2+1`
         // depending on left/right comparisons
-        // diagram:
         /*                7
                    3             11
                 1     5       9      13
