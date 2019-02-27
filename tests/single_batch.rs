@@ -13,6 +13,7 @@ use tempfile::Builder as Tmpfile;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 
 #[test]
 fn single_batch() -> Result<(),Error> {
@@ -25,7 +26,7 @@ fn single_batch() -> Result<(),Error> {
   )?;
   let mut r = rand().seed([13,12]);
   let size = 800;
-  let polygons = (0..size).map(|_| {
+  let inserts = (0..size).map(|_| {
     let xmin: f32 = r.read::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + r.read::<f32>().powf(64.0)*(1.0-xmin);
     let ymin: f32 = r.read::<f32>()*2.0-1.0;
@@ -35,13 +36,32 @@ fn single_batch() -> Result<(),Error> {
     let point = ((xmin,xmax),(ymin,ymax),time);
     Row::Insert(point, value)
   }).collect();
-  db.batch(&polygons)?;
+  db.batch(&inserts)?;
 
   let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
   let mut results = vec![];
   for result in db.query(&bbox)? {
     results.push(result?);
   }
-  assert_eq!(results.len(), size);
+  assert_eq!(results.len(), size, "incorrect length");
+  let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
+  = inserts.iter().map(|r| {
+    match r {
+      Row::Insert(point,value) => (*point,*value),
+      _ => panic!["unexpected row type"]
+    }
+  }).collect();
+  assert_eq!(
+    results.sort_unstable_by(cmp),
+    expected.sort_unstable_by(cmp),
+    "incorrect results"
+  );
   Ok(())
+}
+
+fn cmp<T> (a: &T, b: &T) -> Ordering where T: PartialOrd {
+  match a.partial_cmp(b) {
+    Some(o) => o,
+    None => panic!["comparison failed"]
+  }
 }
