@@ -11,7 +11,9 @@ serde = "1.0.82"
 
 [dev-dependencies]
 rand = "0.6.1"
+random = "0.12.2"
 random-access-disk = "0.8.0"
+tempfile = "3.0.7"
 
 [lib]
 crate-type = [
