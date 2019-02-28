@@ -35,24 +35,49 @@ fn single_batch() -> Result<(),Error> {
   }).collect();
   db.batch(&inserts)?;
 
-  let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
-  let mut results = vec![];
-  for result in db.query(&bbox)? {
-    results.push(result?);
-  }
-  assert_eq!(results.len(), size, "incorrect length");
-  let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
-  = inserts.iter().map(|r| {
-    match r {
-      Row::Insert(point,value) => (*point,*value),
-      _ => panic!["unexpected row type"]
+  {
+    let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
+    let mut results = vec![];
+    for result in db.query(&bbox)? {
+      results.push(result?);
     }
-  }).collect();
-  assert_eq!(
-    results.sort_unstable_by(cmp),
-    expected.sort_unstable_by(cmp),
-    "incorrect results"
-  );
+    assert_eq!(results.len(), size, "incorrect length");
+    let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
+    = inserts.iter().map(|r| {
+      match r {
+        Row::Insert(point,value) => (*point,*value),
+        _ => panic!["unexpected row type"]
+      }
+    }).collect();
+    results.sort_unstable_by(cmp);
+    expected.sort_unstable_by(cmp);
+    assert_eq!(results, expected, "incorrect results for full region");
+  }
+
+  {
+    let bbox = ((-0.8,0.1,0.0),(0.2,0.5,500.0));
+    let mut results = vec![];
+    for result in db.query(&bbox)? {
+      results.push(result?);
+    }
+    let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
+    = inserts.iter()
+      .map(|r| {
+        match r {
+          Row::Insert(point,value) => (*point,*value),
+          _ => panic!["unexpected row type"]
+        }
+      })
+      .filter(|r| {
+        contains_iv((bbox.0).0,(bbox.1).0, (r.0).0)
+        && contains_iv((bbox.0).1,(bbox.1).1, (r.0).1)
+        && contains_pt((bbox.0).2,(bbox.1).2, (r.0).2)
+      })
+      .collect();
+    results.sort_unstable_by(cmp);
+    expected.sort_unstable_by(cmp);
+    assert_eq!(results, expected, "incorrect results for partial region");
+  }
   Ok(())
 }
 
@@ -61,4 +86,11 @@ fn cmp<T> (a: &T, b: &T) -> Ordering where T: PartialOrd {
     Some(o) => o,
     None => panic!["comparison failed"]
   }
+}
+
+fn contains_iv<T> (min: T, max: T, iv: (T,T)) -> bool where T: PartialOrd {
+  min <= iv.1 && iv.0 <= max
+}
+fn contains_pt<T> (min: T, max: T, pt: T) -> bool where T: PartialOrd {
+  min <= pt && pt <= max
 }
