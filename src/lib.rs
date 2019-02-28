@@ -126,7 +126,6 @@ P: Point, V: Value {
           last_rows = last_rows.max(slen);
         }
       }
-      eprintln!("srows.len()={}", srows.len());
       for t in trees.iter() {
         self.create_tree(*t)?;
       }

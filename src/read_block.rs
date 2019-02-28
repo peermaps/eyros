@@ -30,5 +30,6 @@ where S: RandomAccess<Error=Error> {
       )?);
     }
   };
+  assert_eq!(buf.len() as u64, len-4, "incorrect length in block read");
   Ok(buf)
 }

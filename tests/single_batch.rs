@@ -10,9 +10,6 @@ use random_access_disk::RandomAccessDisk;
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
 
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::cmp::Ordering;
 
 #[test]

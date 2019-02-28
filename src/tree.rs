@@ -58,7 +58,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
     // todo: used cached size or rolling max to implicitly read an appropriate
     // amount of data
-    while !self.cursors.is_empty() || !self.blocks.is_empty() {
+    while !self.cursors.is_empty() || !self.blocks.is_empty()
+    || !self.queue.is_empty() {
       if !self.queue.is_empty() {
         return Some(Ok(self.queue.pop().unwrap()))
       }
