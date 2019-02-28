@@ -7,11 +7,3 @@ pub fn num_to_bits (n: u64) -> Vec<bool> {
   }
   bits
 }
-
-pub fn bits_to_num (bits: Vec<bool>) -> u64 {
-  let mut n = 0;
-  for (i,bit) in bits.iter().enumerate() {
-    n += ((*bit) as u64)*(1<<i);
-  }
-  n
-}

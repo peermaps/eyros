@@ -1,4 +1,4 @@
-use ::{Row,Point,Value};
+use ::{Point,Value};
 use bincode::{serialize,deserialize};
 use std::mem::size_of;
 use random_access_storage::RandomAccess;

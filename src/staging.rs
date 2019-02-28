@@ -30,7 +30,7 @@ where P: Point, V: Value {
             return Some(Ok((point,value)))
           }
         },
-        Row::Delete(point,value) => {}
+        Row::Delete(_point,_value) => {}
       }
     }
     None

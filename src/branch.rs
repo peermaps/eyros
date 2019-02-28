@@ -5,7 +5,6 @@ use std::cmp::Ordering;
 use std::mem::size_of;
 use std::rc::Rc;
 use std::cell::RefCell;
-use bincode::{serialize};
 use failure::Error;
 use random_access_storage::RandomAccess;
 

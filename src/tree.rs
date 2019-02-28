@@ -4,7 +4,6 @@ use std::marker::PhantomData;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::mem::size_of;
-use std::cmp::Ordering;
 
 use ::{Row,Point,Value};
 
@@ -219,7 +218,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       for mut branch in branches {
         match branch {
           Node::Empty => {},
-          Node::Data(d) => {},
+          Node::Data(_) => {},
           Node::Branch(ref mut b) => {
             let (data,nb) = {
               let alloc = &mut {|bytes| self.alloc(bytes) };
@@ -248,8 +247,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   fn flush (&mut self) -> Result<(),Error> {
     Ok(())
   }
-  pub fn merge (trees: &mut Vec<Self>, dst: usize, src: Vec<usize>,
-  rows: &Vec<Row<P,V>>) -> Result<(),Error> {
+  pub fn merge (_trees: &mut Vec<Self>, _dst: usize, _src: Vec<usize>,
+  _rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     //println!("MERGE {} {:?} {}", dst, src, rows.len());
     // TODO
     //for i in src { trees[i].clear()? }

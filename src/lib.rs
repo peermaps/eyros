@@ -130,7 +130,7 @@ P: Point, V: Value {
         self.create_tree(*t)?;
       }
       self.create_tree(i)?;
-      for j in self.meta.mask.len()..i+1 {
+      for _ in self.meta.mask.len()..i+1 {
         self.meta.mask.push(false);
       }
       if trees.is_empty() {

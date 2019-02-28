@@ -1,5 +1,5 @@
 use failure::{Error,bail};
-use std::mem::size_of;
+//use std::mem::size_of;
 use random_access_storage::RandomAccess;
 
 #[derive(Debug)]
@@ -19,7 +19,7 @@ impl<S> Meta<S> where S: RandomAccess<Error=Error> {
     if !meta.store.is_empty()? {
       let len = meta.store.len()?;
       let buf = meta.store.read(0,len)?;
-      meta.load_buffer(&buf);
+      meta.load_buffer(&buf)?;
     }
     Ok(meta)
   }
