@@ -247,9 +247,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   fn flush (&mut self) -> Result<(),Error> {
     Ok(())
   }
-  pub fn merge (_trees: &mut Vec<Self>, _dst: usize, _src: Vec<usize>,
-  _rows: &Vec<Row<P,V>>) -> Result<(),Error> {
-    //println!("MERGE {} {:?} {}", dst, src, rows.len());
+  pub fn merge (_trees: &mut Vec<Self>, dst: usize, src: Vec<usize>,
+  rows: &Vec<Row<P,V>>) -> Result<(),Error> {
+    eprintln!("MERGE {} {:?} {}", dst, src, rows.len());
     // TODO
     //for i in src { trees[i].clear()? }
     //trees[dst].clear()?;

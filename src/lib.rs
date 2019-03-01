@@ -103,28 +103,13 @@ P: Point, V: Value {
       &mask
     );
     let mut offset = 0;
-    let mut last_staging = 0;
-    let mut last_rows = 0;
+    let slen = self.staging.rows.len();
     for (i,staging,trees) in p {
-      let slen = self.staging.rows.len();
-      let mut srows = vec![];
+      let mut irows: Vec<(usize,usize)> = vec![];
       for j in staging {
         let size = (2u64.pow(j as u32) * base) as usize;
-        let start = offset;
-        let end = start + size;
-        offset = end;
-        if end <= slen {
-          srows.extend_from_slice(&self.staging.rows[start..end]);
-          last_staging = last_staging.max(end);
-        } else if start >= slen {
-          srows.extend_from_slice(&rows[start-slen..end-slen]);
-          last_rows = last_rows.max(end-slen);
-        } else {
-          srows.extend_from_slice(&self.staging.rows[start..slen]);
-          srows.extend_from_slice(&rows[0..end-slen]);
-          last_staging = last_staging.max(slen);
-          last_rows = last_rows.max(slen);
-        }
+        irows.push((offset,offset+size));
+        offset += size;
       }
       for t in trees.iter() {
         self.create_tree(*t)?;
@@ -132,6 +117,15 @@ P: Point, V: Value {
       self.create_tree(i)?;
       for _ in self.meta.mask.len()..i+1 {
         self.meta.mask.push(false);
+      }
+      let mut srows: Vec<Row<P,V>> = vec![];
+      for (i,j) in irows {
+        for k in i..j {
+          srows.push(
+            if k < slen { self.staging.rows[k].clone() }
+            else { rows[k-slen].clone() }
+          );
+        }
       }
       if trees.is_empty() {
         self.meta.mask[i] = true;
@@ -144,12 +138,14 @@ P: Point, V: Value {
         Tree::merge(&mut self.trees, i, trees, &srows)?;
       }
     }
+    assert_eq!(n-(offset as u64), rem, "offset-n ({}-{}={}) != rem ({}) ",
+      offset, n, (offset as u64)-n, rem);
     let mut rem_rows = vec![];
-    if last_staging < self.staging.rows.len() && self.staging.rows.len() > 0 {
-      rem_rows.extend_from_slice(&self.staging.rows[last_staging..]);
-    }
-    if last_rows < rows.len() && rows.len() > 0 {
-      rem_rows.extend_from_slice(&rows[last_rows..]);
+    for k in offset..n as usize {
+      rem_rows.push(
+        if k < slen { self.staging.rows[k].clone() }
+        else { rows[k-slen].clone() }
+      );
     }
     assert!(rem_rows.len() == rem as usize,
       "unexpected number of remaining rows (expected {}, actual {})",
