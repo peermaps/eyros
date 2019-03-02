@@ -7,14 +7,15 @@ use std::fmt::Debug;
 use std::mem::size_of;
 
 pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
-  type BBox;
+  type Bounds: Copy+Clone+Debug+Serialize+DeserializeOwned;
   fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
-  fn cmp_buf (&[u8], &Self::BBox, usize) -> Result<(bool,bool),Error>;
+  fn cmp_buf (&[u8], &Self::Bounds, usize) -> Result<(bool,bool),Error>;
   fn midpoint_upper (&self, &Self) -> Self where Self: Sized;
   fn serialize_at (&self, usize) -> Result<Vec<u8>,Error>;
   fn dim () -> usize;
-  fn overlaps (&self, &Self::BBox) -> bool;
+  fn overlaps (&self, &Self::Bounds) -> bool;
   fn pivot_size_at (usize) -> usize;
+  fn bounds (&Vec<Self>) -> Option<Self::Bounds>;
 }
 
 pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
@@ -39,6 +40,7 @@ trait Coord<T> {
   fn midpoint_upper (&self, &Self) -> Self;
   fn upper (&self) -> T;
   fn overlaps (&self, &T, &T) -> bool;
+  fn bounds (Vec<&Self>) -> Option<(T,T)>;
 }
 
 impl<T> Coord<T> for T where T: Scalar+PartialOrd+Num<T> {
@@ -51,6 +53,25 @@ impl<T> Coord<T> for T where T: Scalar+PartialOrd+Num<T> {
   fn upper (&self) -> T { *self }
   fn overlaps (&self, min: &T, max: &T) -> bool {
     *min <= *self && *self <= *max
+  }
+  fn bounds (coords: Vec<&Self>) -> Option<(T,T)> {
+    if coords.len() == 0 { return None }
+    let mut min = coords[0];
+    let mut max = coords[0];
+    for i in 1..coords.len() {
+      let c = coords[i];
+      match c.cmp(min) {
+        None => { return None },
+        Some(Ordering::Less) => { min = c },
+        _ => {}
+      };
+      match c.cmp(max) {
+        None => { return None },
+        Some(Ordering::Greater) => { max = c },
+        _ => {}
+      };
+    }
+    Some((*min,*max))
   }
 }
 
@@ -71,13 +92,32 @@ impl<T> Coord<T> for (T,T) where T: Scalar+PartialOrd+Num<T> {
     self.0.overlaps(min,max) || self.1.overlaps(min,max)
     || min.overlaps(&self.0, &self.1) || max.overlaps(&self.0, &self.1)
   }
+  fn bounds (coords: Vec<&Self>) -> Option<(T,T)> {
+    if coords.len() == 0 { return None }
+    let mut min = coords[0].0;
+    let mut max = coords[0].1;
+    for i in 1..coords.len() {
+      let c = coords[i];
+      match (c.0).cmp(&min) {
+        None => { return None },
+        Some(Ordering::Less) => { min = c.0 },
+        _ => {}
+      };
+      match (c.1).cmp(&max) {
+        None => { return None },
+        Some(Ordering::Greater) => { max = c.1 },
+        _ => {}
+      };
+    }
+    Some((min,max))
+  }
 }
 
 macro_rules! impl_point {
   (($($T:tt),+),($($U:tt),+),($($i:tt),+),$dim:expr) => {
     impl<$($T),+> Point for ($($U),+)
     where $($T: Num<$T>),+ {
-      type BBox = (($($T,)+),($($T,)+));
+      type Bounds = (($($T,)+),($($T,)+));
       fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
         let order = match level%Self::dim() {
           $($i => Coord::cmp(&self.$i, &other.$i),)+
@@ -85,7 +125,7 @@ macro_rules! impl_point {
         };
         match order { Some(x) => x, None => Ordering::Less }
       }
-      fn cmp_buf (buf: &[u8], bbox: &Self::BBox, level: usize)
+      fn cmp_buf (buf: &[u8], bbox: &Self::Bounds, level: usize)
       -> Result<(bool,bool),Error> {
         match level % $dim {
           $($i => {
@@ -111,7 +151,7 @@ macro_rules! impl_point {
         Ok(buf)
       }
       fn dim () -> usize { $dim }
-      fn overlaps (&self, bbox: &Self::BBox) -> bool {
+      fn overlaps (&self, bbox: &Self::Bounds) -> bool {
         $(Coord::overlaps(&self.$i, &(bbox.0).$i, &(bbox.1).$i) &&)+ true
       }
       fn pivot_size_at (i: usize) -> usize {
@@ -119,6 +159,21 @@ macro_rules! impl_point {
           $($i => size_of::<$T>(),)+
           _ => panic!("dimension out of bounds")
         }
+      }
+      fn bounds (points: &Vec<Self>) -> Option<Self::Bounds> {
+        if points.is_empty() { return None }
+        let pairs = ($({
+          let optb: Option<($T,$T)> = Coord::bounds(
+            points.iter().map(|p| { &p.$i }).collect()
+          );
+          match optb {
+            None => { return None },
+            Some(b) => b
+          }
+        }),+);
+        let min = ($((pairs.$i).0),+);
+        let max = ($((pairs.$i).1),+);
+        Some((min,max))
       }
     }
   }

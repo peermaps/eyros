@@ -96,7 +96,7 @@ P: Point, V: Value {
     let rem = n - count;
     let mut mask = vec![];
     for mut tree in self.trees.iter_mut() {
-      mask.push(tree.is_empty()?);
+      mask.push(!tree.is_empty()?);
     }
     let p = plan(
       &bits::num_to_bits(n/base),
@@ -163,7 +163,7 @@ P: Point, V: Value {
     }
     Ok(())
   }
-  pub fn query<'a,'b> (&'a mut self, bbox: &'b P::BBox)
+  pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
   -> Result<QueryIterator<'a,'b,S,P,V>,Error> {
     QueryIterator::new(self, bbox)
   }
@@ -177,7 +177,7 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 impl<'a,'b,S,P,V> QueryIterator<'a,'b,S,P,V> where
 S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new<U> (db: &'a mut DB<S,U,P,V>, bbox: &'b P::BBox)
+  pub fn new<U> (db: &'a mut DB<S,U,P,V>, bbox: &'b P::Bounds)
   -> Result<Self,Error>
   where U: (Fn(&str) -> Result<S,Error>) {
     let mut mask: Vec<bool> = vec![];

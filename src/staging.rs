@@ -6,12 +6,12 @@ use bincode::{serialize,deserialize};
 
 pub struct StagingIterator<'a,'b,P,V> where P: Point, V: Value {
   rows: &'a Vec<Row<P,V>>,
-  bbox: &'b P::BBox,
+  bbox: &'b P::Bounds,
   index: usize
 }
 
 impl<'a,'b,P,V> StagingIterator<'a,'b,P,V> where P: Point, V: Value {
-  pub fn new (rows: &'a Vec<Row<P,V>>, bbox: &'b P::BBox) -> Self {
+  pub fn new (rows: &'a Vec<Row<P,V>>, bbox: &'b P::Bounds) -> Self {
     Self { index: 0, bbox, rows }
   }
 }
@@ -97,7 +97,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.rows.extend_from_slice(rows);
     Ok(())
   }
-  pub fn query<'a,'b> (&'a mut self, bbox: &'b P::BBox)
+  pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
   -> StagingIterator<'a,'b,P,V> {
     <(StagingIterator<'a,'b,P,V>)>::new(&self.rows, bbox)
   }

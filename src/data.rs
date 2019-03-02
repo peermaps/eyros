@@ -29,12 +29,15 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.store.write(offset as usize, &data)?;
     Ok(offset as u64)
   }
-  pub fn query (&mut self, offset: u64, bbox: &P::BBox)
+  pub fn query (&mut self, offset: u64, bbox: &P::Bounds)
   -> Result<Vec<(P,V)>,Error> {
-    let rows = Self::parse(&self.read(offset)?)?;
+    let rows = self.list(offset)?;
     Ok(rows.iter().filter(|row| {
       row.0.overlaps(bbox)
     }).map(|row| { *row }).collect())
+  }
+  pub fn list (&mut self, offset: u64) -> Result<Vec<(P,V)>,Error> {
+    Self::parse(&self.read(offset)?)
   }
   pub fn parse (buf: &Vec<u8>) -> Result<Vec<(P,V)>,Error> {
     let size = size_of::<P>() + size_of::<V>();

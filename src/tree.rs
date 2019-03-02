@@ -14,7 +14,7 @@ use read_block::read_block;
 pub struct TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   tree: &'a mut Tree<S,P,V>,
-  bbox: &'b P::BBox,
+  bbox: &'b P::Bounds,
   cursors: Vec<(u64,usize)>,
   blocks: Vec<u64>,
   queue: Vec<(P,V)>,
@@ -23,7 +23,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 impl<'a,'b,S,P,V> TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new (tree: &'a mut Tree<S,P,V>, bbox: &'b P::BBox)
+  pub fn new (tree: &'a mut Tree<S,P,V>, bbox: &'b P::Bounds)
   -> Result<Self,Error> {
     let tree_size = tree.store.len()? as u64;
     Ok(Self {
@@ -234,7 +234,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.flush()?;
     Ok(())
   }
-  pub fn query<'a,'b> (&'a mut self, bbox: &'b P::BBox)
+  pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
   -> Result<TreeIterator<'a,'b,S,P,V>,Error> {
     TreeIterator::new(self, bbox)
   }
@@ -247,12 +247,77 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   fn flush (&mut self) -> Result<(),Error> {
     Ok(())
   }
-  pub fn merge (_trees: &mut Vec<Self>, dst: usize, src: Vec<usize>,
+  pub fn merge (trees: &mut Vec<Self>, dst: usize, src: Vec<usize>,
   rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     eprintln!("MERGE {} {:?} {}", dst, src, rows.len());
-    // TODO
-    //for i in src { trees[i].clear()? }
-    //trees[dst].clear()?;
+    for i in src.iter() {
+      let blocks = trees[*i].unbuild()?;
+      eprintln!("blocks={:?}", blocks);
+    }
+    for i in src.iter() {
+      trees[*i].clear()?
+    }
+    trees[dst].clear()?;
     Ok(())
+  }
+  fn unbuild (&mut self) -> Result<Vec<(P::Bounds,u64)>,Error> {
+    let mut offsets: Vec<u64> = vec![];
+    let mut cursors: Vec<(u64,usize)> = vec![(0,0)];
+    let bf = self.branch_factor;
+    let n = bf*2-3;
+    let tree_size = self.store.len()? as u64;
+    while !cursors.is_empty() {
+      let (c,depth) = cursors.pop().unwrap();
+      let buf = read_block(&mut self.store, c, tree_size, 1024)?;
+      let psize = P::pivot_size_at(depth % P::dim());
+      let p_start = 0;
+      let d_start = p_start + n*psize;
+      let i_start = d_start + (n+bf+7)/8;
+      let b_start = i_start + n*size_of::<u64>();
+      let b_end = b_start+bf*size_of::<u64>();
+      assert_eq!(b_end, buf.len(), "unexpected block length");
+      for i in 0..n {
+        let offset = u64::from_be_bytes([
+          buf[i_start+i*8+0], buf[i_start+i*8+1],
+          buf[i_start+i*8+2], buf[i_start+i*8+3],
+          buf[i_start+i*8+4], buf[i_start+i*8+5],
+          buf[i_start+i*8+6], buf[i_start+i*8+7]
+        ]);
+        let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
+        if offset > 0 && is_data {
+          offsets.push(offset-1);
+        } else if offset > 0 {
+          cursors.push((offset-1,depth+1));
+        }
+      }
+      for i in 0..bf {
+        let offset = u64::from_be_bytes([
+          buf[b_start+i*8+0], buf[b_start+i*8+1],
+          buf[b_start+i*8+2], buf[b_start+i*8+3],
+          buf[b_start+i*8+4], buf[b_start+i*8+5],
+          buf[b_start+i*8+6], buf[b_start+i*8+7]
+        ]);
+        let j = i + n;
+        let is_data = ((buf[d_start+(j/8)]>>(j%8))&1) == 1;
+        if offset > 0 && is_data {
+          offsets.push(offset-1);
+        } else if offset > 0 {
+          cursors.push((offset-1,depth+1));
+        }
+      }
+    }
+    let mut blocks = Vec::with_capacity(offsets.len());
+    let mut dstore = self.data_store.try_borrow_mut()?;
+    for offset in offsets {
+      let rows = dstore.list(offset)?;
+      if rows.is_empty() {
+        panic!["empty data block"];
+      }
+      match P::bounds(&rows.iter().map(|(p,_)| *p).collect()) {
+        None => panic!["invalid data at offset {}", offset],
+        Some(bbox) => blocks.push((bbox,offset))
+      }
+    }
+    Ok(blocks)
   }
 }
