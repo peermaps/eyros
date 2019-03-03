@@ -175,7 +175,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     })
   }
   pub fn clear (&mut self) -> Result<(),Error> {
-    self.store.truncate(0)?;
+    if self.size > 0 {
+      self.size = 0;
+      self.store.truncate(0)?;
+    }
     Ok(())
   }
   pub fn is_empty (&mut self) -> Result<bool,Error> {
@@ -183,15 +186,23 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(r)
   }
   pub fn build (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
+    let dstore = Rc::clone(&self.data_store);
+    self.builder(rows, dstore)
+  }
+  pub fn build_from_blocks (&mut self, blocks: Vec<(P::Bounds,u64)>)
+  -> Result<(),Error> {
+    //self.builder::<P::Range,u64>(rows);
+    Ok(())
+  }
+  pub fn builder<T,U> (&mut self, rows: &Vec<Row<T,U>>,
+  data_store: Rc<RefCell<DataStore<S,T,U>>>) -> Result<(),Error>
+  where T: Point, U: Value {
     let bf = self.branch_factor;
-    if self.size > 0 {
-      self.size = 0;
-      self.store.truncate(0)?;
-    }
+    self.clear()?;
     if rows.len() < bf*2-3 {
       bail!("tree must have at least {} records", bf*2-3);
     }
-    let irows: Vec<(P,V)> = rows.iter()
+    let irows: Vec<(T,U)> = rows.iter()
       .filter(|row| { match row { Row::Insert(_,_) => true, _ => false } })
       .map(|row| { match row {
         Row::Insert(p,v) => (*p,*v),
@@ -199,9 +210,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       } })
       .collect();
     let bucket = (0..rows.len()).collect();
-    let b = Branch::new(0, self.max_data_size,
+    let b = Branch::<S,T,U>::new(0, self.max_data_size,
       Rc::clone(&self.order),
-      Rc::clone(&self.data_store),
+      data_store,
       bucket, &irows
     );
     let mut branches = vec![Node::Branch(b)];
@@ -225,13 +236,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
               b.build(alloc)?
             };
             self.store.write(b.offset as usize, &data)?;
+            self.size = self.size.max(b.offset + (data.len() as u64));
             nbranches.extend(nb);
           }
         }
       }
       branches = nbranches;
     }
-    self.flush()?;
     Ok(())
   }
   pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
@@ -244,20 +255,19 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.size += bytes as u64;
     addr
   }
-  fn flush (&mut self) -> Result<(),Error> {
-    Ok(())
-  }
   pub fn merge (trees: &mut Vec<Self>, dst: usize, src: Vec<usize>,
   rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     eprintln!("MERGE {} {:?} {}", dst, src, rows.len());
+    let mut blocks = vec![];
     for i in src.iter() {
-      let blocks = trees[*i].unbuild()?;
-      eprintln!("blocks={:?}", blocks);
+      blocks.extend(trees[*i].unbuild()?);
     }
+    eprintln!("blocks={:?}", blocks);
     for i in src.iter() {
       trees[*i].clear()?
     }
     trees[dst].clear()?;
+    trees[dst].build_from_blocks(blocks)?;
     Ok(())
   }
   fn unbuild (&mut self) -> Result<Vec<(P::Bounds,u64)>,Error> {

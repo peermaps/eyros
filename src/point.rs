@@ -8,6 +8,7 @@ use std::mem::size_of;
 
 pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
   type Bounds: Copy+Clone+Debug+Serialize+DeserializeOwned;
+  type Range: Copy+Clone+Debug+Serialize+DeserializeOwned;
   fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
   fn cmp_buf (&[u8], &Self::Bounds, usize) -> Result<(bool,bool),Error>;
   fn midpoint_upper (&self, &Self) -> Self where Self: Sized;
@@ -118,6 +119,7 @@ macro_rules! impl_point {
     impl<$($T),+> Point for ($($U),+)
     where $($T: Num<$T>),+ {
       type Bounds = (($($T,)+),($($T,)+));
+      type Range = ($(($T,$T),)+);
       fn cmp_at (&self, other: &Self, level: usize) -> Ordering {
         let order = match level%Self::dim() {
           $($i => Coord::cmp(&self.$i, &other.$i),)+
