@@ -6,6 +6,10 @@ use failure::Error;
 use std::marker::PhantomData;
 use read_block::read_block;
 
+pub trait DataBatch<P,V> where P: Point, V: Value {
+  fn batch (&mut self, &Vec<&(P,V)>) -> Result<u64,Error>;
+}
+
 #[derive(Debug,Clone,Copy)]
 pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
@@ -13,12 +17,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   _marker: PhantomData<(P,V)>
 }
 
-impl<S,P,V> DataStore<S,P,V>
+impl<S,P,V> DataBatch<P,V> for DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (store: S) -> Result<Self,Error> {
-    Ok(Self { store, _marker: PhantomData })
-  }
-  pub fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error> {
+  fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error> {
     let mut data: Vec<u8> = vec![0;4];
     for row in rows.iter() {
       data.extend(serialize(row)?);
@@ -28,6 +29,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let offset = self.store.len()? as u64;
     self.store.write(offset as usize, &data)?;
     Ok(offset as u64)
+  }
+}
+
+impl<S,P,V> DataStore<S,P,V>
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  pub fn open (store: S) -> Result<Self,Error> {
+    Ok(Self { store, _marker: PhantomData })
   }
   pub fn query (&mut self, offset: u64, bbox: &P::Bounds)
   -> Result<Vec<(P,V)>,Error> {

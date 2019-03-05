@@ -8,7 +8,7 @@ use std::mem::size_of;
 use ::{Row,Point,Value};
 
 use branch::{Branch,Node};
-use data::DataStore;
+use data::{DataStore,DataBatch};
 use read_block::read_block;
 
 pub struct TreeIterator<'a,'b,S,P,V>
@@ -189,14 +189,14 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let dstore = Rc::clone(&self.data_store);
     self.builder(rows, dstore)
   }
-  pub fn build_from_blocks (&mut self, blocks: Vec<(P::Bounds,u64)>)
+  pub fn build_from_blocks (&mut self, _blocks: Vec<(P::Bounds,u64)>)
   -> Result<(),Error> {
     //self.builder::<P::Range,u64>(rows);
     Ok(())
   }
-  pub fn builder<T,U> (&mut self, rows: &Vec<Row<T,U>>,
-  data_store: Rc<RefCell<DataStore<S,T,U>>>) -> Result<(),Error>
-  where T: Point, U: Value {
+  pub fn builder<D,T,U> (&mut self, rows: &Vec<Row<T,U>>,
+  data_store: Rc<RefCell<D>>) -> Result<(),Error>
+  where D: DataBatch<T,U>, T: Point, U: Value {
     let bf = self.branch_factor;
     self.clear()?;
     if rows.len() < bf*2-3 {
@@ -210,7 +210,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       } })
       .collect();
     let bucket = (0..rows.len()).collect();
-    let b = Branch::<S,T,U>::new(0, self.max_data_size,
+    let b = Branch::<D,T,U>::new(0, self.max_data_size,
       Rc::clone(&self.order),
       data_store,
       bucket, &irows
