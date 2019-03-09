@@ -8,7 +8,7 @@ use std::mem::size_of;
 use ::{Row,Point,Value};
 
 use branch::{Branch,Node};
-use data::{DataStore,DataBatch};
+use data::{DataStore,DataMerge,DataBatch};
 use read_block::read_block;
 
 pub struct TreeIterator<'a,'b,S,P,V>
@@ -151,6 +151,7 @@ pub struct Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub store: S,
   data_store: Rc<RefCell<DataStore<S,P,V>>>,
+  data_merge: Rc<RefCell<DataMerge<S,P,V>>>,
   branch_factor: usize,
   size: u64,
   max_data_size: usize,
@@ -164,9 +165,12 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   branch_factor: usize, max_data_size: usize,
   order: Rc<Vec<usize>>) -> Result<Self,Error> {
     let size = store.len()? as u64;
+    let data_merge = Rc::new(RefCell::new(
+      DataMerge::new(Rc::clone(&data_store))));
     Ok(Self {
       store,
       data_store,
+      data_merge,
       size,
       order,
       branch_factor,
@@ -189,10 +193,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let dstore = Rc::clone(&self.data_store);
     self.builder(rows, dstore)
   }
-  pub fn build_from_blocks (&mut self, _blocks: Vec<(P::Bounds,u64)>)
+  pub fn build_from_blocks (&mut self, blocks: Vec<(P::Bounds,u64)>)
   -> Result<(),Error> {
-    //self.builder::<P::Range,u64>(rows);
-    Ok(())
+    let rows = blocks.iter().map(|block| {
+      Row::Insert(P::bounds_to_range(block.0),block.1)
+    }).collect();
+    let dstore = Rc::clone(&self.data_merge);
+    self.builder(&rows, dstore)
   }
   pub fn builder<D,T,U> (&mut self, rows: &Vec<Row<T,U>>,
   data_store: Rc<RefCell<D>>) -> Result<(),Error>

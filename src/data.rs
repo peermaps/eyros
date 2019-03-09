@@ -5,9 +5,39 @@ use random_access_storage::RandomAccess;
 use failure::Error;
 use std::marker::PhantomData;
 use read_block::read_block;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 pub trait DataBatch<P,V> where P: Point, V: Value {
   fn batch (&mut self, &Vec<&(P,V)>) -> Result<u64,Error>;
+}
+
+pub struct DataMerge<S,P,V>
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  data_store: Rc<RefCell<DataStore<S,P,V>>>
+}
+
+impl<S,P,V> DataMerge<S,P,V>
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  pub fn new (data_store: Rc<RefCell<DataStore<S,P,V>>>) -> Self {
+    Self { data_store }
+  }
+}
+
+impl<S,P,V> DataBatch<P::Range,u64> for DataMerge<S,P,V>
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  fn batch (&mut self, rows: &Vec<&(P::Range,u64)>) -> Result<u64,Error> {
+    if rows.len() == 1 { // use existing address
+      Ok(rows[0].1)
+    } else { // combine addresses into a new block
+      let mut dstore = self.data_store.try_borrow_mut()?;
+      let mut combined = vec![];
+      for row in rows {
+        combined.extend(dstore.list(row.1)?);
+      }
+      dstore.batch(&combined.iter().map(|c| c).collect())
+    }
+  }
 }
 
 #[derive(Debug,Clone,Copy)]

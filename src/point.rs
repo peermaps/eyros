@@ -8,7 +8,7 @@ use std::mem::size_of;
 
 pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
   type Bounds: Copy+Clone+Debug+Serialize+DeserializeOwned;
-  type Range: Copy+Clone+Debug+Serialize+DeserializeOwned;
+  type Range: Point+Copy+Clone+Debug+Serialize+DeserializeOwned;
   fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
   fn cmp_buf (&[u8], &Self::Bounds, usize) -> Result<(bool,bool),Error>;
   fn midpoint_upper (&self, &Self) -> Self where Self: Sized;
@@ -17,6 +17,7 @@ pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
   fn overlaps (&self, &Self::Bounds) -> bool;
   fn pivot_size_at (usize) -> usize;
   fn bounds (&Vec<Self>) -> Option<Self::Bounds>;
+  fn bounds_to_range (Self::Bounds) -> Self::Range;
 }
 
 pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
@@ -176,6 +177,9 @@ macro_rules! impl_point {
         let min = ($((pairs.$i).0),+);
         let max = ($((pairs.$i).1),+);
         Some((min,max))
+      }
+      fn bounds_to_range (bounds: Self::Bounds) -> Self::Range {
+        ($(((bounds.0).$i,(bounds.1).$i)),+)
       }
     }
   }
