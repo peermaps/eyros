@@ -258,23 +258,41 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   fn alloc (&mut self, bytes: usize) -> u64 {
     let addr = self.size;
-    //println!("ALLOC {}: addr={}",bytes, addr);
     self.size += bytes as u64;
     addr
   }
   pub fn merge (trees: &mut Vec<Self>, dst: usize, src: Vec<usize>,
   rows: &Vec<Row<P,V>>) -> Result<(),Error> {
-    eprintln!("MERGE {} {:?} {}", dst, src, rows.len());
     let mut blocks = vec![];
     for i in src.iter() {
       blocks.extend(trees[*i].unbuild()?);
     }
-    eprintln!("blocks={:?}", blocks);
-    for i in src.iter() {
-      trees[*i].clear()?
+    {
+      let m = trees[dst].max_data_size;
+      let mut dstore = trees[dst].data_store.try_borrow_mut()?;
+      for i in 0..(rows.len()+m-1)/m {
+        let srows = &rows[i*m..((i+1)*m).min(rows.len())];
+        let mut inserts = vec![];
+        for row in srows {
+          match row {
+            Row::Insert(p,v) => { inserts.push((*p,*v)) },
+            _ => {}
+          }
+        }
+        let offset = dstore.batch(
+          &inserts.iter().map(|pv| pv).collect()
+        )?;
+        match P::bounds(&inserts.iter().map(|(p,_)| *p).collect()) {
+          None => panic!["invalid data at offset {}", offset],
+          Some(bbox) => blocks.push((bbox,offset))
+        }
+      }
     }
     trees[dst].clear()?;
     trees[dst].build_from_blocks(blocks)?;
+    for i in src.iter() {
+      trees[*i].clear()?
+    }
     Ok(())
   }
   fn unbuild (&mut self) -> Result<Vec<(P::Bounds,u64)>,Error> {
