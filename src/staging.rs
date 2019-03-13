@@ -75,6 +75,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   pub fn clear (&mut self) -> Result<(),Error> {
     self.store.truncate(0)?;
+    self.rows.clear();
     Ok(())
   }
   pub fn len (&mut self) -> Result<usize,Error> {
