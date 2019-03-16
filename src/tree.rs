@@ -153,7 +153,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   data_store: Rc<RefCell<DataStore<S,P,V>>>,
   data_merge: Rc<RefCell<DataMerge<S,P,V>>>,
   branch_factor: usize,
-  pub size: u64,
+  pub bytes: u64,
   max_data_size: usize,
   order: Rc<Vec<usize>>,
   _marker: PhantomData<(P,V)>
@@ -164,14 +164,14 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn open (mut store: S, data_store: Rc<RefCell<DataStore<S,P,V>>>,
   branch_factor: usize, max_data_size: usize,
   order: Rc<Vec<usize>>) -> Result<Self,Error> {
-    let size = store.len()? as u64;
+    let bytes = store.len()? as u64;
     let data_merge = Rc::new(RefCell::new(
       DataMerge::new(Rc::clone(&data_store))));
     Ok(Self {
       store,
       data_store,
       data_merge,
-      size,
+      bytes,
       order,
       branch_factor,
       max_data_size,
@@ -179,8 +179,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     })
   }
   pub fn clear (&mut self) -> Result<(),Error> {
-    if self.size > 0 {
-      self.size = 0;
+    if self.bytes > 0 {
+      self.bytes = 0;
       self.store.truncate(0)?;
     }
     Ok(())
@@ -243,7 +243,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
               b.build(alloc)?
             };
             self.store.write(b.offset as usize, &data)?;
-            self.size = self.size.max(b.offset + (data.len() as u64));
+            self.bytes = self.bytes.max(b.offset + (data.len() as u64));
             nbranches.extend(nb);
           }
         }
@@ -257,8 +257,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     TreeIterator::new(self, bbox)
   }
   fn alloc (&mut self, bytes: usize) -> u64 {
-    let addr = self.size;
-    self.size += bytes as u64;
+    let addr = self.bytes;
+    self.bytes += bytes as u64;
     addr
   }
   pub fn merge (trees: &mut Vec<Self>, dst: usize, src: Vec<usize>,

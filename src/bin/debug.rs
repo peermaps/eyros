@@ -30,9 +30,16 @@ fn main() -> Result<(),Error> {
     p.push(name);
     Ok(RandomAccessDisk::open(p)?)
   })?;
-  if args[2] == "trees" {
+  if args[2] == "info" {
+    let mut dstore = db.data_store.try_borrow_mut()?;
+    println!["# data\n{} bytes", dstore.bytes()?];
+    println!["# trees"];
     for (i,tree) in db.trees.iter().enumerate() {
-      println!["tree #{} size={}", i, tree.size];
+      if tree.bytes == 0 {
+        println!["[{}] empty", i];
+      } else {
+        println!["[{}] {} bytes", i, tree.bytes];
+      }
     }
   } else if args[2] == "branch-data" {
     let i = args[3].parse::<usize>()?;

@@ -89,7 +89,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let len = self.store.len()? as u64;
     read_block(&mut self.store, offset, len, 1024)
   }
-  pub fn len (&mut self) -> Result<u64,Error> {
+  pub fn bytes (&mut self) -> Result<u64,Error> {
     Ok(self.store.len()? as u64)
   }
 }
