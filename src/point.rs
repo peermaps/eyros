@@ -18,6 +18,7 @@ pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
   fn pivot_size_at (usize) -> usize;
   fn bounds (&Vec<Self>) -> Option<Self::Bounds>;
   fn bounds_to_range (Self::Bounds) -> Self::Range;
+  fn format_at (&[u8], usize) -> Result<String,Error>;
 }
 
 pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
@@ -180,6 +181,15 @@ macro_rules! impl_point {
       }
       fn bounds_to_range (bounds: Self::Bounds) -> Self::Range {
         ($(((bounds.0).$i,(bounds.1).$i)),+)
+      }
+      fn format_at (buf: &[u8], level: usize) -> Result<String,Error> {
+        Ok(match level % Self::dim() {
+          $($i => {
+            let p: $T = deserialize(buf)?;
+            format!["{:?}", p]
+          }),+
+          _ => panic!("match case beyond dimension")
+        })
       }
     }
   }

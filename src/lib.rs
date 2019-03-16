@@ -53,10 +53,10 @@ U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   open_store: U,
   branch_factor: usize,
-  trees: Vec<Tree<S,P,V>>,
+  pub trees: Vec<Tree<S,P,V>>,
   order: Rc<Vec<usize>>,
-  staging: Staging<S,P,V>,
-  data_store: Rc<RefCell<DataStore<S,P,V>>>,
+  pub staging: Staging<S,P,V>,
+  pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
   meta: Meta<S>,
   _marker: PhantomData<(P,V)>,
 }

@@ -153,7 +153,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   data_store: Rc<RefCell<DataStore<S,P,V>>>,
   data_merge: Rc<RefCell<DataMerge<S,P,V>>>,
   branch_factor: usize,
-  size: u64,
+  pub size: u64,
   max_data_size: usize,
   order: Rc<Vec<usize>>,
   _marker: PhantomData<(P,V)>
