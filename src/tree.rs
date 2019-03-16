@@ -288,7 +288,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         }
       }
     }
-    trees[dst].clear()?;
     trees[dst].build_from_blocks(blocks)?;
     for i in src.iter() {
       trees[*i].clear()?
