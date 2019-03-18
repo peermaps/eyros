@@ -111,7 +111,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
           pivot = self.pivots[order[j+bf-2]];
         }
       }
-      self.buckets[j].push(*i);
+      self.buckets[j].push(self.bucket[*i]);
     }
     let mut nodes = Vec::with_capacity(
       self.buckets.len() + self.intersecting.len());
