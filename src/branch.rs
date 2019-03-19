@@ -63,7 +63,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         if matched[*j] { continue }
         if row.0.cmp_at(&pivot, level as usize) == Ordering::Equal {
           matched[*j] = true;
-          intersecting[*i].push(*j);
+          intersecting[*i].push(bucket[*j]);
         }
       }
     }
