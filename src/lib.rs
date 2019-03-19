@@ -57,6 +57,7 @@ P: Point, V: Value {
   order: Rc<Vec<usize>>,
   pub staging: Staging<S,P,V>,
   pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
+  max_data_size: usize,
   meta: Meta<S>,
   _marker: PhantomData<(P,V)>,
 }
@@ -78,6 +79,7 @@ P: Point, V: Value {
       order: Rc::new(pivot_order(bf)),
       meta: meta,
       trees: vec![],
+      max_data_size: 100,
       _marker: PhantomData
     };
     for i in 0..db.meta.mask.len() {
@@ -159,7 +161,7 @@ P: Point, V: Value {
     for i in self.trees.len()..index+1 {
       let store = (self.open_store)(&format!("tree{}",i))?;
       self.trees.push(Tree::open(store, Rc::clone(&self.data_store),
-        self.branch_factor, 100, Rc::clone(&self.order))?);
+        self.branch_factor, self.max_data_size, Rc::clone(&self.order))?);
     }
     Ok(())
   }
