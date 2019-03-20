@@ -33,6 +33,8 @@ fn main() -> Result<(),Error> {
   if args[2] == "info" {
     let mut dstore = db.data_store.try_borrow_mut()?;
     println!["# data\n{} bytes", dstore.bytes()?];
+    println!["# staging\n{} bytes\n{} records",
+      db.staging.bytes()?, db.staging.len()?];
     println!["# trees"];
     for (i,tree) in db.trees.iter().enumerate() {
       if tree.bytes == 0 {
@@ -41,7 +43,7 @@ fn main() -> Result<(),Error> {
         println!["[{}] {} bytes", i, tree.bytes];
       }
     }
-  } else if args[2] == "branch-data" {
+  } else if args[2] == "branch" {
     let i = args[3].parse::<usize>()?;
     let j = args[4].parse::<u64>()?;
     let depth = args[5].parse::<usize>()?;
