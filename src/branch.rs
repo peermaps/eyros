@@ -74,7 +74,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       order,
       data_batch,
       bucket,
-      buckets: Vec::with_capacity(bf),
+      buckets: vec![vec![];bf],
       rows,
       pivots,
       sorted,
@@ -98,15 +98,14 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     let order = &self.order;
     let n = order.len();
     let bf = (n+3)/2;
-    self.buckets = vec![vec![];bf];
     let mut j = 0;
     let mut pivot = self.pivots[order[bf-2]];
     for i in self.sorted.iter() {
       if self.matched[*i] { continue }
       let row = self.rows[self.bucket[*i]];
-      while j < bf-2
+      while j < bf-1
       && row.0.cmp_at(&pivot, self.level as usize) != Ordering::Less {
-        j = (j+1).min(bf-2);
+        j = (j+1).min(bf-1);
         if j < bf-2 {
           pivot = self.pivots[order[j+bf-2]];
         }
@@ -124,7 +123,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         if bucket.is_empty() {
           nodes.push(Node::Empty);
           bitfield.push(false);
-        } else if bucket.len() < self.max_data_size {
+        } else if bucket.len() <= self.max_data_size {
           let mut dstore = self.data_batch.try_borrow_mut()?;
           nodes.push(Node::Data(
             dstore.batch(&bucket.iter()
