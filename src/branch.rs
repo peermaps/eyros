@@ -54,19 +54,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       let b = &rows[bucket[sorted[m+1]]];
       a.0.midpoint_upper(&b.0)
     }).collect();
-    let mut intersecting = vec![vec![];n];
-    let mut matched = vec![false;bucket.len()];
-    for i in order.iter() {
-      let pivot = pivots[*i];
-      for j in sorted.iter() {
-        let row = rows[bucket[*j]];
-        if matched[*j] { continue }
-        if row.0.cmp_at(&pivot, level as usize) == Ordering::Equal {
-          matched[*j] = true;
-          intersecting[*i].push(bucket[*j]);
-        }
-      }
-    }
+    let blen = bucket.len();
     Self {
       offset: 0,
       max_data_size,
@@ -78,8 +66,8 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       rows,
       pivots,
       sorted,
-      intersecting,
-      matched
+      intersecting: vec![vec![];n],
+      matched: vec![false;blen]
     }
   }
   pub fn alloc (&mut self, alloc: &mut FnMut (usize) -> u64) -> () {
@@ -98,22 +86,33 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     let order = &self.order;
     let n = order.len();
     let bf = (n+3)/2;
+    for i in self.order.iter() {
+      let pivot = self.pivots[*i];
+      for j in self.sorted.iter() {
+        let row = self.rows[self.bucket[*j]];
+        if self.matched[*j] { continue }
+        if row.0.cmp_at(&pivot, self.level as usize) == Ordering::Equal {
+          self.matched[*j] = true;
+          self.intersecting[*i].push(self.bucket[*j]);
+        }
+      }
+    }
     let mut j = 0;
-    let mut pivot = self.pivots[order[bf-2]];
     for i in self.sorted.iter() {
       if self.matched[*i] { continue }
       let row = self.rows[self.bucket[*i]];
-      while j < bf-1
-      && row.0.cmp_at(&pivot, self.level as usize) != Ordering::Less {
-        j = (j+1).min(bf-1);
-        if j < bf-2 {
-          pivot = self.pivots[order[j+bf-2]];
+      loop {
+        if j == bf-1 { break }
+        let pivot = self.pivots[j*2];
+        match row.0.cmp_at(&pivot, self.level as usize) {
+          Ordering::Less => { break },
+          Ordering::Greater => j += 1,
+          Ordering::Equal => panic!["bucket interval intersects pivot"]
         }
       }
       self.buckets[j].push(self.bucket[*i]);
     }
-    let mut nodes = Vec::with_capacity(
-      self.buckets.len() + self.intersecting.len());
+    let mut nodes = Vec::with_capacity(bf + n);
     let mut bitfield: Vec<bool> = vec![];
 
     assert_eq!(self.intersecting.len(), n, "unexpected intersecting length");
