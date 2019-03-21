@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use std::mem::size_of;
 use std::rc::Rc;
 use std::cell::RefCell;
-use failure::Error;
+use failure::{Error,bail};
 
 #[derive(Clone)]
 pub enum Node<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
@@ -41,21 +41,45 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   pub fn new (level: usize, max_data_size: usize,
   order: Rc<Vec<usize>>, data_batch: Rc<RefCell<D>>,
   bucket: Vec<usize>, rows: &'a Vec<(P,V)>)
-  -> Self {
+  -> Result<Self,Error> {
     let n = order.len();
     let bf = (n+3)/2;
+    if bucket.len() < n+1 {
+      bail!["bucket must have at least {} records, found {}",
+        n+1, bucket.len()];
+    }
     let mut sorted: Vec<usize> = (0..bucket.len()).collect();
     sorted.sort_unstable_by(|a,b| {
-      rows[bucket[*a]].0.cmp_at(&rows[bucket[*b]].0, level as usize)
+      rows[bucket[*a]].0.cmp_at(&rows[bucket[*b]].0, level)
     });
-    let pivots: Vec<P> = (0..n).map(|k| {
-      let m = ((k+2)*sorted.len()/(n+1)).min(sorted.len()-2);
+    let mut pivots: Vec<P> = (0..n).map(|k| {
+      let m = k;
       let a = &rows[bucket[sorted[m+0]]];
       let b = &rows[bucket[sorted[m+1]]];
       a.0.midpoint_upper(&b.0)
     }).collect();
+    // sometimes the sorted intervals overlap.
+    // sort again to make sure the pivots are always in ascending order
+    pivots.sort_unstable_by(|a,b| {
+      a.cmp_at(b, level)
+    });
+    for i in 0..pivots.len()-1 {
+      match pivots[i].cmp_at(&pivots[i+1], level) {
+        Ordering::Less => {},
+        Ordering::Greater => bail![
+          "pivots must monotonically increase. pivot[{}] > pivot[{}] ({} > {})",
+          i, i+1,
+          P::format_at(&pivots[i].serialize_at(level)?,level)?,
+          P::format_at(&pivots[i+1].serialize_at(level)?,level)?
+        ],
+        Ordering::Equal => bail![
+          "pivots should never be equal: pivot[{}] == pivot[{}] == {}",
+          i, i+1, P::format_at(&pivots[i+1].serialize_at(level)?,level)?
+        ]
+      }
+    }
     let blen = bucket.len();
-    Self {
+    Ok(Self {
       offset: 0,
       max_data_size,
       level,
@@ -68,7 +92,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       sorted,
       intersecting: vec![vec![];n],
       matched: vec![false;blen]
-    }
+    })
   }
   pub fn alloc (&mut self, alloc: &mut FnMut (usize) -> u64) -> () {
     self.offset = alloc(self.bytes());
@@ -91,7 +115,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       for j in self.sorted.iter() {
         let row = self.rows[self.bucket[*j]];
         if self.matched[*j] { continue }
-        if row.0.cmp_at(&pivot, self.level as usize) == Ordering::Equal {
+        if row.0.cmp_at(&pivot, self.level) == Ordering::Equal {
           self.matched[*j] = true;
           self.intersecting[*i].push(self.bucket[*j]);
         }
@@ -104,7 +128,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       loop {
         if j == bf-1 { break }
         let pivot = self.pivots[j*2];
-        match row.0.cmp_at(&pivot, self.level as usize) {
+        match row.0.cmp_at(&pivot, self.level) {
           Ordering::Less => { break },
           Ordering::Greater => j += 1,
           Ordering::Equal => panic!["bucket interval intersects pivot"]
@@ -135,7 +159,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
             Rc::clone(&self.order),
             Rc::clone(&self.data_batch),
             bucket.clone(), self.rows
-          );
+          )?;
           b.alloc(alloc);
           nodes.push(Node::Branch(b));
           bitfield.push(false);
