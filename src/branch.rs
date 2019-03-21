@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use std::mem::size_of;
 use std::rc::Rc;
 use std::cell::RefCell;
-use failure::{Error,bail};
+use failure::{Error,bail,format_err};
 
 #[derive(Clone)]
 pub enum Node<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
@@ -139,8 +139,8 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     let mut nodes = Vec::with_capacity(bf + n);
     let mut bitfield: Vec<bool> = vec![];
 
-    assert_eq!(self.intersecting.len(), n, "unexpected intersecting length");
-    assert_eq!(self.buckets.len(), bf, "unexpected bucket length");
+    ensure_eq!(self.intersecting.len(), n, "unexpected intersecting length");
+    ensure_eq!(self.buckets.len(), bf, "unexpected bucket length");
     for ref buckets in [&self.intersecting,&self.buckets].iter() {
       for bucket in buckets.iter() {
         if bucket.is_empty() {
@@ -166,8 +166,8 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         }
       }
     }
-    assert_eq!(nodes.len(), n+bf, "incorrect number of nodes");
-    assert_eq!(self.pivots.len(), n, "incorrect number of pivots");
+    ensure_eq!(nodes.len(), n+bf, "incorrect number of nodes");
+    ensure_eq!(self.pivots.len(), n, "incorrect number of pivots");
     let len = self.bytes();
     let mut data: Vec<u8> = Vec::with_capacity(len);
     // length
@@ -192,7 +192,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         Node::Empty => 0u64
       }).to_be_bytes());
     }
-    assert_eq!(data.len(), len, "incorrect data length");
+    ensure_eq!(data.len(), len, "incorrect data length");
     Ok((data,nodes))
   }
 }

@@ -1,5 +1,5 @@
 use random_access_storage::RandomAccess;
-use failure::Error;
+use failure::{Error,format_err};
 use std::marker::PhantomData;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -81,7 +81,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let i_start = d_start + (n+bf+7)/8;
       let b_start = i_start + n*size_of::<u64>();
       let b_end = b_start+bf*size_of::<u64>();
-      assert_eq!(b_end, buf.len(), "unexpected block length");
+      ensure_eq_some!(b_end, buf.len(), "unexpected block length");
 
       let mut bcursors = vec![0];
       let mut bitfield: Vec<bool> = vec![false;bf]; // which buckets
@@ -291,7 +291,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
           Some(bbox) => blocks.push((bbox,offset))
         }
       }
-      assert_eq!(srow_len, rows.len(), "divided rows incorrectly");
+      ensure_eq!(srow_len, rows.len(), "divided rows incorrectly");
     }
     trees[dst].build_from_blocks(blocks)?;
     for i in src.iter() {
@@ -314,7 +314,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let i_start = d_start + (n+bf+7)/8;
       let b_start = i_start + n*size_of::<u64>();
       let b_end = b_start+bf*size_of::<u64>();
-      assert_eq!(b_end, buf.len(), "unexpected block length");
+      ensure_eq!(b_end, buf.len(), "unexpected block length");
       for i in 0..n {
         let offset = u64::from_be_bytes([
           buf[i_start+i*8+0], buf[i_start+i*8+1],

@@ -5,6 +5,7 @@ extern crate failure;
 extern crate bincode;
 extern crate serde;
 
+#[macro_use] mod ensure;
 mod meta;
 mod point;
 mod tree;
