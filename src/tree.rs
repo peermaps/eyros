@@ -1,5 +1,5 @@
 use random_access_storage::RandomAccess;
-use failure::{Error,bail};
+use failure::Error;
 use std::marker::PhantomData;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -204,11 +204,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn builder<D,T,U> (&mut self, rows: &Vec<Row<T,U>>,
   data_store: Rc<RefCell<D>>) -> Result<(),Error>
   where D: DataBatch<T,U>, T: Point, U: Value {
-    let bf = self.branch_factor;
     self.clear()?;
-    if rows.len() < bf*2-3 {
-      bail!("tree must have at least {} records", bf*2-3);
-    }
     let irows: Vec<(T,U)> = rows.iter()
       .filter(|row| { match row { Row::Insert(_,_) => true, _ => false } })
       .map(|row| { match row {
@@ -221,7 +217,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       Rc::clone(&self.order),
       data_store,
       bucket, &irows
-    );
+    )?;
     let mut branches = vec![Node::Branch(b)];
     match branches[0] {
       Node::Branch(ref mut b) => {
@@ -230,8 +226,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       },
       _ => panic!("unexpected initial node type")
     };
-    for _level in 0.. {
-      if branches.is_empty() { break }
+    while !branches.is_empty() {
       let mut nbranches = vec![];
       for mut branch in branches {
         match branch {
@@ -268,10 +263,19 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       blocks.extend(trees[*i].unbuild()?);
     }
     {
-      let m = trees[dst].max_data_size;
       let mut dstore = trees[dst].data_store.try_borrow_mut()?;
+      let mut inserts = vec![];
+      for row in rows {
+        match row {
+          Row::Insert(p,v) => { inserts.push((*p,*v)) },
+          _ => {}
+        }
+      }
+      let m = trees[dst].max_data_size;
+      let mut srow_len = 0;
       for i in 0..(rows.len()+m-1)/m {
         let srows = &rows[i*m..((i+1)*m).min(rows.len())];
+        srow_len += srows.len();
         let mut inserts = vec![];
         for row in srows {
           match row {
@@ -287,6 +291,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
           Some(bbox) => blocks.push((bbox,offset))
         }
       }
+      assert_eq!(srow_len, rows.len(), "divided rows incorrectly");
     }
     trees[dst].build_from_blocks(blocks)?;
     for i in src.iter() {

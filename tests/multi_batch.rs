@@ -8,8 +8,7 @@ use eyros::{DB,Row};
 use failure::Error;
 use random_access_disk::RandomAccessDisk;
 use random::{Source,default as rand};
-//use tempfile::Builder as Tmpfile;
-use std::path::PathBuf;
+use tempfile::Builder as Tmpfile;
 
 use std::cmp::Ordering;
 
@@ -18,12 +17,10 @@ type V = u32;
 
 #[test]
 fn multi_batch() -> Result<(),Error> {
-  //let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let dir = PathBuf::from("/tmp/eyros-db");
+  let dir = Tmpfile::new().prefix("eyros").tempdir()?;
   let mut db: DB<_,_,P,V> = DB::open(
     |name: &str| -> Result<RandomAccessDisk,Error> {
-      //let p = dir.path().join(name);
-      let p = dir.join(name);
+      let p = dir.path().join(name);
       Ok(RandomAccessDisk::open(p)?)
     }
   )?;
@@ -53,7 +50,7 @@ fn multi_batch() -> Result<(),Error> {
     for result in db.query(&bbox)? {
       results.push(result?);
     }
-    assert_eq!(results.len(), size, "incorrect length");
+    assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(P,V)>
     = inserts.iter().map(|r| {
       match r {
@@ -88,6 +85,8 @@ fn multi_batch() -> Result<(),Error> {
       .collect();
     results.sort_unstable_by(cmp);
     expected.sort_unstable_by(cmp);
+    assert_eq!(results.len(), expected.len(),
+      "incorrect length for partial region");
     assert_eq!(results, expected, "incorrect results for partial region");
   }
   Ok(())

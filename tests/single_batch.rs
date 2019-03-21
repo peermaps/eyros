@@ -22,7 +22,7 @@ fn single_batch() -> Result<(),Error> {
     }
   )?;
   let mut r = rand().seed([13,12]);
-  let size = 800;
+  let size = 4000;
   let inserts = (0..size).map(|_| {
     let xmin: f32 = r.read::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + r.read::<f32>().powf(64.0)*(1.0-xmin);
@@ -41,7 +41,7 @@ fn single_batch() -> Result<(),Error> {
     for result in db.query(&bbox)? {
       results.push(result?);
     }
-    assert_eq!(results.len(), size, "incorrect length");
+    assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
     = inserts.iter().map(|r| {
       match r {
@@ -76,6 +76,8 @@ fn single_batch() -> Result<(),Error> {
       .collect();
     results.sort_unstable_by(cmp);
     expected.sort_unstable_by(cmp);
+    assert_eq!(results.len(), expected.len(),
+      "incorrect length for partial region");
     assert_eq!(results, expected, "incorrect results for partial region");
   }
   Ok(())

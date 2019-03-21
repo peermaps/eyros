@@ -24,10 +24,9 @@ use order::pivot_order;
 use data::DataStore;
 
 use random_access_storage::RandomAccess;
-use failure::Error;
+use failure::{Error,bail};
 use serde::{Serialize,de::DeserializeOwned};
 use meta::Meta;
-use std::marker::PhantomData;
 use std::fmt::Debug;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -58,8 +57,7 @@ P: Point, V: Value {
   pub staging: Staging<S,P,V>,
   pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
   max_data_size: usize,
-  meta: Meta<S>,
-  _marker: PhantomData<(P,V)>,
+  meta: Meta<S>
 }
 
 impl<S,U,P,V> DB<S,U,P,V> where
@@ -71,6 +69,11 @@ P: Point, V: Value {
     let staging = Staging::open(open_store("staging")?)?;
     let data_store = DataStore::open(open_store("data")?)?;
     let bf = 9;
+    let n = bf*2-3;
+    let max_data_size = 16;
+    if max_data_size <= n {
+      bail!["max_data_size must be greater than {} for branch_factor={}", n, bf]
+    }
     let mut db = Self {
       open_store,
       branch_factor: bf,
@@ -79,8 +82,7 @@ P: Point, V: Value {
       order: Rc::new(pivot_order(bf)),
       meta: meta,
       trees: vec![],
-      max_data_size: 100,
-      _marker: PhantomData
+      max_data_size
     };
     for i in 0..db.meta.mask.len() {
       db.create_tree(i)?;

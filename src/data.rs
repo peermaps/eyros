@@ -30,6 +30,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     if rows.len() == 1 { // use existing address
       Ok(rows[0].1)
     } else { // combine addresses into a new block
+      // TODO: this function should return a Vec<u64>
+      // of blocks with at most max_data_size records
       let mut dstore = self.data_store.try_borrow_mut()?;
       let mut combined = vec![];
       for row in rows {
