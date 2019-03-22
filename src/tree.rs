@@ -95,17 +95,20 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         )];
         let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
         let i_offset = i_start + i*8;
-        if cmp.0 && cmp.1 && is_data { // intersection
+        if cmp.0 && cmp.1 { // intersection
           let offset = u64::from_be_bytes([
             buf[i_offset+0], buf[i_offset+1],
             buf[i_offset+2], buf[i_offset+3],
             buf[i_offset+4], buf[i_offset+5],
             buf[i_offset+6], buf[i_offset+7],
           ]);
-          if offset > 0 {
+          if is_data && offset > 0 {
             self.blocks.push(offset-1);
+          } else if offset > 0 {
+            self.cursors.push((offset-1,depth+1));
           }
         }
+
         if cmp.0 && c*2+1 < n { // left internal
           bcursors.push(c*2+1);
         } else if cmp.0 { // left branch

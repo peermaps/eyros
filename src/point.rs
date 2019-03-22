@@ -133,10 +133,10 @@ macro_rules! impl_point {
       -> Result<(bool,bool),Error> {
         match level % $dim {
           $($i => {
-            let point: $T = deserialize(&buf)?;
+            let point: $T = deserialize(buf)?;
             Ok((
               (bbox.0).$i <= point,
-             (bbox.1).$i >= point
+              point <= (bbox.1).$i
             ))
           },)+
           _ => panic!("level out of bounds")
