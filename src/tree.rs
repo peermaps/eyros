@@ -95,20 +95,19 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         )];
         let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
         let i_offset = i_start + i*8;
-        if cmp.0 && cmp.1 { // intersection
-          let offset = u64::from_be_bytes([
-            buf[i_offset+0], buf[i_offset+1],
-            buf[i_offset+2], buf[i_offset+3],
-            buf[i_offset+4], buf[i_offset+5],
-            buf[i_offset+6], buf[i_offset+7],
-          ]);
-          if is_data && offset > 0 {
-            self.blocks.push(offset-1);
-          } else if offset > 0 {
-            self.cursors.push((offset-1,depth+1));
-          }
+        // intersection:
+        let offset = u64::from_be_bytes([
+          buf[i_offset+0], buf[i_offset+1],
+          buf[i_offset+2], buf[i_offset+3],
+          buf[i_offset+4], buf[i_offset+5],
+          buf[i_offset+6], buf[i_offset+7],
+        ]);
+        if is_data && offset > 0 {
+          self.blocks.push(offset-1);
+        } else if offset > 0 {
+          self.cursors.push((offset-1,depth+1));
         }
-
+        // internal branches:
         if cmp.0 && c*2+1 < n { // left internal
           bcursors.push(c*2+1);
         } else if cmp.0 { // left branch
@@ -194,24 +193,30 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   pub fn build (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     let dstore = Rc::clone(&self.data_store);
-    self.builder(rows, dstore)
+    self.builder(&rows.iter().map(|row| { (row,1u64) }).collect(), dstore)
   }
-  pub fn build_from_blocks (&mut self, blocks: Vec<(P::Bounds,u64)>)
+  pub fn build_from_blocks (&mut self, blocks: Vec<(P::Bounds,u64,u64)>)
   -> Result<(),Error> {
-    let rows = blocks.iter().map(|block| {
-      Row::Insert(P::bounds_to_range(block.0),block.1)
+    let inserts: Vec<Row<P::Range,u64>> = blocks.iter()
+    .map(|(bbox,offset,_)| {
+      Row::Insert(P::bounds_to_range(*bbox),*offset)
+    }).collect();
+    let rows = blocks.iter().enumerate().map(|(i,(_,_,len))| {
+      (&inserts[i],*len)
     }).collect();
     let dstore = Rc::clone(&self.data_merge);
     self.builder(&rows, dstore)
   }
-  pub fn builder<D,T,U> (&mut self, rows: &Vec<Row<T,U>>,
+  pub fn builder<D,T,U> (&mut self, rows: &Vec<(&Row<T,U>,u64)>,
   data_store: Rc<RefCell<D>>) -> Result<(),Error>
   where D: DataBatch<T,U>, T: Point, U: Value {
     self.clear()?;
-    let irows: Vec<(T,U)> = rows.iter()
-      .filter(|row| { match row { Row::Insert(_,_) => true, _ => false } })
-      .map(|row| { match row {
-        Row::Insert(p,v) => (*p,*v),
+    let irows: Vec<((T,U),u64)> = rows.iter()
+      .filter(|(row,_)| {
+        match row { Row::Insert(_,_) => true, _ => false }
+      })
+      .map(|(row,len)| { match row {
+        Row::Insert(p,v) => ((*p,*v),*len),
         _ => panic!("unexpected")
       } })
       .collect();
@@ -291,7 +296,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         )?;
         match P::bounds(&inserts.iter().map(|(p,_)| *p).collect()) {
           None => panic!["invalid data at offset {}", offset],
-          Some(bbox) => blocks.push((bbox,offset))
+          Some(bbox) => blocks.push((bbox,offset,inserts.len() as u64))
         }
       }
       ensure_eq!(srow_len, rows.len(), "divided rows incorrectly");
@@ -302,7 +307,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     Ok(())
   }
-  fn unbuild (&mut self) -> Result<Vec<(P::Bounds,u64)>,Error> {
+  fn unbuild (&mut self) -> Result<Vec<(P::Bounds,u64,u64)>,Error> {
     let mut offsets: Vec<u64> = vec![];
     let mut cursors: Vec<(u64,usize)> = vec![(0,0)];
     let bf = self.branch_factor;
@@ -357,7 +362,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       match P::bounds(&rows.iter().map(|(p,_)| *p).collect()) {
         None => panic!["invalid data at offset {}", offset],
-        Some(bbox) => blocks.push((bbox,offset))
+        Some(bbox) => blocks.push((bbox,offset,rows.len() as u64))
       }
     }
     Ok(blocks)

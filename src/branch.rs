@@ -18,7 +18,7 @@ pub enum Node<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
 pub struct Data<'a,P,V> where P: Point, V: Value {
   pub offset: u64,
   bucket: Vec<usize>,
-  rows: &'a Vec<(P,V)>
+  rows: &'a Vec<((P,V),u64)>
 }
 
 #[derive(Clone)]
@@ -30,7 +30,7 @@ pub struct Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   data_batch: Rc<RefCell<D>>,
   bucket: Vec<usize>,
   buckets: Vec<Vec<usize>>,
-  rows: &'a Vec<(P,V)>,
+  rows: &'a Vec<((P,V),u64)>,
   pivots: Vec<P>,
   sorted: Vec<usize>,
   intersecting: Vec<Vec<usize>>,
@@ -40,7 +40,7 @@ pub struct Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
 impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   pub fn new (level: usize, max_data_size: usize,
   order: Rc<Vec<usize>>, data_batch: Rc<RefCell<D>>,
-  bucket: Vec<usize>, rows: &'a Vec<(P,V)>)
+  bucket: Vec<usize>, rows: &'a Vec<((P,V),u64)>)
   -> Result<Self,Error> {
     let n = order.len();
     let bf = (n+3)/2;
@@ -50,12 +50,12 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     }
     let mut sorted: Vec<usize> = (0..bucket.len()).collect();
     sorted.sort_unstable_by(|a,b| {
-      rows[bucket[*a]].0.cmp_at(&rows[bucket[*b]].0, level)
+      (rows[bucket[*a]].0).0.cmp_at(&(rows[bucket[*b]].0).0, level)
     });
     let mut pivots: Vec<P> = (0..n).map(|k| {
       let m = k;
-      let a = &rows[bucket[sorted[m+0]]];
-      let b = &rows[bucket[sorted[m+1]]];
+      let a = &(rows[bucket[sorted[m+0]]].0);
+      let b = &(rows[bucket[sorted[m+1]]].0);
       a.0.midpoint_upper(&b.0)
     }).collect();
     // sometimes the sorted intervals overlap.
@@ -115,7 +115,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       for j in self.sorted.iter() {
         let row = self.rows[self.bucket[*j]];
         if self.matched[*j] { continue }
-        if row.0.cmp_at(&pivot, self.level) == Ordering::Equal {
+        if (row.0).0.cmp_at(&pivot, self.level) == Ordering::Equal {
           self.matched[*j] = true;
           self.intersecting[*i].push(self.bucket[*j]);
         }
@@ -128,7 +128,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       loop {
         if j == bf-1 { break }
         let pivot = self.pivots[j*2];
-        match row.0.cmp_at(&pivot, self.level) {
+        match (row.0).0.cmp_at(&pivot, self.level) {
           Ordering::Less => { break },
           Ordering::Greater => j += 1,
           Ordering::Equal => panic!["bucket interval intersects pivot"]
@@ -143,14 +143,18 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     ensure_eq!(self.buckets.len(), bf, "unexpected bucket length");
     for ref buckets in [&self.intersecting,&self.buckets].iter() {
       for bucket in buckets.iter() {
+        let mut size = 0u64;
+        for b in bucket.iter() { size += self.rows[*b].1 }
+
         if bucket.is_empty() {
           nodes.push(Node::Empty);
           bitfield.push(false);
-        } else if bucket.len() <= self.max_data_size {
+        } else if size as usize <= self.max_data_size {
           let mut dstore = self.data_batch.try_borrow_mut()?;
           nodes.push(Node::Data(
-            dstore.batch(&bucket.iter()
-              .map(|b| { &self.rows[*b] }).collect())?
+            dstore.batch(&bucket.iter().map(|b| {
+              &self.rows[*b].0
+            }).collect())?
           ));
           bitfield.push(true);
         } else {
