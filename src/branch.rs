@@ -66,27 +66,21 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     pivots.sort_unstable_by(|a,b| {
       a.cmp_at(b, level)
     });
+    { // remove duplicate pivots in already sorted vec
+      let mut i = 0;
+      while i < pivots.len()-1 {
+        while pivots[i].cmp_at(&pivots[i+1], level) == Ordering::Equal {
+          pivots.remove(i+1);
+        }
+        i += 1;
+      }
+    }
     // pad out pivots so there's exactly n elements
     if pivots.len() < 2 {
       bail!["not enough records to construct pivots. need at least 2, found {}",
         pivots.len()];
     } else if pivots.len() < n {
       pivots = pivots::pad(&pivots, n);
-    }
-    for i in 0..pivots.len()-1 {
-      match pivots[i].cmp_at(&pivots[i+1], level) {
-        Ordering::Less => {},
-        Ordering::Greater => bail![
-          "pivots must monotonically increase. pivot[{}] > pivot[{}] ({} > {})",
-          i, i+1,
-          P::format_at(&pivots[i].serialize_at(level)?,level)?,
-          P::format_at(&pivots[i+1].serialize_at(level)?,level)?
-        ],
-        Ordering::Equal => bail![
-          "pivots should never be equal: pivot[{}] == pivot[{}] == {}",
-          i, i+1, P::format_at(&pivots[i+1].serialize_at(level)?,level)?
-        ]
-      }
     }
     let blen = bucket.len();
     Ok(Self {
@@ -159,7 +153,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         if bucket.is_empty() {
           nodes.push(Node::Empty);
           bitfield.push(false);
-        } else if size as usize <= self.max_data_size {
+        } else if size as usize <= self.max_data_size || bucket.len() <= 3 {
           let mut dstore = self.data_batch.try_borrow_mut()?;
           nodes.push(Node::Data(
             dstore.batch(&bucket.iter().map(|b| {
