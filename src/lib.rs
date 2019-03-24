@@ -16,11 +16,13 @@ mod bits;
 mod order;
 mod data;
 mod read_block;
+mod pivots;
 
 use staging::{Staging,StagingIterator};
 use planner::plan;
 pub use point::{Point,Scalar};
 pub use tree::{Tree,TreeIterator};
+pub use branch::Branch;
 use order::pivot_order;
 use data::DataStore;
 

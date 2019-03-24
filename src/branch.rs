@@ -6,6 +6,7 @@ use std::mem::size_of;
 use std::rc::Rc;
 use std::cell::RefCell;
 use failure::{Error,bail,format_err};
+use pivots;
 
 #[derive(Clone)]
 pub enum Node<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
@@ -44,15 +45,17 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   -> Result<Self,Error> {
     let n = order.len();
     let bf = (n+3)/2;
+    /*
     if bucket.len() < n+1 {
       bail!["bucket must have at least {} records, found {}",
         n+1, bucket.len()];
     }
+    */
     let mut sorted: Vec<usize> = (0..bucket.len()).collect();
     sorted.sort_unstable_by(|a,b| {
       (rows[bucket[*a]].0).0.cmp_at(&(rows[bucket[*b]].0).0, level)
     });
-    let mut pivots: Vec<P> = (0..n).map(|k| {
+    let mut pivots: Vec<P> = (0..n.min(sorted.len()-1)).map(|k| {
       let m = k;
       let a = &(rows[bucket[sorted[m+0]]].0);
       let b = &(rows[bucket[sorted[m+1]]].0);
@@ -63,6 +66,13 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     pivots.sort_unstable_by(|a,b| {
       a.cmp_at(b, level)
     });
+    // pad out pivots so there's exactly n elements
+    if pivots.len() < 2 {
+      bail!["not enough records to construct pivots. need at least 2, found {}",
+        pivots.len()];
+    } else if pivots.len() < n {
+      pivots = pivots::pad(&pivots, n);
+    }
     for i in 0..pivots.len()-1 {
       match pivots[i].cmp_at(&pivots[i+1], level) {
         Ordering::Less => {},
