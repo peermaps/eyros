@@ -1,4 +1,5 @@
 use ::{Point,Value};
+use write_cache::WriteCache;
 use bincode::{serialize,deserialize};
 use std::mem::size_of;
 use random_access_storage::RandomAccess;
@@ -42,10 +43,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
 }
 
-#[derive(Debug,Clone,Copy)]
+#[derive(Debug,Clone)]
 pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  store: S,
+  store: WriteCache<S>,
   _marker: PhantomData<(P,V)>
 }
 
@@ -67,7 +68,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 impl<S,P,V> DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn open (store: S) -> Result<Self,Error> {
-    Ok(Self { store, _marker: PhantomData })
+    Ok(Self {
+      store: WriteCache::new(store)?,
+      _marker: PhantomData
+    })
+  }
+  pub fn flush (&mut self) -> Result<(),Error> {
+    self.store.flush()
   }
   pub fn query (&mut self, offset: u64, bbox: &P::Bounds)
   -> Result<Vec<(P,V)>,Error> {

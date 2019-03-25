@@ -69,7 +69,8 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     { // remove duplicate pivots in already sorted vec
       let mut i = 0;
       while i < pivots.len()-1 {
-        while pivots[i].cmp_at(&pivots[i+1], level) == Ordering::Equal {
+        while i < pivots.len()-1
+        && pivots[i].cmp_at(&pivots[i+1], level) == Ordering::Equal {
           pivots.remove(i+1);
         }
         i += 1;

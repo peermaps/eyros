@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::mem::size_of;
 
 use ::{Row,Point,Value};
+use write_cache::WriteCache;
 
 use branch::{Branch,Node};
 use data::{DataStore,DataMerge,DataBatch};
@@ -151,7 +152,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 pub struct Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub store: S,
+  pub store: WriteCache<S>,
   data_store: Rc<RefCell<DataStore<S,P,V>>>,
   data_merge: Rc<RefCell<DataMerge<S,P,V>>>,
   branch_factor: usize,
@@ -170,7 +171,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let data_merge = Rc::new(RefCell::new(
       DataMerge::new(Rc::clone(&data_store))));
     Ok(Self {
-      store,
+      store: WriteCache::new(store)?,
       data_store,
       data_merge,
       bytes,
@@ -185,6 +186,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       self.bytes = 0;
       self.store.truncate(0)?;
     }
+    self.store.flush()?;
     Ok(())
   }
   pub fn is_empty (&mut self) -> Result<bool,Error> {
@@ -253,6 +255,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       branches = nbranches;
     }
+    self.store.flush()?;
     Ok(())
   }
   pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)

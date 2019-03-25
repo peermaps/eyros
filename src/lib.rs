@@ -17,6 +17,7 @@ mod order;
 mod data;
 mod read_block;
 mod pivots;
+mod write_cache;
 
 use staging::{Staging,StagingIterator};
 use planner::plan;
@@ -73,7 +74,7 @@ P: Point, V: Value {
     let data_store = DataStore::open(open_store("data")?)?;
     let bf = 9;
     let n = bf*2-3;
-    let max_data_size = 16;
+    let max_data_size = 4000;
     if max_data_size <= n {
       bail!["max_data_size must be greater than {} for branch_factor={}", n, bf]
     }
@@ -93,7 +94,7 @@ P: Point, V: Value {
     Ok(db)
   }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
-    let base = 9_u64.pow(2);
+    let base = 16_000;
     let n = (self.staging.len()? + rows.len()) as u64;
     if n <= base {
       self.staging.batch(rows)?;
@@ -159,6 +160,10 @@ P: Point, V: Value {
       rem, rem_rows.len());
     self.staging.clear()?;
     self.staging.batch(&rem_rows)?;
+    {
+      let mut dstore = self.data_store.try_borrow_mut()?;
+      dstore.flush()?;
+    }
     self.meta.save()?;
     Ok(())
   }
