@@ -69,7 +69,7 @@ impl<S,P,V> DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn open (store: S) -> Result<Self,Error> {
     Ok(Self {
-      store: WriteCache::new(store)?,
+      store: WriteCache::open(store)?,
       _marker: PhantomData
     })
   }

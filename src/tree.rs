@@ -171,7 +171,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let data_merge = Rc::new(RefCell::new(
       DataMerge::new(Rc::clone(&data_store))));
     Ok(Self {
-      store: WriteCache::new(store)?,
+      store: WriteCache::open(store)?,
       data_store,
       data_merge,
       bytes,

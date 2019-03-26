@@ -3,6 +3,7 @@ use failure::{Error,bail};
 use random_access_storage::RandomAccess;
 use std::mem::size_of;
 use bincode::{serialize,deserialize};
+use write_cache::WriteCache;
 
 pub struct StagingIterator<'a,'b,P,V> where P: Point, V: Value {
   rows: &'a Vec<Row<P,V>>,
@@ -39,7 +40,7 @@ where P: Point, V: Value {
 
 pub struct Staging<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  store: S,
+  store: WriteCache<S>,
   pub rows: Vec<Row<P,V>>
 }
 
@@ -50,14 +51,17 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
   pub fn open (mut store: S) -> Result<Self,Error> {
     let is_empty = store.is_empty()?;
-    let mut staging = Self { store, rows: vec![] };
+    let mut staging = Self {
+      store: WriteCache::open(store)?,
+      rows: vec![]
+    };
     if !is_empty { staging.load()? }
     Ok(staging)
   }
   fn load (&mut self) -> Result<(),Error> {
     let len = self.store.len()?;
     let buf = self.store.read(0, len)?;
-    let n = 1+size_of::<P>() + size_of::<V>();
+    let n = size_of::<P>() + size_of::<V>();
     let m = len/n;
     self.rows.clear();
     self.rows.reserve(m);
@@ -83,7 +87,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(len)
   }
   pub fn len (&mut self) -> Result<usize,Error> {
-    let n = 1+size_of::<P>() + size_of::<V>();
+    let n = size_of::<P>() + size_of::<V>();
     Ok(self.bytes()?/n)
   }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
@@ -100,6 +104,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.store.write(offset,&buf)?;
     self.rows.extend_from_slice(rows);
     Ok(())
+  }
+  pub fn flush (&mut self) -> Result<(),Error> {
+    self.store.flush()
   }
   pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
   -> StagingIterator<'a,'b,P,V> {

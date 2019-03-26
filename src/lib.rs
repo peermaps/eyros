@@ -28,7 +28,7 @@ use order::pivot_order;
 use data::DataStore;
 
 use random_access_storage::RandomAccess;
-use failure::{Error,bail};
+use failure::{Error,bail,format_err,ensure};
 use serde::{Serialize,de::DeserializeOwned};
 use meta::Meta;
 use std::fmt::Debug;
@@ -61,6 +61,7 @@ P: Point, V: Value {
   pub staging: Staging<S,P,V>,
   pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
   max_data_size: usize,
+  base_size: usize,
   meta: Meta<S>
 }
 
@@ -74,10 +75,13 @@ P: Point, V: Value {
     let data_store = DataStore::open(open_store("data")?)?;
     let bf = 9;
     let n = bf*2-3;
-    let max_data_size = 4000;
+    let max_data_size = 1000;
     if max_data_size <= n {
       bail!["max_data_size must be greater than {} for branch_factor={}", n, bf]
     }
+    let base_size = max_data_size * n;
+    ensure![base_size > max_data_size,
+      "base_size ({}) must be > max_data_size ({})", base_size, max_data_size];
     let mut db = Self {
       open_store,
       branch_factor: bf,
@@ -86,7 +90,8 @@ P: Point, V: Value {
       order: Rc::new(pivot_order(bf)),
       meta: meta,
       trees: vec![],
-      max_data_size
+      max_data_size,
+      base_size
     };
     for i in 0..db.meta.mask.len() {
       db.create_tree(i)?;
@@ -94,10 +99,11 @@ P: Point, V: Value {
     Ok(db)
   }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
-    let base = 16_000;
     let n = (self.staging.len()? + rows.len()) as u64;
+    let base = self.base_size as u64;
     if n <= base {
       self.staging.batch(rows)?;
+      self.staging.flush()?;
       return Ok(())
     }
     let count = (n/base)*base;
@@ -146,7 +152,7 @@ P: Point, V: Value {
         Tree::merge(&mut self.trees, i, trees, &srows)?;
       }
     }
-    assert_eq!(n-(offset as u64), rem, "offset-n ({}-{}={}) != rem ({}) ",
+    ensure_eq!(n-(offset as u64), rem, "offset-n ({}-{}={}) != rem ({}) ",
       offset, n, (offset as u64)-n, rem);
     let mut rem_rows = vec![];
     for k in offset..n as usize {
@@ -155,11 +161,12 @@ P: Point, V: Value {
         else { rows[k-slen].clone() }
       );
     }
-    assert!(rem_rows.len() == rem as usize,
+    ensure_eq!(rem_rows.len(), rem as usize,
       "unexpected number of remaining rows (expected {}, actual {})",
       rem, rem_rows.len());
     self.staging.clear()?;
     self.staging.batch(&rem_rows)?;
+    self.staging.flush()?;
     {
       let mut dstore = self.data_store.try_borrow_mut()?;
       dstore.flush()?;
