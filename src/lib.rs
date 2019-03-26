@@ -6,6 +6,7 @@ extern crate bincode;
 extern crate serde;
 
 #[macro_use] mod ensure;
+mod builder;
 mod meta;
 mod point;
 mod tree;
@@ -19,6 +20,7 @@ mod read_block;
 mod pivots;
 mod write_cache;
 
+pub use builder::Builder;
 use staging::{Staging,StagingIterator};
 use planner::plan;
 pub use point::{Point,Scalar};
@@ -70,16 +72,17 @@ S: RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   pub fn open(open_store: U) -> Result<Self,Error> {
+    Builder::new(open_store).build()
+  }
+  pub fn open_opts(open_store: U, bf: usize,
+  max_data_size: usize, base_size: usize) -> Result<Self,Error> {
     let meta = Meta::open(open_store("meta")?)?;
     let staging = Staging::open(open_store("staging")?)?;
     let data_store = DataStore::open(open_store("data")?)?;
-    let bf = 9;
     let n = bf*2-3;
-    let max_data_size = 1000;
     if max_data_size <= n {
       bail!["max_data_size must be greater than {} for branch_factor={}", n, bf]
     }
-    let base_size = max_data_size * n;
     ensure![base_size > max_data_size,
       "base_size ({}) must be > max_data_size ({})", base_size, max_data_size];
     let mut db = Self {
