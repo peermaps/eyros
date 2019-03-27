@@ -2,7 +2,7 @@ use ::{DB,Point,Value};
 use failure::Error;
 use random_access_storage::RandomAccess;
 
-pub struct Builder<S,U> where
+pub struct Setup<S,U> where
 S: RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>) {
   max_data_size: usize,
@@ -11,7 +11,7 @@ U: (Fn(&str) -> Result<S,Error>) {
   open_store: U
 }
 
-impl<S,U> Builder<S,U> where
+impl<S,U> Setup<S,U> where
 S: RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>) {
   pub fn new (open_store: U) -> Self {

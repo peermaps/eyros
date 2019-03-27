@@ -20,7 +20,7 @@ mod read_block;
 mod pivots;
 mod write_cache;
 
-pub use builder::Builder;
+pub use builder::Setup;
 use staging::{Staging,StagingIterator};
 use planner::plan;
 pub use point::{Point,Scalar};
@@ -30,7 +30,7 @@ use order::pivot_order;
 use data::DataStore;
 
 use random_access_storage::RandomAccess;
-use failure::{Error,bail,format_err,ensure};
+use failure::{Error,format_err,ensure};
 use serde::{Serialize,de::DeserializeOwned};
 use meta::Meta;
 use std::fmt::Debug;
@@ -72,17 +72,19 @@ S: RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   pub fn open(open_store: U) -> Result<Self,Error> {
-    Builder::new(open_store).build()
+    Setup::new(open_store).build()
   }
   pub fn open_opts(open_store: U, bf: usize,
   max_data_size: usize, base_size: usize) -> Result<Self,Error> {
     let meta = Meta::open(open_store("meta")?)?;
     let staging = Staging::open(open_store("staging")?)?;
     let data_store = DataStore::open(open_store("data")?)?;
+    /*
     let n = bf*2-3;
     if max_data_size <= n {
       bail!["max_data_size must be greater than {} for branch_factor={}", n, bf]
     }
+    */
     ensure![base_size > max_data_size,
       "base_size ({}) must be > max_data_size ({})", base_size, max_data_size];
     let mut db = Self {

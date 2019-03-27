@@ -188,7 +188,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     // data bitfield
     for i in 0..(n+bf+7)/8 {
       let mut byte = 0u8;
-      for j in 0..8 {
+      for j in 0..8.min(n+bf-i*8) {
         byte += (1 << j) * (bitfield[i*8+j] as u8);
       }
       data.push(byte);
