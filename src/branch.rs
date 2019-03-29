@@ -54,7 +54,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       (rows[bucket[*a]].0).0.cmp_at(&(rows[bucket[*b]].0).0, level)
     });
     let mut pivots: Vec<P> = {
-      let z = n.min(sorted.len()-1);
+      let z = n.min(sorted.len()-2);
       (0..z).map(|k| {
         let m = (k+1) * sorted.len() / (z+1);
         let a = &(rows[bucket[sorted[m+0]]].0);
