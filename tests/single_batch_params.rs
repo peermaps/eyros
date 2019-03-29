@@ -1,3 +1,5 @@
+#![feature(duration_float)]
+
 extern crate eyros;
 extern crate failure;
 extern crate random;
@@ -9,22 +11,33 @@ use failure::Error;
 use random_access_disk::RandomAccessDisk;
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
+use std::time;
 
 use std::cmp::Ordering;
 
 #[test]
-fn single_batch_xxyyz_bf9_small_data_small_base() -> Result<(),Error> {
+fn single_4k_batch_xxyyz_9_bf_10_data_16_base() -> Result<(),Error> {
   from_params(4000, 9, 10, 16)
 }
 
 #[test]
-fn single_batch_xxyyz_bf5_small_data_small_base() -> Result<(),Error> {
+fn single_4k_batch_xxyyz_5_bf_10_data_16_base() -> Result<(),Error> {
   from_params(4000, 5, 10, 16)
 }
 
 #[test]
-fn single_batch_xxyyz_bf17_small_data_small_base() -> Result<(),Error> {
+fn single_4k_batch_xxyyz_17_bf_10_data_16_base() -> Result<(),Error> {
   from_params(4000, 17, 10, 16)
+}
+
+#[test]
+fn single_32k_batch_xxyyz_9_bf_400_data_1k_base() -> Result<(),Error> {
+  from_params(32_000, 9, 400, 1000)
+}
+
+#[test]
+fn single_200k_batch_xxyyz_9_bf_400_data_1k_base() -> Result<(),Error> {
+  from_params(200_000, 9, 400, 1000)
 }
 
 fn from_params (size: usize, bf: usize, max_data_size: usize,
@@ -50,14 +63,22 @@ base_size: usize) -> Result<(),Error> {
     let point = ((xmin,xmax),(ymin,ymax),time);
     Row::Insert(point, value)
   }).collect();
-  db.batch(&inserts)?;
+  {
+    let start = time::Instant::now();
+    db.batch(&inserts)?;
+    eprintln!["batch write for {} records in {} seconds",
+      size, start.elapsed().as_float_secs()];
+  }
 
   {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
     let mut results = vec![];
+    let start = time::Instant::now();
     for result in db.query(&bbox)? {
       results.push(result?);
     }
+    eprintln!["batch query for {} records in {} seconds",
+      results.len(), start.elapsed().as_float_secs()];
     assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
     = inserts.iter().map(|r| {
@@ -74,9 +95,12 @@ base_size: usize) -> Result<(),Error> {
   {
     let bbox = ((-0.8,0.1,0.0),(0.2,0.5,500.0));
     let mut results = vec![];
+    let start = time::Instant::now();
     for result in db.query(&bbox)? {
       results.push(result?);
     }
+    eprintln!["batch query for {} records in {} seconds",
+      results.len(), start.elapsed().as_float_secs()];
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
     = inserts.iter()
       .map(|r| {

@@ -6,7 +6,8 @@ pub struct WriteCache<S> where S: RandomAccess {
   store: S,
   queue: Vec<(usize,Vec<u8>)>,
   length: usize,
-  buffered: usize
+  buffered: usize,
+  enabled: bool
 }
 
 impl<S> WriteCache<S> where S: RandomAccess {
@@ -16,7 +17,8 @@ impl<S> WriteCache<S> where S: RandomAccess {
       store,
       queue: vec![],
       length,
-      buffered: 0
+      buffered: 0,
+      enabled: true
     })
   }
   pub fn flush (&mut self) -> Result<(),S::Error> {
@@ -24,6 +26,7 @@ impl<S> WriteCache<S> where S: RandomAccess {
       self.store.write(q.0, &q.1)?;
     }
     self.queue.clear();
+    self.buffered = 0;
     Ok(())
   }
 }
@@ -31,6 +34,8 @@ impl<S> WriteCache<S> where S: RandomAccess {
 impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
   type Error = S::Error;
   fn write (&mut self, offset: usize, data: &[u8]) -> Result<(),Self::Error> {
+    if !self.enabled { return self.store.write(offset, data) }
+
     let new_range = (offset,offset+data.len());
     let overlapping: Vec<usize> = (0..self.queue.len()).filter(|i| {
       let q = &self.queue[*i];
@@ -71,13 +76,16 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
       self.queue.insert(overlapping[0], merged);
     }
     self.length = self.length.max(end);
+    /*
     if self.buffered >= 1024*256 {
       self.flush()?;
     }
+    */
     Ok(())
   }
   fn read (&mut self, offset: usize, length: usize)
   -> Result<Vec<u8>,Self::Error> {
+    if !self.enabled { return self.store.read(offset, length) }
     // TODO: analysis to know when to skip the read()
     let range = (offset,offset+length);
     let slen = self.store.len()?;
@@ -101,6 +109,7 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
     self.store.del(offset, length)
   }
   fn truncate (&mut self, length: usize) -> Result<(),Self::Error> {
+    if !self.enabled { return self.store.truncate(length) }
     let mut i = 0;
     while i < self.queue.len() {
       let q0 = self.queue[i].0;
@@ -119,10 +128,12 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
     Ok(())
   }
   fn len (&mut self) -> Result<usize,Self::Error> {
-    Ok(self.length)
+    if self.enabled { Ok(self.length) }
+    else { self.store.len() }
   }
   fn is_empty (&mut self) -> Result<bool,Self::Error> {
-    Ok(self.length == 0)
+    if self.enabled { Ok(self.length == 0) }
+    else { self.store.is_empty() }
   }
 }
 
