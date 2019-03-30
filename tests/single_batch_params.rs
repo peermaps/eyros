@@ -36,6 +36,11 @@ fn single_32k_batch_xxyyz_9_bf_400_data_1k_base() -> Result<(),Error> {
 }
 
 #[test]
+fn single_64k_batch_xxyyz_9_bf_1k_data_16k_base() -> Result<(),Error> {
+  from_params(64_000, 9, 1_000, 16_000)
+}
+
+#[test]
 fn single_200k_batch_xxyyz_9_bf_400_data_1k_base() -> Result<(),Error> {
   from_params(200_000, 9, 400, 1000)
 }

@@ -45,8 +45,8 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   -> Result<Self,Error> {
     let n = order.len();
     let bf = (n+3)/2;
-    if bucket.len() < 2 {
-      bail!["not enough records to construct pivots. need at least 2, found {}",
+    if bucket.len() < 3 {
+      bail!["not enough records to construct pivots. need at least 3, found {}",
         bucket.len()];
     }
     let mut sorted: Vec<usize> = (0..bucket.len()).collect();
@@ -76,6 +76,10 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         }
         i += 1;
       }
+    }
+    if pivots.len() < 2 {
+      bail!["not enough data to pad pivots. need at least 2, found {}",
+        pivots.len()];
     }
     // pad out pivots so there's exactly n elements
     if pivots.len() < n {
@@ -124,17 +128,16 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         }
       }
     }
-    let mut j = 0;
     for i in self.sorted.iter() {
       if self.matched[*i] { continue }
       let row = self.rows[self.bucket[*i]];
-      loop {
-        if j == bf-1 { break }
+      let mut j = 0;
+      while j < bf-1 {
         let pivot = self.pivots[j*2];
         match (row.0).0.cmp_at(&pivot, self.level) {
           Ordering::Less => { break },
           Ordering::Greater => j += 1,
-          Ordering::Equal => panic!["bucket interval intersects pivot"]
+          Ordering::Equal => bail!["bucket interval intersects pivot"]
         }
       }
       self.buckets[j].push(self.bucket[*i]);

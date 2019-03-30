@@ -130,9 +130,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         */
       }
       for (i,b) in bitfield.iter().enumerate() {
+        if !b { continue }
         let j = i+n;
         let is_data = (buf[d_start+j/8]>>(j%8))&1 == 1;
-        if !b { continue }
         let offset = u64::from_be_bytes([
           buf[b_start+i*8+0], buf[b_start+i*8+1],
           buf[b_start+i*8+2], buf[b_start+i*8+3],
