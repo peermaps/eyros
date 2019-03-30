@@ -89,14 +89,16 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
     // TODO: analysis to know when to skip the read()
     let range = (offset,offset+length);
     let slen = self.store.len()?;
-    let mut data = self.store.read(offset, slen.min(length))?;
+    let mut data = if slen < offset { vec![] }
+      else { self.store.read(offset, (slen-offset).min(length))? };
     if slen < length {
       data.extend(vec![0;length-slen]);
     }
     for q in self.queue.iter() {
       if overlaps(range,(q.0,q.0+q.1.len())) {
-        let end = (q.0-offset).min(length);
-        data[q.0-offset..end].copy_from_slice(q.1.as_slice());
+        let end = (q.0.max(offset)-offset).min(length);
+        let len = end + offset - q.0.max(offset);
+        data[q.0.max(offset)-offset..end].copy_from_slice(&q.1[0..len]);
       }
     }
     Ok(data)
