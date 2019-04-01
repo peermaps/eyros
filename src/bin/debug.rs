@@ -4,6 +4,9 @@ extern crate failure;
 extern crate random_access_disk;
 extern crate random_access_storage;
 
+#[path="../ensure.rs"]
+#[macro_use] mod ensure;
+
 use eyros::{DB,Row};
 use failure::{Error,bail};
 use random_access_disk::RandomAccessDisk;

@@ -1,4 +1,4 @@
-use failure::{Error,bail};
+use failure::{Error,bail,format_err};
 use random_access_storage::RandomAccess;
 use std::cmp::Ordering;
 
@@ -8,6 +8,8 @@ where S: RandomAccess<Error=Error> {
   let size_guess = guess.min(max_size - offset.min(max_size));
   if size_guess < 4 { bail!["block too small for length field"] }
   let fbuf: Vec<u8> = store.read(offset as usize, size_guess as usize)?;
+  ensure_eq![fbuf.len() as u64, size_guess, "requested {} bytes, received {}",
+    size_guess, fbuf.len()];
   let len = u32::from_be_bytes([fbuf[0],fbuf[1],fbuf[2],fbuf[3]]) as u64;
   if len < 4 { bail!["length field must be at least 4"] }
   if offset + len > max_size {
@@ -30,6 +32,6 @@ where S: RandomAccess<Error=Error> {
       )?);
     }
   };
-  assert_eq!(buf.len() as u64, len-4, "incorrect length in block read");
+  ensure_eq![buf.len() as u64, len-4, "incorrect length in block read"];
   Ok(buf)
 }

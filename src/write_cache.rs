@@ -6,7 +6,6 @@ pub struct WriteCache<S> where S: RandomAccess {
   store: S,
   queue: Vec<(usize,Vec<u8>)>,
   length: usize,
-  buffered: usize,
   enabled: bool
 }
 
@@ -17,7 +16,6 @@ impl<S> WriteCache<S> where S: RandomAccess {
       store,
       queue: vec![],
       length,
-      buffered: 0,
       enabled: true
     })
   }
@@ -26,7 +24,6 @@ impl<S> WriteCache<S> where S: RandomAccess {
       self.store.write(q.0, &q.1)?;
     }
     self.queue.clear();
-    self.buffered = 0;
     Ok(())
   }
 }
@@ -44,15 +41,12 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
 
     let mut start = new_range.0;
     let mut end = new_range.1;
-    let mut overlapped = 0;
     for i in overlapping.iter() {
       let q = &self.queue[*i];
       start = start.min(q.0);
       end = end.max(q.0 + (q.1).len());
-      overlapped += q.1.len();
     }
     let mut merged = (start,vec![0;end-start]);
-    self.buffered += end-start - overlapped;
     for i in overlapping.iter() {
       let q = &self.queue[*i];
       merged.1[q.0-start..q.0-start+q.1.len()]
@@ -76,11 +70,6 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
       self.queue.insert(overlapping[0], merged);
     }
     self.length = self.length.max(end);
-    /*
-    if self.buffered >= 1024*256 {
-      self.flush()?;
-    }
-    */
     Ok(())
   }
   fn read (&mut self, offset: usize, length: usize)
@@ -88,19 +77,37 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
     if !self.enabled { return self.store.read(offset, length) }
     // TODO: analysis to know when to skip the read()
     let range = (offset,offset+length);
-    let slen = self.store.len()?;
-    let mut data = if slen < offset { vec![] }
-      else { self.store.read(offset, (slen-offset).min(length))? };
-    if slen < length {
-      data.extend(vec![0;length-slen]);
-    }
+    let mut data = {
+      let slen = self.store.len()?;
+      let mut d = if slen < offset { vec![] }
+        else { self.store.read(offset, (slen-offset).min(length))? };
+      let dlen = d.len();
+      if dlen < length {
+        d.extend(vec![0;length-dlen]);
+      }
+      d
+    };
+    // TODO: turn these asserts into ensure_eq!
+    assert_eq![data.len(), length, "insufficient length"];
     for q in self.queue.iter() {
       if overlaps(range,(q.0,q.0+q.1.len())) {
-        let end = (q.0.max(offset)-offset).min(length);
-        let len = end + offset - q.0.max(offset);
-        data[q.0.max(offset)-offset..end].copy_from_slice(&q.1[0..len]);
+        let q1 = q.0 + q.1.len();
+        let dstart = q.0.max(range.0) - range.0;
+        let dend = q1.min(range.1) - range.0;
+        let qstart = q.0.max(range.0) - q.0;
+        let qend = q1.min(range.1) - q.0;
+        assert_eq![dend-dstart, qend-qstart, "data and range length mismatch"];
+        data[dstart..dend].copy_from_slice(&q.1[qstart..qend]);
       }
     }
+    assert_eq![length, data.len(),
+      "requested read of {} bytes, returned {} bytes instead",
+      length, data.len()];
+    /*
+    ensure_eq![length, data.len(),
+      "requested read of {} bytes, returned {} bytes instead",
+      length, data.len()];
+    */
     Ok(data)
   }
   fn read_to_writer (&mut self, _offset: usize, _length: usize,

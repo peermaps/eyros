@@ -104,7 +104,7 @@ P: Point, V: Value {
     Ok(db)
   }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
-    let n = (self.staging.len()? + rows.len()) as u64;
+    let n = (self.staging.rows.len() + rows.len()) as u64;
     let base = self.base_size as u64;
     if n <= base {
       self.staging.batch(rows)?;
