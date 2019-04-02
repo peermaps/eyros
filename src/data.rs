@@ -87,7 +87,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Self::parse(&self.read(offset)?)
   }
   pub fn parse (buf: &Vec<u8>) -> Result<Vec<(P,V)>,Error> {
-    let size = size_of::<P>() + size_of::<V>();
+    let size = P::size_of() + size_of::<V>();
     let mut results = vec![];
     for i in 0..buf.len()/size {
       results.push(deserialize(&buf[i*size..(i+1)*size])?);

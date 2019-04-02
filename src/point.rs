@@ -16,6 +16,7 @@ pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
   fn dim () -> usize;
   fn overlaps (&self, &Self::Bounds) -> bool;
   fn pivot_size_at (usize) -> usize;
+  fn size_of () -> usize;
   fn bounds (&Vec<Self>) -> Option<Self::Bounds>;
   fn bounds_to_range (Self::Bounds) -> Self::Range;
   fn format_at (&[u8], usize) -> Result<String,Error>;
@@ -163,6 +164,9 @@ macro_rules! impl_point {
           $($i => size_of::<$T>(),)+
           _ => panic!("dimension out of bounds")
         }
+      }
+      fn size_of () -> usize {
+        $(size_of::<$U>()+)+0
       }
       fn bounds (points: &Vec<Self>) -> Option<Self::Bounds> {
         if points.is_empty() { return None }
