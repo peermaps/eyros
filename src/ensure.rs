@@ -11,16 +11,13 @@ macro_rules! ensure_eq {
       }
     }
   });
-  ($left:expr, $right:expr,) => ({
-    assert_eq!($left, $right)
-  });
-  ($left:expr, $right:expr, $($arg:tt)+) => ({
+  ($left:expr, $right:expr, $($arg:tt)*) => ({
     match (&($left), &($right)) {
       (left_val, right_val) => {
         if !(*left_val == *right_val) {
           return Err(format_err!(r#"assertion failed: `(left == right)`
   left: `{:?}`,
- right: `{:?}`: {}"#, left_val, right_val, format_args!($($arg)+)));
+ right: `{:?}`: {}"#, left_val, right_val, format_args!($($arg)*)));
         }
       }
     }
@@ -40,16 +37,13 @@ macro_rules! ensure_eq_some {
       }
     }
   });
-  ($left:expr, $right:expr,) => ({
-    assert_eq!($left, $right)
-  });
-  ($left:expr, $right:expr, $($arg:tt)+) => ({
+  ($left:expr, $right:expr, $($arg:tt)*) => ({
     match (&($left), &($right)) {
       (left_val, right_val) => {
         if !(*left_val == *right_val) {
           return Some(Err(format_err!(r#"assertion failed: `(left == right)`
   left: `{:?}`,
- right: `{:?}`: {}"#, left_val, right_val, format_args!($($arg)+))));
+ right: `{:?}`: {}"#, left_val, right_val, format_args!($($arg)*))));
         }
       }
     }
