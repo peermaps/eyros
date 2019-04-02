@@ -3,7 +3,7 @@ use write_cache::WriteCache;
 use bincode::{serialize,deserialize};
 use std::mem::size_of;
 use random_access_storage::RandomAccess;
-use failure::Error;
+use failure::{Error,format_err};
 use std::marker::PhantomData;
 use read_block::read_block;
 use std::rc::Rc;
@@ -55,7 +55,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error> {
     let mut data: Vec<u8> = vec![0;4];
     for row in rows.iter() {
-      data.extend(serialize(row)?);
+      let buf = serialize(row)?;
+      ensure_eq!(buf.len(), P::size_of() + size_of::<V>(),
+        "unexpected length in data batch");
+      data.extend(buf);
     }
     let len = data.len() as u32;
     data[0..4].copy_from_slice(&len.to_be_bytes());

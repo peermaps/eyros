@@ -93,8 +93,7 @@ impl<T> Coord<T> for (T,T) where T: Scalar+PartialOrd+Num<T> {
   }
   fn upper (&self) -> T { self.1 }
   fn overlaps (&self, min: &T, max: &T) -> bool {
-    self.0.overlaps(min,max) || self.1.overlaps(min,max)
-    || min.overlaps(&self.0, &self.1) || max.overlaps(&self.0, &self.1)
+    *min <= self.1 && self.0 <= *max
   }
   fn bounds (coords: Vec<&Self>) -> Option<(T,T)> {
     if coords.len() == 0 { return None }
