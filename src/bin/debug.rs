@@ -1,4 +1,4 @@
-#![feature(int_to_from_bytes)]
+#![feature(int_to_from_bytes,duration_float)]
 extern crate eyros;
 extern crate failure;
 extern crate random_access_disk;
@@ -14,13 +14,14 @@ use random_access_storage::RandomAccess;
 use std::path::PathBuf;
 use std::env;
 use std::mem::size_of;
+use std::time;
 
 #[path="../read_block.rs"]
 mod read_block;
 use read_block::read_block;
 use eyros::Point;
 
-type P = ((f32,f32),(f32,f32),f32);
+type P = ((f32,f32),(f32,f32));
 type V = u32;
 
 fn main() -> Result<(),Error> {
@@ -131,6 +132,18 @@ fn main() -> Result<(),Error> {
         Row::Delete(p,v) => println!["{:?} [DELETE]", (p,v)],
       }
     }
+  } else if args[2] == "time-query" {
+    let bbox = (
+      (args[3].parse::<f32>()?,args[4].parse::<f32>()?),
+      (args[5].parse::<f32>()?,args[6].parse::<f32>()?)
+    );
+    let mut results = vec![];
+    let start = time::Instant::now();
+    for result in db.query(&bbox)? {
+      results.push(result?);
+    }
+    let elapsed = start.elapsed().as_float_secs();
+    println!["{} results in {} seconds", results.len(), elapsed];
   } else {
     bail!["COMMAND not recognized"];
   }
