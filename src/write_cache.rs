@@ -55,8 +55,8 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
     merged.1[new_range.0-start..new_range.0-start+data.len()]
       .copy_from_slice(data);
  
-    for i in overlapping.iter() {
-      self.queue.remove(overlapping[*i]-*i);
+    for (i,ov) in overlapping.iter().enumerate() {
+      self.queue.remove(ov-i);
     }
     if overlapping.is_empty() {
       let mut j = 0;
