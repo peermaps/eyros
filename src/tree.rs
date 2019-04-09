@@ -195,7 +195,11 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   pub fn build (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     let dstore = Rc::clone(&self.data_store);
-    self.builder(&rows.iter().map(|row| { (row,1u64) }).collect(), dstore)
+    self.builder(
+      &rows.iter().map(|row| { (row,1u64) }).collect(),
+      dstore,
+      &mut |_bucket| { panic!["whatever"] }
+    )
   }
   pub fn build_from_blocks (&mut self, blocks: Vec<(P::Bounds,u64,u64)>)
   -> Result<(),Error> {
@@ -206,11 +210,39 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let rows = blocks.iter().enumerate().map(|(i,(_,_,len))| {
       (&inserts[i],*len)
     }).collect();
-    let dstore = Rc::clone(&self.data_merge);
-    self.builder(&rows, dstore)
+    let dmerge = Rc::clone(&self.data_merge);
+    let dstore = Rc::clone(&self.data_store);
+    let bf = self.branch_factor;
+    self.builder(&rows, dmerge, &mut |bucket| {
+      let mut ds = dstore.try_borrow_mut()?;
+      let mut drows = vec![];
+      for b in bucket.iter() {
+        let offset: u64 = blocks[*b].1;
+        drows.extend(ds.list(offset)?);
+      }
+      let mut buckets = vec![];
+      let k = drows.len();
+      let step = k / bf;
+      let mut i = 0;
+      while i < k {
+        let subrows = drows[i..(i+step).min(k)].to_vec();
+        let bbox = P::bounds(&subrows.iter().map(|row| { row.0 }).collect())
+          .unwrap();
+        let offset = ds.batch(&subrows.iter().map(|row| { row }).collect())?;
+        buckets.push((Row::Insert(
+          P::bounds_to_range(bbox),
+          offset
+        ),subrows.len() as u64));
+        i += step;
+      }
+      //eprintln!["SPLIT {} to {} [k={}]", bucket.len(), buckets.len(), k];
+      Ok(buckets)
+    })
   }
   pub fn builder<D,T,U> (&mut self, rows: &Vec<(&Row<T,U>,u64)>,
-  data_store: Rc<RefCell<D>>) -> Result<(),Error>
+  data_store: Rc<RefCell<D>>,
+  splitter: &mut FnMut (Vec<usize>) -> Result<Vec<(Row<T,U>,u64)>,Error>)
+  -> Result<(),Error>
   where D: DataBatch<T,U>, T: Point, U: Value {
     self.clear()?;
     let irows: Vec<((T,U),u64)> = rows.iter()
@@ -225,8 +257,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let bucket = (0..rows.len()).collect();
     let b = Branch::<D,T,U>::new(0, self.max_data_size,
       Rc::clone(&self.order),
-      data_store,
-      bucket, &irows
+      Rc::clone(&data_store),
+      bucket, Rc::new(irows)
     )?;
     let mut branches = vec![Node::Branch(b)];
     match branches[0] {
@@ -250,6 +282,27 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
             self.store.write(b.offset as usize, &data)?;
             self.bytes = self.bytes.max(b.offset + (data.len() as u64));
             nbranches.extend(nb);
+          },
+          Node::Split(bucket, offset) => {
+            let drows = splitter(bucket)?;
+            let dirows: Vec<((T,U),u64)> = drows.iter()
+              .filter(|(row,_)| {
+                match row { Row::Insert(_,_) => true, _ => false }
+              })
+              .map(|(row,len)| { match row {
+                Row::Insert(p,v) => ((*p,*v),*len),
+                _ => panic!("unexpected")
+              } })
+              .collect();
+            let mut b = Branch::<D,T,U>::new(0, self.max_data_size,
+              Rc::clone(&self.order),
+              Rc::clone(&data_store),
+              (0..dirows.len()).collect(),
+              Rc::new(dirows)
+            )?;
+            b.offset = offset;
+            //eprintln!["SPLIT AT {}", offset];
+            nbranches.push(Node::Branch(b));
           }
         }
       }

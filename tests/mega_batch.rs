@@ -1,3 +1,4 @@
+#![feature(duration_float)]
 extern crate eyros;
 extern crate failure;
 extern crate random;
@@ -11,6 +12,7 @@ use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
 
 use std::cmp::Ordering;
+use std::time;
 
 type P = ((f32,f32),(f32,f32),f32);
 type V = u32;
@@ -41,16 +43,29 @@ fn mega_batch() -> Result<(),Error> {
   let batches: Vec<Vec<Row<P,V>>> = (0..n).map(|i| {
     inserts[i*batch_size..(i+1)*batch_size].to_vec()
   }).collect();
-  for batch in batches {
-    db.batch(&batch)?;
+  {
+    let mut total = 0f64;
+    for batch in batches {
+      let start = time::Instant::now();
+      db.batch(&batch)?;
+      let elapsed = start.elapsed().as_float_secs();
+      total += elapsed;
+      eprintln!["batch write for {} records in {} seconds",
+        batch.len(), elapsed];
+    }
+    eprintln!["total batch time: {}\nwrote {} records per second",
+      total, (size as f64)/total];
   }
 
   {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
     let mut results = vec![];
+    let start = time::Instant::now();
     for result in db.query(&bbox)? {
       results.push(result?);
     }
+    eprintln!["query for {} records in {} seconds",
+      results.len(), start.elapsed().as_float_secs()];
     assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(P,V)>
     = inserts.iter().map(|r| {
@@ -67,9 +82,12 @@ fn mega_batch() -> Result<(),Error> {
   {
     let bbox = ((-0.8,0.1,0.0),(0.2,0.5,500.0));
     let mut results = vec![];
+    let start = time::Instant::now();
     for result in db.query(&bbox)? {
       results.push(result?);
     }
+    eprintln!["query for {} records in {} seconds",
+      results.len(), start.elapsed().as_float_secs()];
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
     = inserts.iter()
       .map(|r| {

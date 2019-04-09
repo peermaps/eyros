@@ -78,7 +78,7 @@ P: Point, V: Value {
   max_data_size: usize, base_size: usize) -> Result<Self,Error> {
     let meta = Meta::open(open_store("meta")?)?;
     let staging = Staging::open(open_store("staging")?)?;
-    let data_store = DataStore::open(open_store("data")?)?;
+    let data_store = DataStore::open(open_store("data")?, max_data_size)?;
     /*
     let n = bf*2-3;
     if max_data_size <= n {

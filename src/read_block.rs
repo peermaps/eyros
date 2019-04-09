@@ -11,11 +11,14 @@ where S: RandomAccess<Error=Error> {
   ensure_eq![fbuf.len() as u64, size_guess, "requested {} bytes, received {}",
     size_guess, fbuf.len()];
   let len = u32::from_be_bytes([fbuf[0],fbuf[1],fbuf[2],fbuf[3]]) as u64;
-  if len < 4 { bail!["length field must be at least 4"] }
+  if len < 4 {
+    bail!["length field must be at least 4 (at offset {})",offset]
+  }
   if offset + len > max_size {
     bail!["offset+length ({}+{}={}) exceeds end of file ({})",
       offset, len, offset+len, max_size ];
   }
+  //eprintln!["READ {} {}", offset, len];
   let mut buf = Vec::with_capacity((len-4) as usize);
   match size_guess.cmp(&len) {
     Ordering::Equal => {

@@ -3,7 +3,7 @@ use write_cache::WriteCache;
 use bincode::{serialize,deserialize};
 use std::mem::size_of;
 use random_access_storage::RandomAccess;
-use failure::{Error,format_err};
+use failure::{Error,format_err,ensure};
 use std::marker::PhantomData;
 use read_block::read_block;
 use std::rc::Rc;
@@ -31,13 +31,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     if rows.len() == 1 { // use existing address
       Ok(rows[0].1)
     } else { // combine addresses into a new block
-      // TODO: this function should return a Vec<u64>
-      // of blocks with at most max_data_size records
       let mut dstore = self.data_store.try_borrow_mut()?;
+      let max = dstore.max_data_size;
       let mut combined = vec![];
       for row in rows {
         combined.extend(dstore.list(row.1)?);
       }
+      ensure![combined.len() <= max, "data page limit exceeded in data merge"];
       dstore.batch(&combined.iter().map(|c| c).collect())
     }
   }
@@ -47,6 +47,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: WriteCache<S>,
+  pub max_data_size: usize,
   _marker: PhantomData<(P,V)>
 }
 
@@ -70,9 +71,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 impl<S,P,V> DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (store: S) -> Result<Self,Error> {
+  pub fn open (store: S, max_data_size: usize) -> Result<Self,Error> {
     Ok(Self {
       store: WriteCache::open(store)?,
+      max_data_size,
       _marker: PhantomData
     })
   }

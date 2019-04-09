@@ -9,21 +9,22 @@ use failure::{Error,bail,format_err};
 use pivots;
 
 #[derive(Clone)]
-pub enum Node<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
+pub enum Node<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   Empty,
-  Branch(Branch<'a,D,P,V>),
+  Branch(Branch<D,P,V>),
+  Split(Vec<usize>,u64),
   Data(u64)
 }
 
 #[derive(Clone)]
-pub struct Data<'a,P,V> where P: Point, V: Value {
+pub struct Data<P,V> where P: Point, V: Value {
   pub offset: u64,
   bucket: Vec<usize>,
-  rows: &'a Vec<((P,V),u64)>
+  rows: Rc<Vec<((P,V),u64)>>
 }
 
 #[derive(Clone)]
-pub struct Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
+pub struct Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   pub offset: u64,
   level: usize,
   max_data_size: usize,
@@ -31,17 +32,17 @@ pub struct Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   data_batch: Rc<RefCell<D>>,
   bucket: Vec<usize>,
   buckets: Vec<Vec<usize>>,
-  rows: &'a Vec<((P,V),u64)>,
+  rows: Rc<Vec<((P,V),u64)>>,
   pivots: Vec<P>,
   sorted: Vec<usize>,
   intersecting: Vec<Vec<usize>>,
   matched: Vec<bool>
 }
 
-impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
+impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   pub fn new (level: usize, max_data_size: usize,
   order: Rc<Vec<usize>>, data_batch: Rc<RefCell<D>>,
-  bucket: Vec<usize>, rows: &'a Vec<((P,V),u64)>)
+  bucket: Vec<usize>, rows: Rc<Vec<((P,V),u64)>>)
   -> Result<Self,Error> {
     let n = order.len();
     let bf = (n+3)/2;
@@ -113,7 +114,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       + (n+bf)*size_of::<u64>() // I+B
   }
   pub fn build (&mut self, alloc: &mut FnMut (usize) -> u64)
-  -> Result<(Vec<u8>,Vec<Node<'a,D,P,V>>),Error> {
+  -> Result<(Vec<u8>,Vec<Node<D,P,V>>),Error> {
     let order = &self.order;
     let n = order.len();
     let bf = (n+3)/2;
@@ -151,24 +152,25 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       for bucket in buckets.iter() {
         let mut size = 0u64;
         for b in bucket.iter() { size += self.rows[*b].1 }
-
         if bucket.is_empty() {
           nodes.push(Node::Empty);
           bitfield.push(false);
-        } else if size as usize <= self.max_data_size || bucket.len() <= 3 {
+        } else if size as usize <= self.max_data_size {
           let mut dstore = self.data_batch.try_borrow_mut()?;
-          nodes.push(Node::Data(
-            dstore.batch(&bucket.iter().map(|b| {
-              &self.rows[*b].0
-            }).collect())?
-          ));
+          let offset = dstore.batch(&bucket.iter().map(|b| {
+            &self.rows[*b].0
+          }).collect())?;
+          nodes.push(Node::Data(offset));
           bitfield.push(true);
+        } else if bucket.len() <= 3 {
+          nodes.push(Node::Split(bucket.clone(),alloc(self.bytes())));
+          bitfield.push(false);
         } else {
           let mut b = Branch::new(
             self.level+1, self.max_data_size,
             Rc::clone(&self.order),
             Rc::clone(&self.data_batch),
-            bucket.clone(), self.rows
+            bucket.clone(), Rc::clone(&self.rows)
           )?;
           b.alloc(alloc);
           nodes.push(Node::Branch(b));
@@ -199,6 +201,7 @@ impl<'a,D,P,V> Branch<'a,D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       data.extend(&(match node {
         Node::Branch(b) => b.offset+1,
         Node::Data(d) => *d+1,
+        Node::Split(_, offset) => *offset+1,
         Node::Empty => 0u64
       }).to_be_bytes());
     }
