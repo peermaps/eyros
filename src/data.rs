@@ -37,7 +37,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       for row in rows {
         combined.extend(dstore.list(row.1)?);
       }
-      ensure![combined.len() <= max, "data page limit exceeded in data merge"];
+      ensure![combined.len() <= max, "data size limit exceeded in data merge"];
       dstore.batch(&combined.iter().map(|c| c).collect())
     }
   }
@@ -54,6 +54,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 impl<S,P,V> DataBatch<P,V> for DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error> {
+    ensure![rows.len() <= self.max_data_size,
+      "data size limit exceeded in data merge"];
     let mut data: Vec<u8> = vec![0;4];
     for row in rows.iter() {
       let buf = serialize(row)?;
