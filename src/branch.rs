@@ -46,29 +46,39 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   -> Result<Self,Error> {
     let n = order.len();
     let bf = (n+3)/2;
-    if bucket.len() < 3 {
-      bail!["not enough records to construct pivots. need at least 3, found {}",
-        bucket.len()];
-    }
     let mut sorted: Vec<usize> = (0..bucket.len()).collect();
     sorted.sort_unstable_by(|a,b| {
       (rows[bucket[*a]].0).0.cmp_at(&(rows[bucket[*b]].0).0, level)
     });
-    let mut pivots: Vec<P> = {
-      let z = n.min(sorted.len()-2);
-      (0..z).map(|k| {
-        let m = (k+1) * sorted.len() / (z+1);
-        let a = &(rows[bucket[sorted[m+0]]].0);
-        let b = &(rows[bucket[sorted[m+1]]].0);
-        a.0.midpoint_upper(&b.0)
-      }).collect()
-    };
+    let mut pivots: Vec<P> =
+      if sorted.len() == 2 {
+        let a = rows[bucket[sorted[0]]].0;
+        let b = rows[bucket[sorted[1]]].0;
+        vec![a.0.midpoint_upper(&b.0)]
+      } else {
+        let z = n.min(sorted.len()-2);
+        (0..z).map(|k| {
+          let m = (k+1) * sorted.len() / (z+1);
+          let a = &(rows[bucket[sorted[m+0]]].0);
+          let b = &(rows[bucket[sorted[m+1]]].0);
+          a.0.midpoint_upper(&b.0)
+        }).collect()
+      };
     // sometimes the sorted intervals overlap.
     // sort again to make sure the pivots are always in ascending order
     pivots.sort_unstable_by(|a,b| {
       a.cmp_at(b, level)
     });
-    { // remove duplicate pivots in already sorted vec
+    if pivots.is_empty() {
+      bail!["empty set of pivots"]
+    } else if pivots.len() == 1 {
+      pivots = vec![pivots[0],pivots[0]];
+      /*
+      bail!["not enough data to pad pivots. need at least 2, found {}",
+        pivots.len()];
+      */
+    } else {
+      // remove duplicate pivots in already sorted vec
       let mut i = 0;
       while i < pivots.len()-1 {
         while i < pivots.len()-1
@@ -77,10 +87,6 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         }
         i += 1;
       }
-    }
-    if pivots.len() < 2 {
-      bail!["not enough data to pad pivots. need at least 2, found {}",
-        pivots.len()];
     }
     // pad out pivots so there's exactly n elements
     if pivots.len() < n {
@@ -162,9 +168,9 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
           }).collect())?;
           nodes.push(Node::Data(offset));
           bitfield.push(true);
-        } else if bucket.len() <= 3 {
-          nodes.push(Node::Split(bucket.clone(),alloc(self.bytes())));
-          bitfield.push(false);
+        //} else if bucket.len() < bf {
+        //  nodes.push(Node::Split(bucket.clone(),alloc(self.bytes())));
+        //  bitfield.push(false);
         } else {
           let mut b = Branch::new(
             self.level+1, self.max_data_size,
