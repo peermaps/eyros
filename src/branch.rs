@@ -12,7 +12,6 @@ use pivots;
 pub enum Node<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   Empty,
   Branch(Branch<D,P,V>),
-  Split(Vec<usize>,u64),
   Data(u64)
 }
 
@@ -168,9 +167,6 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
           }).collect())?;
           nodes.push(Node::Data(offset));
           bitfield.push(true);
-        //} else if bucket.len() < bf {
-        //  nodes.push(Node::Split(bucket.clone(),alloc(self.bytes())));
-        //  bitfield.push(false);
         } else {
           let mut b = Branch::new(
             self.level+1, self.max_data_size,
@@ -207,7 +203,6 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       data.extend(&(match node {
         Node::Branch(b) => b.offset+1,
         Node::Data(d) => *d+1,
-        Node::Split(_, offset) => *offset+1,
         Node::Empty => 0u64
       }).to_be_bytes());
     }
