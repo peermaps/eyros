@@ -4,9 +4,10 @@ extern crate random_access_storage;
 extern crate failure;
 extern crate bincode;
 extern crate serde;
+extern crate lru;
 
 #[macro_use] mod ensure;
-mod builder;
+mod setup;
 mod meta;
 mod point;
 mod tree;
@@ -20,7 +21,7 @@ mod read_block;
 mod pivots;
 mod write_cache;
 
-pub use builder::Setup;
+pub use setup::Setup;
 use staging::{Staging,StagingIterator};
 use planner::plan;
 pub use point::{Point,Scalar};
@@ -74,17 +75,12 @@ P: Point, V: Value {
   pub fn open(open_store: U) -> Result<Self,Error> {
     Setup::new(open_store).build()
   }
-  pub fn open_opts(open_store: U, bf: usize,
-  max_data_size: usize, base_size: usize) -> Result<Self,Error> {
+  pub fn open_opts(open_store: U, bf: usize, max_data_size: usize,
+  base_size: usize, bbox_cache_size: usize) -> Result<Self,Error> {
     let meta = Meta::open(open_store("meta")?)?;
     let staging = Staging::open(open_store("staging")?)?;
-    let data_store = DataStore::open(open_store("data")?, max_data_size)?;
-    /*
-    let n = bf*2-3;
-    if max_data_size <= n {
-      bail!["max_data_size must be greater than {} for branch_factor={}", n, bf]
-    }
-    */
+    let data_store = DataStore::open(open_store("data")?,
+      max_data_size, bbox_cache_size)?;
     ensure![base_size > max_data_size,
       "base_size ({}) must be > max_data_size ({})", base_size, max_data_size];
     let mut db = Self {

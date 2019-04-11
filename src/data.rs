@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use read_block::read_block;
 use std::rc::Rc;
 use std::cell::RefCell;
+use lru::LruCache;
 
 pub trait DataBatch<P,V> where P: Point, V: Value {
   fn batch (&mut self, &Vec<&(P,V)>) -> Result<u64,Error>;
@@ -43,10 +44,11 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
 }
 
-#[derive(Debug,Clone)]
+//#[derive(Debug,Clone)]
 pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: WriteCache<S>,
+  bbox_cache: LruCache<u64,(P::Bounds,u64)>,
   pub max_data_size: usize,
   _marker: PhantomData<(P,V)>
 }
@@ -73,9 +75,11 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 impl<S,P,V> DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (store: S, max_data_size: usize) -> Result<Self,Error> {
+  pub fn open (store: S, max_data_size: usize,
+  bbox_cache_size: usize) -> Result<Self,Error> {
     Ok(Self {
       store: WriteCache::open(store)?,
+      bbox_cache: LruCache::new(bbox_cache_size),
       max_data_size,
       _marker: PhantomData
     })
@@ -109,6 +113,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(self.store.len()? as u64)
   }
   pub fn bbox (&mut self, offset: u64) -> Result<(P::Bounds,u64),Error> {
+    match self.bbox_cache.get(&offset) {
+      None => {},
+      Some(r) => return Ok(*r)
+    };
     let rows = self.list(offset)?;
     if rows.is_empty() {
       bail!["empty data block"]
@@ -117,6 +125,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       None => bail!["invalid data at offset {}", offset],
       Some(bbox) => bbox
     };
-    Ok((bbox,rows.len() as u64))
+    let result = (bbox,rows.len() as u64);
+    self.bbox_cache.put(offset, result.clone());
+    Ok(result)
   }
 }

@@ -8,6 +8,7 @@ U: (Fn(&str) -> Result<S,Error>) {
   max_data_size: usize,
   base_size: usize,
   branch_factor: usize,
+  bbox_cache_size: usize,
   open_store: U
 }
 
@@ -19,7 +20,8 @@ U: (Fn(&str) -> Result<S,Error>) {
       open_store,
       branch_factor: 9,
       max_data_size: 1000,
-      base_size: 9_000
+      base_size: 9_000,
+      bbox_cache_size: 10_000
     }
   }
   pub fn branch_factor (mut self, bf: usize) -> Self {
@@ -32,6 +34,10 @@ U: (Fn(&str) -> Result<S,Error>) {
   }
   pub fn max_data_size (mut self, size: usize) -> Self {
     self.max_data_size = size;
+    self
+  }
+  pub fn bbox_cache_size (mut self, size: usize) -> Self {
+    self.bbox_cache_size = size;
     self
   }
   pub fn build<P,V> (self) -> Result<DB<S,U,P,V>,Error>
