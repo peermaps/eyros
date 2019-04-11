@@ -108,6 +108,36 @@ fn mega_batch() -> Result<(),Error> {
       "incorrect length for partial region");
     assert_eq!(results, expected, "incorrect results for partial region");
   }
+
+  {
+    let bbox = ((-0.500,0.800,200.0),(-0.495,0.805,300.0));
+    let mut results = vec![];
+    let start = time::Instant::now();
+    for result in db.query(&bbox)? {
+      results.push(result?);
+    }
+    eprintln!["query for {} records in {} seconds",
+      results.len(), start.elapsed().as_float_secs()];
+    let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
+    = inserts.iter()
+      .map(|r| {
+        match r {
+          Row::Insert(point,value) => (*point,*value),
+          _ => panic!["unexpected row type"]
+        }
+      })
+      .filter(|r| {
+        contains_iv((bbox.0).0,(bbox.1).0, (r.0).0)
+        && contains_iv((bbox.0).1,(bbox.1).1, (r.0).1)
+        && contains_pt((bbox.0).2,(bbox.1).2, (r.0).2)
+      })
+      .collect();
+    results.sort_unstable_by(cmp);
+    expected.sort_unstable_by(cmp);
+    assert_eq!(results.len(), expected.len(),
+      "incorrect length for small region");
+    assert_eq!(results, expected, "incorrect results for small region");
+  }
   Ok(())
 }
 
