@@ -362,14 +362,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let mut blocks = Vec::with_capacity(offsets.len());
     let mut dstore = self.data_store.try_borrow_mut()?;
     for offset in offsets {
-      let rows = dstore.list(offset)?;
-      if rows.is_empty() {
-        panic!["empty data block"];
-      }
-      match P::bounds(&rows.iter().map(|(p,_)| *p).collect()) {
-        None => panic!["invalid data at offset {}", offset],
-        Some(bbox) => blocks.push((bbox,offset,rows.len() as u64))
-      }
+      let (bbox,len) = dstore.bbox(offset)?;
+      blocks.push((bbox,offset,len))
     }
     Ok(blocks)
   }

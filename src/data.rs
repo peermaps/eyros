@@ -3,7 +3,7 @@ use write_cache::WriteCache;
 use bincode::{serialize,deserialize};
 use std::mem::size_of;
 use random_access_storage::RandomAccess;
-use failure::{Error,format_err,ensure};
+use failure::{Error,format_err,ensure,bail};
 use std::marker::PhantomData;
 use read_block::read_block;
 use std::rc::Rc;
@@ -107,5 +107,16 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   pub fn bytes (&mut self) -> Result<u64,Error> {
     Ok(self.store.len()? as u64)
+  }
+  pub fn bbox (&mut self, offset: u64) -> Result<(P::Bounds,u64),Error> {
+    let rows = self.list(offset)?;
+    if rows.is_empty() {
+      bail!["empty data block"]
+    }
+    let bbox = match P::bounds(&rows.iter().map(|(p,_)| *p).collect()) {
+      None => bail!["invalid data at offset {}", offset],
+      Some(bbox) => bbox
+    };
+    Ok((bbox,rows.len() as u64))
   }
 }
