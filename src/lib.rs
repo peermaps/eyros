@@ -20,12 +20,13 @@ mod data;
 mod read_block;
 mod pivots;
 mod write_cache;
+mod block_cache;
 
-pub use setup::Setup;
+pub use setup::{Setup,SetupFields};
 use staging::{Staging,StagingIterator};
 use planner::plan;
 pub use point::{Point,Scalar};
-pub use tree::{Tree,TreeIterator};
+pub use tree::{Tree,TreeIterator,TreeOpts};
 pub use branch::Branch;
 use order::pivot_order;
 use data::DataStore;
@@ -58,14 +59,12 @@ S: RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   open_store: U,
-  branch_factor: usize,
   pub trees: Vec<Tree<S,P,V>>,
   order: Rc<Vec<usize>>,
   pub staging: Staging<S,P,V>,
   pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
-  max_data_size: usize,
-  base_size: usize,
-  meta: Meta<S>
+  meta: Meta<S>,
+  fields: SetupFields
 }
 
 impl<S,U,P,V> DB<S,U,P,V> where
@@ -75,24 +74,23 @@ P: Point, V: Value {
   pub fn open(open_store: U) -> Result<Self,Error> {
     Setup::new(open_store).build()
   }
-  pub fn open_opts(open_store: U, bf: usize, max_data_size: usize,
-  base_size: usize, bbox_cache_size: usize) -> Result<Self,Error> {
-    let meta = Meta::open(open_store("meta")?)?;
-    let staging = Staging::open(open_store("staging")?)?;
-    let data_store = DataStore::open(open_store("data")?,
-      max_data_size, bbox_cache_size)?;
-    ensure![base_size > max_data_size,
-      "base_size ({}) must be > max_data_size ({})", base_size, max_data_size];
+  pub fn open_from_setup(setup: Setup<S,U>) -> Result<Self,Error> {
+    let meta = Meta::open((setup.open_store)("meta")?)?;
+    let staging = Staging::open((setup.open_store)("staging")?)?;
+    let data_store = DataStore::open((setup.open_store)("data")?,
+      setup.fields.max_data_size, setup.fields.bbox_cache_size)?;
+    ensure![setup.fields.base_size > setup.fields.max_data_size,
+      "base_size ({}) must be > max_data_size ({})",
+      setup.fields.base_size, setup.fields.max_data_size];
+    let bf = setup.fields.branch_factor;
     let mut db = Self {
-      open_store,
-      branch_factor: bf,
+      open_store: setup.open_store,
       staging,
       data_store: Rc::new(RefCell::new(data_store)),
       order: Rc::new(pivot_order(bf)),
       meta: meta,
       trees: vec![],
-      max_data_size,
-      base_size
+      fields: setup.fields
     };
     for i in 0..db.meta.mask.len() {
       db.create_tree(i)?;
@@ -101,7 +99,7 @@ P: Point, V: Value {
   }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     let n = (self.staging.rows.len() + rows.len()) as u64;
-    let base = self.base_size as u64;
+    let base = self.fields.base_size as u64;
     if n <= base {
       self.staging.batch(rows)?;
       self.staging.flush()?;
@@ -178,8 +176,15 @@ P: Point, V: Value {
   fn create_tree (&mut self, index: usize) -> Result<(),Error> {
     for i in self.trees.len()..index+1 {
       let store = (self.open_store)(&format!("tree{}",i))?;
-      self.trees.push(Tree::open(store, Rc::clone(&self.data_store),
-        self.branch_factor, self.max_data_size, Rc::clone(&self.order))?);
+      self.trees.push(Tree::open(TreeOpts {
+        store,
+        data_store: Rc::clone(&self.data_store),
+        order: Rc::clone(&self.order),
+        branch_factor: self.fields.branch_factor,
+        max_data_size: self.fields.max_data_size,
+        block_cache_size: self.fields.block_cache_size,
+        block_cache_count: self.fields.block_cache_count
+      })?);
     }
     Ok(())
   }

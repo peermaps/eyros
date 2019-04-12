@@ -1,5 +1,5 @@
 use random_access_storage::RandomAccess;
-use std::io::{Write};
+use std::io::Write;
 
 #[derive(Debug,Clone)]
 pub struct WriteCache<S> where S: RandomAccess {

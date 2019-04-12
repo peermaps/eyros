@@ -1,12 +1,12 @@
 use random_access_storage::RandomAccess;
 use failure::{Error,format_err};
-use std::marker::PhantomData;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::mem::size_of;
 
 use ::{Row,Point,Value};
 use write_cache::WriteCache;
+use block_cache::BlockCache;
 
 use branch::{Branch,Node};
 use data::{DataStore,DataMerge,DataBatch};
@@ -150,35 +150,43 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
 }
 
+pub struct TreeOpts<S,P,V>
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  pub store: S,
+  pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
+  pub branch_factor: usize,
+  pub max_data_size: usize,
+  pub block_cache_size: usize,
+  pub block_cache_count: usize,
+  pub order: Rc<Vec<usize>>
+}
+
 pub struct Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub store: WriteCache<S>,
+  pub store: WriteCache<BlockCache<S>>,
   data_store: Rc<RefCell<DataStore<S,P,V>>>,
   data_merge: Rc<RefCell<DataMerge<S,P,V>>>,
   branch_factor: usize,
   pub bytes: u64,
   max_data_size: usize,
   order: Rc<Vec<usize>>,
-  _marker: PhantomData<(P,V)>
 }
 
 impl<S,P,V> Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (mut store: S, data_store: Rc<RefCell<DataStore<S,P,V>>>,
-  branch_factor: usize, max_data_size: usize,
-  order: Rc<Vec<usize>>) -> Result<Self,Error> {
-    let bytes = store.len()? as u64;
+  pub fn open (mut opts: TreeOpts<S,P,V>) -> Result<Self,Error> {
+    let bytes = opts.store.len()? as u64;
     let data_merge = Rc::new(RefCell::new(
-      DataMerge::new(Rc::clone(&data_store))));
+      DataMerge::new(Rc::clone(&opts.data_store))));
     Ok(Self {
-      store: WriteCache::open(store)?,
-      data_store,
+      store: WriteCache::open(BlockCache::new(
+        opts.store, opts.block_cache_size, opts.block_cache_count))?,
+      data_store: opts.data_store,
       data_merge,
       bytes,
-      order,
-      branch_factor,
-      max_data_size,
-      _marker: PhantomData
+      order: opts.order,
+      branch_factor: opts.branch_factor,
+      max_data_size: opts.max_data_size
     })
   }
   pub fn clear (&mut self) -> Result<(),Error> {
