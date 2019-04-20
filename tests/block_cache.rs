@@ -60,3 +60,44 @@ fn block_cache_full_write () -> Result<(),Error> {
   }
   Ok(())
 }
+
+#[test]
+fn block_cache_read_write_commit () -> Result<(),Error> {
+  let mut r = rand().seed([13,12]);
+  let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
+  for i in 10..20 {
+    let mut store = BlockCache::new(
+      RandomAccessDisk::open(dir.path().join(i.to_string()))?, 50, 40);
+    let size = 1_000;
+    let mut data = vec![];
+    for _ in 0..size {
+      data.push(r.read::<u8>());
+    }
+    let mut mask = vec![false;size];
+    let mut covered = 0;
+    while covered < size {
+      let i = (r.read::<f64>()*(size as f64)) as usize;
+      let j = i + ((r.read::<f64>()*((size-i+1) as f64)) as usize);
+      store.write(i,&data[i..j])?;
+      for k in i..j {
+        if !mask[k] { covered += 1 }
+        mask[k] = true;
+      }
+    }
+    store.commit()?;
+    for _ in 0..500 {
+      let i = (r.read::<f64>()*(size as f64)) as usize;
+      let len = (r.read::<f64>()*((size-i) as f64)) as usize;
+      assert_eq![store.read(i,len)?, data[i..i+len].to_vec()];
+    }
+    assert_eq![store.read(8, 4)?, data[8..8+4].to_vec()];
+    assert_eq![store.read(10, 3)?, data[10..10+3].to_vec()];
+    assert_eq![store.read(0, 4)?, data[0..4].to_vec()];
+  }
+  Ok(())
+}
+
+#[test]
+fn block_cache_read_write_resume () -> Result<(),Error> {
+  Ok(())
+}

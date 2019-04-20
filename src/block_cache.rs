@@ -51,13 +51,28 @@ impl Block {
     }
     true
   }
-  /*
-  pub fn commit<S> (&mut self, store: &mut S, offset: u64)
-  -> Result<(),S::Error> where S: RandomAccess {
-    store.write(offset as usize, &self.data)?;
-    Ok(())
+  pub fn writes (&self) -> Vec<(usize,&[u8])> {
+    if self.missing == 0 {
+      vec![(0,self.data.as_slice())]
+    } else {
+      let mut result = vec![];
+      let mut offset = 0;
+      let mut prev = false;
+      for i in 0..self.data.len() {
+        let m = (self.mask[i/8] >> (i%8)) & 1 == 1;
+        if m && !prev {
+          offset = i;
+        } else if !m && prev {
+          result.push((offset,&self.data[offset..i]));
+        }
+        prev = m;
+      }
+      if prev && offset < self.data.len() {
+        result.push((offset,&self.data[offset..]));
+      }
+      result
+    }
   }
-  */
 }
 
 //#[derive(Debug,Clone)]
@@ -76,6 +91,33 @@ impl<S> BlockCache<S> where S: RandomAccess {
       reads: LruCache::new(count),
       writes: HashMap::new()
     }
+  }
+}
+
+impl<S> BlockCache<S> where S: RandomAccess {
+  pub fn commit (&mut self) -> Result<(),S::Error> {
+    let mut writes: Vec<(u64,Vec<u8>)> = vec![];
+    for (b,block) in self.writes.iter() {
+      self.reads.put(*b, block.clone());
+      if writes.is_empty() {
+        for (i,slice) in block.writes() {
+          writes.push(((i as u64)+b,slice.to_vec()));
+        }
+      } else {
+        for (i,slice) in block.writes() {
+          if i == 0 {
+            writes.last_mut().unwrap().1.extend_from_slice(slice);
+          } else {
+            writes.push(((i as u64)+b,slice.to_vec()));
+          }
+        }
+      }
+    }
+    self.writes.clear();
+    for (offset,data) in writes {
+      self.store.write(offset as usize, &data)?;
+    }
+    Ok(())
   }
 }
 
