@@ -106,8 +106,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.rows.extend_from_slice(rows);
     Ok(())
   }
-  pub fn flush (&mut self) -> Result<(),Error> {
-    self.store.flush()
+  pub fn commit (&mut self) -> Result<(),Error> {
+    self.store.commit()
   }
   pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
   -> StagingIterator<'a,'b,P,V> {

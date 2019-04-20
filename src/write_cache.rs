@@ -19,7 +19,7 @@ impl<S> WriteCache<S> where S: RandomAccess {
       enabled: true
     })
   }
-  pub fn flush (&mut self) -> Result<(),S::Error> {
+  pub fn commit (&mut self) -> Result<(),S::Error> {
     for q in self.queue.iter() {
       self.store.write(q.0, &q.1)?;
     }

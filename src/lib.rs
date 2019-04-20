@@ -78,7 +78,8 @@ P: Point, V: Value {
     let meta = Meta::open((setup.open_store)("meta")?)?;
     let staging = Staging::open((setup.open_store)("staging")?)?;
     let data_store = DataStore::open((setup.open_store)("data")?,
-      setup.fields.max_data_size, setup.fields.bbox_cache_size)?;
+      setup.fields.max_data_size, setup.fields.bbox_cache_size,
+      setup.fields.block_cache_size, setup.fields.block_cache_count)?;
     ensure![setup.fields.base_size > setup.fields.max_data_size,
       "base_size ({}) must be > max_data_size ({})",
       setup.fields.base_size, setup.fields.max_data_size];
@@ -102,7 +103,7 @@ P: Point, V: Value {
     let base = self.fields.base_size as u64;
     if n <= base {
       self.staging.batch(rows)?;
-      self.staging.flush()?;
+      self.staging.commit()?;
       return Ok(())
     }
     let count = (n/base)*base;
@@ -165,10 +166,10 @@ P: Point, V: Value {
       rem, rem_rows.len());
     self.staging.clear()?;
     self.staging.batch(&rem_rows)?;
-    self.staging.flush()?;
+    self.staging.commit()?;
     {
       let mut dstore = self.data_store.try_borrow_mut()?;
-      dstore.flush()?;
+      dstore.commit()?;
     }
     self.meta.save()?;
     Ok(())

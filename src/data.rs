@@ -1,4 +1,5 @@
 use ::{Point,Value};
+//use block_cache::BlockCache;
 use write_cache::WriteCache;
 use bincode::{serialize,deserialize};
 use std::mem::size_of;
@@ -47,6 +48,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 //#[derive(Debug,Clone)]
 pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
+  //store: BlockCache<S>,
   store: WriteCache<S>,
   bbox_cache: LruCache<u64,(P::Bounds,u64)>,
   pub max_data_size: usize,
@@ -75,17 +77,18 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 impl<S,P,V> DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (store: S, max_data_size: usize,
-  bbox_cache_size: usize) -> Result<Self,Error> {
+  pub fn open (store: S, max_data_size: usize, bbox_cache_size: usize,
+  block_cache_size: usize, block_cache_count: usize) -> Result<Self,Error> {
     Ok(Self {
+      //store: BlockCache::new(store, block_cache_size, block_cache_count),
       store: WriteCache::open(store)?,
       bbox_cache: LruCache::new(bbox_cache_size),
       max_data_size,
       _marker: PhantomData
     })
   }
-  pub fn flush (&mut self) -> Result<(),Error> {
-    self.store.flush()
+  pub fn commit (&mut self) -> Result<(),Error> {
+    self.store.commit()
   }
   pub fn query (&mut self, offset: u64, bbox: &P::Bounds)
   -> Result<Vec<(P,V)>,Error> {

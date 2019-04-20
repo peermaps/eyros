@@ -98,6 +98,68 @@ fn block_cache_read_write_commit () -> Result<(),Error> {
 }
 
 #[test]
-fn block_cache_read_write_resume () -> Result<(),Error> {
+fn block_cache_cold_read () -> Result<(),Error> {
+  let mut r = rand().seed([13,12]);
+  let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
+  let mut store = RandomAccessDisk::open(dir.path().join("20"))?;
+  let size = 1_000;
+  let mut data = vec![];
+  for _ in 0..size {
+    data.push(r.read::<u8>());
+  }
+  store.write(0, &data)?;
+  let mut bstore = BlockCache::new(store, 50, 20);
+  for _ in 0..500 {
+    let i = (r.read::<f64>()*(size as f64)) as usize;
+    let len = (r.read::<f64>()*((size-i) as f64)) as usize;
+    assert_eq![bstore.read(i,len)?, data[i..i+len].to_vec()];
+  }
+  Ok(())
+}
+
+#[test]
+fn block_cache_cold_read_write_read () -> Result<(),Error> {
+  let mut r = rand().seed([13,12]);
+  let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
+  let size = 1_000;
+  let mut data = vec![];
+  {
+    let mut store = RandomAccessDisk::open(dir.path().join("20"))?;
+    for _ in 0..size {
+      data.push(r.read::<u8>());
+    }
+    store.write(0, &data)?;
+    let mut bstore = BlockCache::new(store, 50, 20);
+    for _ in 0..500 {
+      let i = (r.read::<f64>()*(size as f64)) as usize;
+      let len = (r.read::<f64>()*((size-i) as f64)) as usize;
+      assert_eq![bstore.read(i,len)?, data[i..i+len].to_vec()];
+    }
+    for _ in 0..20 {
+      let i = (r.read::<f64>()*(size as f64)) as usize;
+      let len = ((r.read::<f64>()*((size-i) as f64)) as usize).min(30);
+      let mut chunk = vec![];
+      for _ in 0..len {
+        chunk.push(r.read::<u8>());
+      }
+      data[i..i+len].copy_from_slice(&chunk);
+      bstore.write(i, &data)?;
+    }
+    for _ in 0..500 {
+      let i = (r.read::<f64>()*(size as f64)) as usize;
+      let len = (r.read::<f64>()*((size-i) as f64)) as usize;
+      assert_eq![bstore.read(i,len)?, data[i..i+len].to_vec()];
+    }
+    bstore.commit()?;
+    for _ in 0..500 {
+      let i = (r.read::<f64>()*(size as f64)) as usize;
+      let len = (r.read::<f64>()*((size-i) as f64)) as usize;
+      assert_eq![bstore.read(i,len)?, data[i..i+len].to_vec()];
+    }
+  }
+  {
+    let mut store = RandomAccessDisk::open(dir.path().join("20"))?;
+    assert_eq![store.read(0,size)?, data];
+  }
   Ok(())
 }
