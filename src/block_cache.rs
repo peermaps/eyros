@@ -79,6 +79,7 @@ impl Block {
 pub struct BlockCache<S> where S: RandomAccess {
   store: S,
   size: usize,
+  length: Option<u64>,
   reads: LruCache<u64,Block>,
   writes: HashMap<u64,Block>
 }
@@ -88,6 +89,7 @@ impl<S> BlockCache<S> where S: RandomAccess {
     Self {
       store,
       size,
+      length: None,
       reads: LruCache::new(count),
       writes: HashMap::new()
     }
@@ -97,23 +99,30 @@ impl<S> BlockCache<S> where S: RandomAccess {
 impl<S> BlockCache<S> where S: RandomAccess {
   pub fn commit (&mut self) -> Result<(),S::Error> {
     let mut writes: Vec<(u64,Vec<u8>)> = vec![];
-    for (b,block) in self.writes.iter() {
-      self.reads.put(*b, block.clone());
-      if writes.is_empty() {
-        for (i,slice) in block.writes() {
+    let mut keys: Vec<u64> = self.writes.keys().map(|b| *b).collect();
+    keys.sort_unstable();
+    for b in keys {
+      let block = self.writes.remove(&b).unwrap();
+      for (i,slice) in block.writes() {
+        if i == 0 && !writes.is_empty() {
+          let should_push = {
+            let last = writes.last_mut().unwrap();
+            if last.0 + (last.1.len() as u64) == b {
+              last.1.extend_from_slice(slice);
+              false
+            } else { true }
+          };
+          if should_push {
+            writes.push((b,slice.to_vec()));
+          }
+        } else {
           writes.push(((i as u64)+b,slice.to_vec()));
         }
-      } else {
-        for (i,slice) in block.writes() {
-          if i == 0 {
-            writes.last_mut().unwrap().1.extend_from_slice(slice);
-          } else {
-            writes.push(((i as u64)+b,slice.to_vec()));
-          }
-        }
       }
+      self.reads.put(b, block);
     }
-    self.writes.clear();
+    // TODO: analyze gaps and state of read cache in order to 
+    // merge some nearby writes with the gap filled from the read cache
     for (offset,data) in writes {
       self.store.write(offset as usize, &data)?;
     }
@@ -158,6 +167,11 @@ impl<S> RandomAccess for BlockCache<S> where S: RandomAccess {
         }
       }
     }
+    self.length = Some(match self.length {
+      Some(len) => len.max((offset as u64) + (data.len() as u64)),
+      None => (self.store.len()? as u64)
+        .max((offset as u64) + (data.len() as u64))
+    });
     Ok(())
   }
   fn read (&mut self, offset: usize, length: usize) ->
@@ -253,10 +267,20 @@ impl<S> RandomAccess for BlockCache<S> where S: RandomAccess {
     self.store.del(offset, length)
   }
   fn truncate (&mut self, length: usize) -> Result<(),Self::Error> {
+    self.reads.clear();
+    self.writes.clear();
+    self.length = Some(0);
     self.store.truncate(length)
   }
   fn len (&mut self) -> Result<usize,Self::Error> {
-    self.store.len()
+    Ok(match self.length {
+      None => {
+        let len = self.store.len()? as u64;
+        self.length = Some(len);
+        len
+      },
+      Some(len) => len
+    } as usize)
   }
   fn is_empty (&mut self) -> Result<bool,Self::Error> {
     self.store.is_empty()

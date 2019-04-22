@@ -48,6 +48,7 @@ fn block_cache_full_write () -> Result<(),Error> {
           mask[k] = true;
         }
       }
+      assert_eq![store.len()?, size, "expected length"];
       for _ in 0..500 {
         let i = (r.read::<f64>()*(size as f64)) as usize;
         let len = (r.read::<f64>()*((size-i) as f64)) as usize;
@@ -56,6 +57,7 @@ fn block_cache_full_write () -> Result<(),Error> {
       assert_eq![store.read(8, 4)?, data[8..8+4].to_vec()];
       assert_eq![store.read(10, 3)?, data[10..10+3].to_vec()];
       assert_eq![store.read(0, 4)?, data[0..4].to_vec()];
+      assert_eq![store.len()?, size, "expected length"];
     }
   }
   Ok(())
@@ -84,7 +86,9 @@ fn block_cache_read_write_commit () -> Result<(),Error> {
         mask[k] = true;
       }
     }
+    assert_eq![store.len()?, size, "expected length"];
     store.commit()?;
+    assert_eq![store.len()?, size, "expected length"];
     for _ in 0..500 {
       let i = (r.read::<f64>()*(size as f64)) as usize;
       let len = (r.read::<f64>()*((size-i) as f64)) as usize;
@@ -93,6 +97,7 @@ fn block_cache_read_write_commit () -> Result<(),Error> {
     assert_eq![store.read(8, 4)?, data[8..8+4].to_vec()];
     assert_eq![store.read(10, 3)?, data[10..10+3].to_vec()];
     assert_eq![store.read(0, 4)?, data[0..4].to_vec()];
+    assert_eq![store.len()?, size, "expected length"];
   }
   Ok(())
 }
@@ -129,6 +134,7 @@ fn block_cache_cold_read_write_read () -> Result<(),Error> {
       data.push(r.read::<u8>());
     }
     store.write(0, &data)?;
+    assert_eq![store.len()?, size, "expected length"];
     let mut bstore = BlockCache::new(store, 50, 20);
     for _ in 0..500 {
       let i = (r.read::<f64>()*(size as f64)) as usize;
@@ -143,7 +149,7 @@ fn block_cache_cold_read_write_read () -> Result<(),Error> {
         chunk.push(r.read::<u8>());
       }
       data[i..i+len].copy_from_slice(&chunk);
-      bstore.write(i, &data)?;
+      bstore.write(i, &chunk)?;
     }
     for _ in 0..500 {
       let i = (r.read::<f64>()*(size as f64)) as usize;
@@ -156,10 +162,13 @@ fn block_cache_cold_read_write_read () -> Result<(),Error> {
       let len = (r.read::<f64>()*((size-i) as f64)) as usize;
       assert_eq![bstore.read(i,len)?, data[i..i+len].to_vec()];
     }
+    assert_eq![bstore.read(0,size)?, data];
+    assert_eq![bstore.len()?, size, "expected length"];
   }
   {
     let mut store = RandomAccessDisk::open(dir.path().join("20"))?;
     assert_eq![store.read(0,size)?, data];
+    assert_eq![store.len()?, size, "expected length"];
   }
   Ok(())
 }

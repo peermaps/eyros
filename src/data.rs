@@ -1,6 +1,5 @@
 use ::{Point,Value};
-//use block_cache::BlockCache;
-use write_cache::WriteCache;
+use block_cache::BlockCache;
 use bincode::{serialize,deserialize};
 use std::mem::size_of;
 use random_access_storage::RandomAccess;
@@ -48,8 +47,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 //#[derive(Debug,Clone)]
 pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  //store: BlockCache<S>,
-  store: WriteCache<S>,
+  store: BlockCache<S>,
   bbox_cache: LruCache<u64,(P::Bounds,u64)>,
   pub max_data_size: usize,
   _marker: PhantomData<(P,V)>
@@ -80,8 +78,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn open (store: S, max_data_size: usize, bbox_cache_size: usize,
   block_cache_size: usize, block_cache_count: usize) -> Result<Self,Error> {
     Ok(Self {
-      //store: BlockCache::new(store, block_cache_size, block_cache_count),
-      store: WriteCache::open(store)?,
+      store: BlockCache::new(store, block_cache_size, block_cache_count),
       bbox_cache: LruCache::new(bbox_cache_size),
       max_data_size,
       _marker: PhantomData
