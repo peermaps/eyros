@@ -1,5 +1,4 @@
 use ::{Point,Value};
-use block_cache::BlockCache;
 use bincode::{serialize,deserialize};
 use std::mem::size_of;
 use random_access_storage::RandomAccess;
@@ -47,8 +46,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 //#[derive(Debug,Clone)]
 pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  store: BlockCache<S>,
+  store: S,
   bbox_cache: LruCache<u64,(P::Bounds,u64)>,
+  list_cache: LruCache<u64,Vec<(P,V)>>,
   pub max_data_size: usize,
   _marker: PhantomData<(P,V)>
 }
@@ -78,14 +78,16 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn open (store: S, max_data_size: usize, bbox_cache_size: usize,
   block_cache_size: usize, block_cache_count: usize) -> Result<Self,Error> {
     Ok(Self {
-      store: BlockCache::new(store, block_cache_size, block_cache_count),
+      store,
       bbox_cache: LruCache::new(bbox_cache_size),
+      list_cache: LruCache::new(2_000),
       max_data_size,
       _marker: PhantomData
     })
   }
   pub fn commit (&mut self) -> Result<(),Error> {
-    self.store.commit()
+    //self.store.commit()
+    Ok(())
   }
   pub fn query (&mut self, offset: u64, bbox: &P::Bounds)
   -> Result<Vec<(P,V)>,Error> {
@@ -95,7 +97,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }).map(|row| { *row }).collect())
   }
   pub fn list (&mut self, offset: u64) -> Result<Vec<(P,V)>,Error> {
-    Self::parse(&self.read(offset)?)
+    match self.list_cache.get(&offset) {
+      Some(rows) => return Ok(rows.to_vec()),
+      None => {}
+    }
+    let rows = Self::parse(&self.read(offset)?)?;
+    self.list_cache.put(offset, rows);
+    Ok(self.list_cache.peek(&offset).unwrap().to_vec())
   }
   pub fn parse (buf: &Vec<u8>) -> Result<Vec<(P,V)>,Error> {
     let size = P::size_of() + size_of::<V>();

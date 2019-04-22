@@ -25,12 +25,12 @@ U: (Fn(&str) -> Result<S,Error>) {
     Self {
       open_store,
       fields: SetupFields {
-        branch_factor: 9,
-        max_data_size: 1000,
+        branch_factor: 5,
+        max_data_size: 3_000,
         base_size: 9_000,
         bbox_cache_size: 10_000,
         block_cache_size: 4096,
-        block_cache_count: 10_000
+        block_cache_count: 200_000
       }
     }
   }
