@@ -267,9 +267,26 @@ impl<S> RandomAccess for BlockCache<S> where S: RandomAccess {
     self.store.del(offset, length)
   }
   fn truncate (&mut self, length: usize) -> Result<(),Self::Error> {
-    self.reads.clear();
-    self.writes.clear();
-    self.length = Some(0);
+    if length == 0 {
+      self.reads.clear();
+      self.writes.clear();
+    } else {
+      let rkeys: Vec<u64> = self.reads.iter()
+        .map(|(k,_)| *k)
+        .filter(|b| *b >= length as u64)
+        .collect();
+      for b in rkeys {
+        self.reads.pop(&b);
+      }
+      let wkeys: Vec<u64> = self.writes.keys()
+        .map(|b| *b)
+        .filter(|b| *b >= length as u64)
+        .collect();
+      for b in wkeys {
+        self.writes.remove(&b);
+      }
+    }
+    self.length = Some(length as u64);
     self.store.truncate(length)
   }
   fn len (&mut self) -> Result<usize,Self::Error> {
