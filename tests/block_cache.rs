@@ -172,3 +172,31 @@ fn block_cache_cold_read_write_read () -> Result<(),Error> {
   }
   Ok(())
 }
+
+#[test]
+fn block_cache_append () -> Result<(),Error> {
+  let mut r = rand().seed([13,12]);
+  let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
+  let file = dir.path().join("21");
+  let mut store = BlockCache::new(RandomAccessDisk::open(file)?, 50, 40);
+  let mut expected: Vec<u8> = vec![];
+  for level in 0..5 {
+    eprintln!["level={}", level];
+    for _ in 0..20 {
+      let mut chunk = vec![];
+      let size = 1 + ((r.read::<f64>()*(200 as f64)) as usize);
+      for _ in 0..size {
+        chunk.push(r.read::<u8>());
+      }
+      let offset = store.len()?;
+      store.write(offset, &chunk)?;
+      expected.extend(chunk);
+    }
+    store.commit()?;
+  }
+  let len = store.len()?;
+  eprintln!["store length: {}\nexpected length: {}", len, expected.len()];
+  assert_eq![len, expected.len(), "expected vs store length mismatch"];
+  assert_eq![store.read(0,len)?, expected];
+  Ok(())
+}
