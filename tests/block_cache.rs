@@ -174,29 +174,95 @@ fn block_cache_cold_read_write_read () -> Result<(),Error> {
 }
 
 #[test]
-fn block_cache_append () -> Result<(),Error> {
+fn block_cache_append_low_count () -> Result<(),Error> {
   let mut r = rand().seed([13,12]);
   let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
   let file = dir.path().join("21");
   let mut store = BlockCache::new(RandomAccessDisk::open(file)?, 50, 40);
   let mut expected: Vec<u8> = vec![];
-  for level in 0..5 {
-    eprintln!["level={}", level];
-    for _ in 0..20 {
+  for _level in 0..50 {
+    for _ in 0..100 {
       let mut chunk = vec![];
-      let size = 1 + ((r.read::<f64>()*(200 as f64)) as usize);
+      let size = 1 + ((r.read::<f64>()*(4096 as f64)) as usize);
       for _ in 0..size {
         chunk.push(r.read::<u8>());
       }
       let offset = store.len()?;
       store.write(offset, &chunk)?;
       expected.extend(chunk);
+      assert_eq![store.len()?, expected.len(), "post-write length check"];
     }
+    assert_eq![store.len()?, expected.len(), "pre-commit length check"];
     store.commit()?;
+    assert_eq![store.len()?, expected.len(), "post-commit length check"];
   }
   let len = store.len()?;
-  eprintln!["store length: {}\nexpected length: {}", len, expected.len()];
   assert_eq![len, expected.len(), "expected vs store length mismatch"];
   assert_eq![store.read(0,len)?, expected];
+  Ok(())
+}
+
+#[test]
+fn block_cache_append_high_count () -> Result<(),Error> {
+  let mut r = rand().seed([13,12]);
+  let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
+  let file = dir.path().join("21");
+  let mut store = BlockCache::new(RandomAccessDisk::open(file)?, 50, 4000);
+  let mut expected: Vec<u8> = vec![];
+  for _level in 0..50 {
+    for _ in 0..100 {
+      let mut chunk = vec![];
+      let size = 1 + ((r.read::<f64>()*(4096 as f64)) as usize);
+      for _ in 0..size {
+        chunk.push(r.read::<u8>());
+      }
+      let offset = store.len()?;
+      store.write(offset, &chunk)?;
+      expected.extend(chunk);
+      assert_eq![store.len()?, expected.len(), "post-write length check"];
+    }
+    assert_eq![store.len()?, expected.len(), "pre-commit length check"];
+    store.commit()?;
+    assert_eq![store.len()?, expected.len(), "post-commit length check"];
+  }
+  let len = store.len()?;
+  assert_eq![len, expected.len(), "expected vs store length mismatch"];
+  assert_eq![store.read(0,len)?, expected];
+  Ok(())
+}
+
+#[test]
+fn block_cache_read_append_interleaved () -> Result<(),Error> {
+  let mut r = rand().seed([13,12]);
+  let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
+  let file = dir.path().join("22");
+  let mut store = BlockCache::new(RandomAccessDisk::open(file)?, 500, 20);
+  let mut data: Vec<u8> = vec![];
+  for _ in 0..5_000 {
+    let c = r.read::<f64>();
+    if c < 0.01 {
+      store.commit()?;
+    } else if c < 0.4 {
+      let i = store.len()?;
+      let size = (r.read::<f64>()*(1000 as f64)) as usize;
+      let mut chunk = vec![];
+      for _ in 0..size {
+        chunk.push(r.read::<u8>());
+      }
+      store.write(i, &chunk)?;
+      data.extend_from_slice(&chunk);
+    } else {
+      let size = store.len()?;
+      let i = (r.read::<f64>()*(size as f64)) as usize;
+      let len = (r.read::<f64>()*((size-i) as f64)) as usize;
+      assert_eq![store.read(i,len)?.as_slice(), &data[i..i+len],
+        "read data {}..{}", i, i+len];
+    }
+    assert_eq![store.len()?, data.len(), "length"];
+  }
+  store.commit()?;
+  let len = store.len()?;
+  assert_eq![len, data.len(), "full length"];
+  assert_eq![store.read(0,len)?, data, "full content"];
   Ok(())
 }

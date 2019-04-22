@@ -44,7 +44,7 @@ impl Block {
       }
     }
   }
-  pub fn have_all (&self, i: usize, j: usize) -> bool {
+  pub fn has_range (&self, i: usize, j: usize) -> bool {
     if self.missing == 0 { return true }
     for k in i..j {
       if (self.mask[k/8] >> (k%8)) & 1 == 0 { return false }
@@ -101,8 +101,9 @@ impl<S> BlockCache<S> where S: RandomAccess {
     let mut writes: Vec<(u64,Vec<u8>)> = vec![];
     let mut keys: Vec<u64> = self.writes.keys().map(|b| *b).collect();
     keys.sort_unstable();
+    let len = self.len()? as u64;
     for b in keys {
-      let block = self.writes.remove(&b).unwrap();
+      let mut block = self.writes.remove(&b).unwrap();
       for (i,slice) in block.writes() {
         if i == 0 && !writes.is_empty() {
           let should_push = {
@@ -113,13 +114,18 @@ impl<S> BlockCache<S> where S: RandomAccess {
             } else { true }
           };
           if should_push {
-            writes.push((b,slice.to_vec()));
+            writes.push(((i as u64)+b,slice.to_vec()));
           }
         } else {
           writes.push(((i as u64)+b,slice.to_vec()));
         }
       }
-      self.reads.put(b, block);
+      if block.has_range(0, self.size) {
+        self.reads.put(b, block);
+      } else if block.has_range(0, ((len-b) as usize).min(self.size)) {
+        block.merge(&vec![0;self.size]);
+        self.reads.put(b, block);
+      }
     }
     // TODO: analyze gaps and state of read cache in order to 
     // merge some nearby writes with the gap filled from the read cache
@@ -156,6 +162,9 @@ impl<S> RandomAccess for BlockCache<S> where S: RandomAccess {
       if check_read {
         match self.reads.pop(&b) {
           Some(mut block) => {
+            if !block.has_range(b_start, b_end) {
+              panic!["read block does not have sufficient data"];
+            }
             block.data[b_start..b_end].copy_from_slice(slice);
             self.writes.insert(b, block);
           },
@@ -192,7 +201,7 @@ impl<S> RandomAccess for BlockCache<S> where S: RandomAccess {
       result_i += b_len;
       match self.writes.get(&b) {
         Some(block) => {
-          if block.have_all(b_start, b_end) {
+          if block.has_range(b_start, b_end) {
             let slice = &block.data[b_start..b_end];
             result[range.0..range.1].copy_from_slice(slice);
           } else {
@@ -202,6 +211,9 @@ impl<S> RandomAccess for BlockCache<S> where S: RandomAccess {
         None => {
           match self.reads.get(&b) {
             Some(rblock) => {
+              if !rblock.has_range(b_start, b_end) {
+                panic!["read block does not have sufficient data"];
+              }
               let slice = &rblock.data[b_start..b_end];
               result[range.0..range.1].copy_from_slice(slice);
             },
@@ -213,8 +225,7 @@ impl<S> RandomAccess for BlockCache<S> where S: RandomAccess {
     if !reads.is_empty() {
       let len = self.store.len()? as u64;
       let i = reads[0].0.min(len);
-      let j = (reads.last().unwrap().0 + (self.size as u64))
-        .min(self.store.len()? as u64);
+      let j = (reads.last().unwrap().0 + (self.size as u64)).min(len);
       let data = if j > i {
         self.store.read(i as usize, (j-i) as usize)?
       } else { vec![] };
@@ -235,6 +246,11 @@ impl<S> RandomAccess for BlockCache<S> where S: RandomAccess {
           match self.writes.get_mut(&b) {
             Some(block) => {
               block.merge(&slice);
+              if !block.has_range(b_start, b_end) {
+                panic!["write block {} does not have the necessary bytes: \
+                  {}..{}", b, b_start, b_end
+                ];
+              }
               let bslice = &block.data[b_start..b_end];
               result[range.0..range.1].copy_from_slice(bslice);
             },
@@ -243,16 +259,24 @@ impl<S> RandomAccess for BlockCache<S> where S: RandomAccess {
             }
           }
         } else {
-          let mut vdata = slice.to_vec();
-          if slice.len() < self.size {
-            vdata.extend(vec![0;self.size-slice.len()]);
+          let block = if slice.len() < self.size {
+            let mut b = Block::new(self.size);
+            b.write(b_start, slice);
+            b
+          } else {
+            Block::from_data(slice.to_vec())
+          };
+          if !block.has_range(b_start, b_end) {
+            panic!["read block {} does not have the necessary bytes: {}..{}",
+              b, b_start, b_end];
           }
-          let block = Block::from_data(vdata);
           {
             let bslice = &block.data[b_start..b_end];
             result[range.0..range.1].copy_from_slice(bslice);
           }
-          self.reads.put(b, block);
+          if block.has_range(0, self.size) {
+            self.reads.put(b, block);
+          }
         }
       }
     }
