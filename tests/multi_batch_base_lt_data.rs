@@ -50,7 +50,7 @@ fn multi_batch() -> Result<(),Error> {
   for batch in batches {
     let batch_start = time::Instant::now();
     db.batch(&batch)?;
-    let batch_elapsed = batch_start.elapsed().as_float_secs();
+    let batch_elapsed = batch_start.elapsed().as_secs_f64();
     count += batch.len() as u64;
     total += batch_elapsed;
     eprintln!["{}: batch for {} records in {} seconds",

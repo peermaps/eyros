@@ -72,7 +72,7 @@ base_size: usize) -> Result<(),Error> {
     let start = time::Instant::now();
     db.batch(&inserts)?;
     eprintln!["batch write for {} records in {} seconds",
-      size, start.elapsed().as_float_secs()];
+      size, start.elapsed().as_secs_f64()];
   }
 
   {
@@ -83,7 +83,7 @@ base_size: usize) -> Result<(),Error> {
       results.push(result?);
     }
     eprintln!["batch query for {} records in {} seconds",
-      results.len(), start.elapsed().as_float_secs()];
+      results.len(), start.elapsed().as_secs_f64()];
     assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
     = inserts.iter().map(|r| {
@@ -105,7 +105,7 @@ base_size: usize) -> Result<(),Error> {
       results.push(result?);
     }
     eprintln!["batch query for {} records in {} seconds",
-      results.len(), start.elapsed().as_float_secs()];
+      results.len(), start.elapsed().as_secs_f64()];
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
     = inserts.iter()
       .map(|r| {

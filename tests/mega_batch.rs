@@ -48,7 +48,7 @@ fn mega_batch() -> Result<(),Error> {
     for batch in batches {
       let start = time::Instant::now();
       db.batch(&batch)?;
-      let elapsed = start.elapsed().as_float_secs();
+      let elapsed = start.elapsed().as_secs_f64();
       total += elapsed;
       eprintln!["batch write for {} records in {} seconds",
         batch.len(), elapsed];
@@ -65,7 +65,7 @@ fn mega_batch() -> Result<(),Error> {
       results.push(result?);
     }
     eprintln!["query for {} records in {} seconds",
-      results.len(), start.elapsed().as_float_secs()];
+      results.len(), start.elapsed().as_secs_f64()];
     assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(P,V)>
     = inserts.iter().map(|r| {
@@ -87,7 +87,7 @@ fn mega_batch() -> Result<(),Error> {
       results.push(result?);
     }
     eprintln!["query for {} records in {} seconds",
-      results.len(), start.elapsed().as_float_secs()];
+      results.len(), start.elapsed().as_secs_f64()];
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
     = inserts.iter()
       .map(|r| {
@@ -117,7 +117,7 @@ fn mega_batch() -> Result<(),Error> {
       results.push(result?);
     }
     eprintln!["query for {} records in {} seconds",
-      results.len(), start.elapsed().as_float_secs()];
+      results.len(), start.elapsed().as_secs_f64()];
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
     = inserts.iter()
       .map(|r| {

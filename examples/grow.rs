@@ -32,7 +32,7 @@ fn main() -> Result<(),Error> {
     }).collect();
     let batch_start = time::Instant::now();
     db.batch(&rows)?;
-    let batch_elapsed = batch_start.elapsed().as_float_secs();
+    let batch_elapsed = batch_start.elapsed().as_secs_f64();
     count += batch_size;
     total += batch_elapsed;
     println!["{}: batch for {} records in {} seconds",
