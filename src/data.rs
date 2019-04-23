@@ -3,7 +3,6 @@ use bincode::{serialize,deserialize};
 use std::mem::size_of;
 use random_access_storage::RandomAccess;
 use failure::{Error,format_err,ensure,bail};
-use std::marker::PhantomData;
 use read_block::read_block;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -49,8 +48,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: S,
   bbox_cache: LruCache<u64,(P::Bounds,u64)>,
   list_cache: LruCache<u64,Vec<(P,V)>>,
-  pub max_data_size: usize,
-  _marker: PhantomData<(P,V)>
+  pub max_data_size: usize
 }
 
 impl<S,P,V> DataBatch<P,V> for DataStore<S,P,V>
@@ -76,13 +74,12 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 impl<S,P,V> DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn open (store: S, max_data_size: usize, bbox_cache_size: usize,
-  block_cache_size: usize, block_cache_count: usize) -> Result<Self,Error> {
+  list_cache_size: usize) -> Result<Self,Error> {
     Ok(Self {
       store,
       bbox_cache: LruCache::new(bbox_cache_size),
-      list_cache: LruCache::new(2_000),
-      max_data_size,
-      _marker: PhantomData
+      list_cache: LruCache::new(list_cache_size),
+      max_data_size
     })
   }
   pub fn commit (&mut self) -> Result<(),Error> {
