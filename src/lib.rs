@@ -80,9 +80,6 @@ P: Point, V: Value {
     let data_store = DataStore::open((setup.open_store)("data")?,
       setup.fields.max_data_size, setup.fields.bbox_cache_size,
       setup.fields.block_cache_size, setup.fields.block_cache_count)?;
-    ensure![setup.fields.base_size > setup.fields.max_data_size,
-      "base_size ({}) must be > max_data_size ({})",
-      setup.fields.base_size, setup.fields.max_data_size];
     let bf = setup.fields.branch_factor;
     let mut db = Self {
       open_store: setup.open_store,
