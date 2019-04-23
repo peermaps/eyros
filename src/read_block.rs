@@ -18,7 +18,6 @@ where S: RandomAccess<Error=Error> {
     bail!["offset+length ({}+{}={}) exceeds end of file ({})",
       offset, len, offset+len, max_size ];
   }
-  //eprintln!["READ {} {}", offset, len];
   let mut buf = Vec::with_capacity((len-4) as usize);
   match size_guess.cmp(&len) {
     Ordering::Equal => {

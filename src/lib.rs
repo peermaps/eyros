@@ -32,7 +32,7 @@ use order::pivot_order;
 use data::DataStore;
 
 use random_access_storage::RandomAccess;
-use failure::{Error,format_err,ensure};
+use failure::{Error,format_err};
 use serde::{Serialize,de::DeserializeOwned};
 use meta::Meta;
 use std::fmt::Debug;
@@ -79,7 +79,7 @@ P: Point, V: Value {
     let staging = Staging::open((setup.open_store)("staging")?)?;
     let data_store = DataStore::open((setup.open_store)("data")?,
       setup.fields.max_data_size, setup.fields.bbox_cache_size,
-      setup.fields.block_cache_size, setup.fields.block_cache_count)?;
+      setup.fields.data_list_cache_size)?;
     let bf = setup.fields.branch_factor;
     let mut db = Self {
       open_store: setup.open_store,

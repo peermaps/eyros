@@ -7,6 +7,7 @@ pub struct SetupFields {
   pub base_size: usize,
   pub branch_factor: usize,
   pub bbox_cache_size: usize,
+  pub data_list_cache_size: usize,
   pub block_cache_size: usize,
   pub block_cache_count: usize,
 }
@@ -29,6 +30,7 @@ U: (Fn(&str) -> Result<S,Error>) {
         max_data_size: 3_000,
         base_size: 9_000,
         bbox_cache_size: 10_000,
+        data_list_cache_size: 16_000,
         block_cache_size: 4096,
         block_cache_count: 200_000
       }
@@ -56,6 +58,10 @@ U: (Fn(&str) -> Result<S,Error>) {
   }
   pub fn bbox_cache_size (mut self, size: usize) -> Self {
     self.fields.bbox_cache_size = size;
+    self
+  }
+  pub fn data_list_cache_size (mut self, size: usize) -> Self {
+    self.fields.data_list_cache_size = size;
     self
   }
   pub fn build<P,V> (self) -> Result<DB<S,U,P,V>,Error>
