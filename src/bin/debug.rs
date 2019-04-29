@@ -1,4 +1,4 @@
-#![feature(int_to_from_bytes,duration_float)]
+#![feature(duration_float)]
 extern crate eyros;
 extern crate failure;
 extern crate random_access_disk;
@@ -7,7 +7,7 @@ extern crate random_access_storage;
 #[path="../ensure.rs"]
 #[macro_use] mod ensure;
 
-use eyros::{DB,Row};
+use eyros::{Setup,DB,Row};
 use failure::{Error,bail};
 use random_access_disk::RandomAccessDisk;
 use random_access_storage::RandomAccess;
@@ -29,11 +29,15 @@ fn main() -> Result<(),Error> {
   if args.len() < 3 {
     bail!["usage: debug DBPATH COMMAND {...}"];
   }
-  let mut db: DB<_,_,P,V> = DB::open(|name| {
+  let mut db = Setup::new(|name| {
     let mut p = PathBuf::from(&args[1]);
     p.push(name);
     Ok(RandomAccessDisk::open(p)?)
-  })?;
+  })
+    .branch_factor(5)
+    .max_data_size(3_000)
+    .base_size(1_000)
+    .build()?;
   if args[2] == "info" {
     let mut dstore = db.data_store.try_borrow_mut()?;
     println!["# data\n{} bytes", dstore.bytes()?];
@@ -102,14 +106,13 @@ fn main() -> Result<(),Error> {
     for result in db.query(&bbox)? {
       results.push(result?);
     }
-    let elapsed = start.elapsed().as_float_secs();
+    let elapsed = start.elapsed().as_secs_f64();
     println!["{} results in {} seconds", results.len(), elapsed];
   } else if args[2] == "branches" {
     let i = args[3].parse::<usize>()?;
     let mut queue = vec![(0,0)];
     while !queue.is_empty() {
       let (offset,depth) = queue.pop().unwrap();
-      println!["{} {}", depth, offset];
       let b = read_branch(&mut db, i, offset, depth)?;
       for (is_data,i_offset) in b.intersecting {
         if !is_data && i_offset > 0 {
@@ -139,7 +142,7 @@ offset: u64, depth: usize) -> Result<Branch,Error>
 where S: RandomAccess<Error=Error>, U: (Fn(&str) -> Result<S,Error>) {
   let len = db.trees[tree_i].store.len()? as u64;
   let buf = read_block(&mut db.trees[tree_i].store, offset, len, 1024)?;
-  let bf = 9;
+  let bf = db.fields.branch_factor;
   let n = bf*2-3;
 
   let psize = P::pivot_size_at(depth % P::dim());

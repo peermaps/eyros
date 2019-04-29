@@ -25,7 +25,7 @@ pub struct Data<P,V> where P: Point, V: Value {
 #[derive(Clone)]
 pub struct Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   pub offset: u64,
-  level: usize,
+  pub level: usize,
   max_data_size: usize,
   order: Rc<Vec<usize>>,
   data_batch: Rc<RefCell<D>>,

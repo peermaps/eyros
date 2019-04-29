@@ -1,5 +1,3 @@
-#![feature(int_to_from_bytes)]
-
 extern crate random_access_storage;
 extern crate failure;
 extern crate bincode;
@@ -64,7 +62,7 @@ P: Point, V: Value {
   pub staging: Staging<S,P,V>,
   pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
   meta: Meta<S>,
-  fields: SetupFields
+  pub fields: SetupFields
 }
 
 impl<S,U,P,V> DB<S,U,P,V> where
@@ -106,7 +104,7 @@ P: Point, V: Value {
     let count = (n/base)*base;
     let rem = n - count;
     let mut mask = vec![];
-    for mut tree in self.trees.iter_mut() {
+    for tree in self.trees.iter_mut() {
       mask.push(!tree.is_empty()?);
     }
     let p = plan(
