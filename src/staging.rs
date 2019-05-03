@@ -25,10 +25,10 @@ where P: Point, V: Value {
     while self.index < len {
       let i = self.index;
       self.index += 1;
-      match self.rows[i] {
+      match &self.rows[i] {
         Row::Insert(point,value) => {
           if point.overlaps(self.bbox) {
-            return Some(Ok((point,value)))
+            return Some(Ok((*point,value.clone())))
           }
         },
         Row::Delete(_point,_value) => {}

@@ -42,8 +42,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   Staging(StagingIterator<'a,'b,P,V>)
 }
 
-pub trait Value: Debug+Copy+Serialize+DeserializeOwned+'static {}
-impl<T> Value for T where T: Debug+Copy+Serialize+DeserializeOwned+'static {}
+pub trait Value: Debug+Clone+Serialize+DeserializeOwned+'static {}
+impl<T> Value for T where T: Debug+Clone+Serialize+DeserializeOwned+'static {}
 
 #[derive(Clone,Debug)]
 pub enum Row<P,V> where P: Point, V: Value {

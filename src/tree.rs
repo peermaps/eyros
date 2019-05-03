@@ -228,7 +228,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         match row { Row::Insert(_,_) => true, _ => false }
       })
       .map(|(row,len)| { match row {
-        Row::Insert(p,v) => ((*p,*v),*len),
+        Row::Insert(p,v) => ((*p,v.clone()),*len),
         _ => panic!("unexpected")
       } })
       .collect();
@@ -287,7 +287,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let mut inserts = vec![];
       for row in rows {
         match row {
-          Row::Insert(p,v) => { inserts.push((*p,*v)) },
+          Row::Insert(p,v) => { inserts.push((*p,v.clone())) },
           _ => {}
         }
       }
@@ -299,7 +299,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         let mut inserts = vec![];
         for row in srows {
           match row {
-            Row::Insert(p,v) => { inserts.push((*p,*v)) },
+            Row::Insert(p,v) => { inserts.push((*p,v.clone())) },
             _ => {}
           }
         }

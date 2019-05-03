@@ -52,8 +52,8 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     });
     let mut pivots: Vec<P> =
       if sorted.len() == 2 {
-        let a = rows[bucket[sorted[0]]].0;
-        let b = rows[bucket[sorted[1]]].0;
+        let a = &rows[bucket[sorted[0]]].0;
+        let b = &rows[bucket[sorted[1]]].0;
         vec![a.0.midpoint_upper(&b.0)]
       } else {
         let z = n.min(sorted.len()-2);
@@ -128,7 +128,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     for i in self.order.iter() {
       let pivot = self.pivots[*i];
       for j in self.sorted.iter() {
-        let row = self.rows[self.bucket[*j]];
+        let row = &self.rows[self.bucket[*j]];
         if self.matched[*j] { continue }
         if (row.0).0.cmp_at(&pivot, self.level) == Ordering::Equal {
           self.matched[*j] = true;
@@ -138,7 +138,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     }
     for i in self.sorted.iter() {
       if self.matched[*i] { continue }
-      let row = self.rows[self.bucket[*i]];
+      let row = &self.rows[self.bucket[*i]];
       let mut j = 0;
       while j < bf-1 {
         let pivot = self.pivots[j*2];

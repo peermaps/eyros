@@ -91,7 +91,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let rows = self.list(offset)?;
     Ok(rows.iter().filter(|row| {
       row.0.overlaps(bbox)
-    }).map(|row| { *row }).collect())
+    }).map(|row| { row.clone() }).collect())
   }
   pub fn list (&mut self, offset: u64) -> Result<Vec<(P,V)>,Error> {
     match self.list_cache.get(&offset) {
