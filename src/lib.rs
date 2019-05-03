@@ -18,7 +18,6 @@ mod data;
 mod read_block;
 mod pivots;
 mod write_cache;
-mod block_cache;
 
 pub use setup::{Setup,SetupFields};
 use staging::{Staging,StagingIterator};
@@ -174,12 +173,11 @@ P: Point, V: Value {
       let store = (self.open_store)(&format!("tree{}",i))?;
       self.trees.push(Tree::open(TreeOpts {
         store,
+        index,
         data_store: Rc::clone(&self.data_store),
         order: Rc::clone(&self.order),
         branch_factor: self.fields.branch_factor,
-        max_data_size: self.fields.max_data_size,
-        block_cache_size: self.fields.block_cache_size,
-        block_cache_count: self.fields.block_cache_count
+        max_data_size: self.fields.max_data_size
       })?);
     }
     Ok(())

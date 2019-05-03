@@ -5,7 +5,6 @@ use std::rc::Rc;
 use std::mem::size_of;
 
 use ::{Row,Point,Value};
-use block_cache::BlockCache;
 
 use branch::{Branch,Node};
 use data::{DataStore,DataMerge,DataBatch};
@@ -155,18 +154,19 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
   pub branch_factor: usize,
   pub max_data_size: usize,
-  pub block_cache_size: usize,
-  pub block_cache_count: usize,
+  pub index: usize,
   pub order: Rc<Vec<usize>>
 }
 
 pub struct Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub store: BlockCache<S>,
+  //pub store: BlockCache<S>,
+  pub store: S,
   data_store: Rc<RefCell<DataStore<S,P,V>>>,
   data_merge: Rc<RefCell<DataMerge<S,P,V>>>,
   branch_factor: usize,
   pub bytes: u64,
+  pub index: usize,
   max_data_size: usize,
   order: Rc<Vec<usize>>,
 }
@@ -178,10 +178,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let data_merge = Rc::new(RefCell::new(
       DataMerge::new(Rc::clone(&opts.data_store))));
     Ok(Self {
-      store: BlockCache::new(
-        opts.store, opts.block_cache_size, opts.block_cache_count),
+      store: opts.store,
       data_store: opts.data_store,
       data_merge,
+      index: opts.index,
       bytes,
       order: opts.order,
       branch_factor: opts.branch_factor,
@@ -193,7 +193,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       self.bytes = 0;
       self.store.truncate(0)?;
     }
-    self.store.commit()?;
+    //self.store.sync_all()?;
     Ok(())
   }
   pub fn is_empty (&mut self) -> Result<bool,Error> {
@@ -233,9 +233,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       } })
       .collect();
     let bucket = (0..rows.len()).collect();
-    let b = Branch::<D,T,U>::new(0, self.max_data_size,
-      Rc::clone(&self.order),
-      Rc::clone(&data_store),
+    let b = Branch::<D,T,U>::new(0, self.index, self.max_data_size,
+      Rc::clone(&self.order), Rc::clone(&data_store),
       bucket, Rc::new(irows)
     )?;
     let mut branches = vec![Node::Branch(b)];
@@ -265,7 +264,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       branches = nbranches;
     }
-    self.store.commit()?;
+    //self.store.sync_all()?;
     Ok(())
   }
   pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
