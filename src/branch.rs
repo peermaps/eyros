@@ -29,6 +29,7 @@ pub struct Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   pub index: usize,
   max_data_size: usize,
   order: Rc<Vec<usize>>,
+  bincode: Rc<bincode::Config>,
   data_batch: Rc<RefCell<D>>,
   bucket: Vec<usize>,
   buckets: Vec<Vec<usize>>,
@@ -41,7 +42,7 @@ pub struct Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
 
 impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   pub fn new (level: usize, index: usize, max_data_size: usize,
-  order: Rc<Vec<usize>>, data_batch: Rc<RefCell<D>>,
+  order: Rc<Vec<usize>>, bincode: Rc<bincode::Config>, data_batch: Rc<RefCell<D>>,
   bucket: Vec<usize>, rows: Rc<Vec<((P,V),u64)>>)
   -> Result<Self,Error> {
     let n = order.len();
@@ -96,6 +97,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     Ok(Self {
       offset: 0,
       max_data_size,
+      bincode,
       index,
       level,
       order,
@@ -173,6 +175,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
           let mut b = Branch::new(
             self.level+1, self.index, self.max_data_size,
             Rc::clone(&self.order),
+            Rc::clone(&self.bincode),
             Rc::clone(&self.data_batch),
             bucket.clone(), Rc::clone(&self.rows)
           )?;
@@ -190,7 +193,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     data.extend_from_slice(&(len as u32).to_be_bytes());
     // pivots
     for pivot in self.pivots.iter() {
-      data.extend(pivot.serialize_at(self.level % P::dim())?);
+      data.extend(pivot.serialize_at(&self.bincode, self.level % P::dim())?);
     }
     // data bitfield
     for i in 0..(n+bf+7)/8 {

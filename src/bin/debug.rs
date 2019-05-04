@@ -156,7 +156,7 @@ where S: RandomAccess<Error=Error>, U: (Fn(&str) -> Result<S,Error>) {
   let mut str_pivots = vec![];
   for i in 0..n {
     let pbuf = &buf[p_start+i*psize..p_start+(i+1)*psize];
-    str_pivots.push(P::format_at(pbuf, depth)?);
+    str_pivots.push(P::format_at(&db.bincode, pbuf, depth)?);
   }
   let intersecting: Vec<(bool,u64)> = (0..n).map(|i| {
     let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;

@@ -88,6 +88,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         let c = bcursors.pop().unwrap();
         let i = order[c];
         let cmp: (bool,bool) = iwrap![P::cmp_buf(
+          &self.tree.bincode,
           &buf[p_start+i*psize..p_start+(i+1)*psize],
           &self.bbox,
           depth % P::dim()
@@ -155,7 +156,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub branch_factor: usize,
   pub max_data_size: usize,
   pub index: usize,
-  pub order: Rc<Vec<usize>>
+  pub order: Rc<Vec<usize>>,
+  pub bincode: Rc<bincode::Config>
 }
 
 pub struct Tree<S,P,V>
@@ -169,6 +171,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub index: usize,
   max_data_size: usize,
   order: Rc<Vec<usize>>,
+  bincode: Rc<bincode::Config>
 }
 
 impl<S,P,V> Tree<S,P,V>
@@ -184,6 +187,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       index: opts.index,
       bytes,
       order: opts.order,
+      bincode: opts.bincode,
       branch_factor: opts.branch_factor,
       max_data_size: opts.max_data_size
     })
@@ -234,7 +238,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       .collect();
     let bucket = (0..rows.len()).collect();
     let b = Branch::<D,T,U>::new(0, self.index, self.max_data_size,
-      Rc::clone(&self.order), Rc::clone(&data_store),
+      Rc::clone(&self.order),
+      Rc::clone(&self.bincode),
+      Rc::clone(&data_store),
       bucket, Rc::new(irows)
     )?;
     let mut branches = vec![Node::Branch(b)];

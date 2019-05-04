@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::ops::{Div,Add};
 use failure::Error;
-use bincode::{serialize,deserialize};
 use serde::{Serialize,de::DeserializeOwned};
 use std::fmt::Debug;
 use std::mem::size_of;
@@ -10,16 +9,17 @@ pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
   type Bounds: Copy+Clone+Debug+Serialize+DeserializeOwned;
   type Range: Point+Copy+Clone+Debug+Serialize+DeserializeOwned;
   fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
-  fn cmp_buf (&[u8], &Self::Bounds, usize) -> Result<(bool,bool),Error>;
+  fn cmp_buf (&bincode::Config, &[u8], &Self::Bounds, usize)
+    -> Result<(bool,bool),Error>;
   fn midpoint_upper (&self, &Self) -> Self where Self: Sized;
-  fn serialize_at (&self, usize) -> Result<Vec<u8>,Error>;
+  fn serialize_at (&self, &bincode::Config, usize) -> Result<Vec<u8>,Error>;
   fn dim () -> usize;
   fn overlaps (&self, &Self::Bounds) -> bool;
   fn pivot_size_at (usize) -> usize;
   fn size_of () -> usize;
   fn bounds (&Vec<Self>) -> Option<Self::Bounds>;
   fn bounds_to_range (Self::Bounds) -> Self::Range;
-  fn format_at (&[u8], usize) -> Result<String,Error>;
+  fn format_at (&bincode::Config, &[u8], usize) -> Result<String,Error>;
 }
 
 pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
@@ -129,11 +129,11 @@ macro_rules! impl_point {
         };
         match order { Some(x) => x, None => Ordering::Less }
       }
-      fn cmp_buf (buf: &[u8], bbox: &Self::Bounds, level: usize)
-      -> Result<(bool,bool),Error> {
+      fn cmp_buf (bincode: &bincode::Config, buf: &[u8], bbox: &Self::Bounds,
+      level: usize) -> Result<(bool,bool),Error> {
         match level % $dim {
           $($i => {
-            let point: $T = deserialize(buf)?;
+            let point: $T = bincode.deserialize(buf)?;
             Ok((
               (bbox.0).$i <= point,
               point <= (bbox.1).$i
@@ -147,9 +147,10 @@ macro_rules! impl_point {
           Coord::midpoint_upper(&self.$i, &other.$i)
         ),+)
       }
-      fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
+      fn serialize_at (&self, bincode: &bincode::Config, level: usize)
+      -> Result<Vec<u8>,Error> {
         let buf: Vec<u8> = match level%Self::dim() {
-          $($i => serialize(&self.$i.upper())?,)+
+          $($i => bincode.serialize(&self.$i.upper())?,)+
           _ => panic!("match case beyond dimension")
         };
         Ok(buf)
@@ -185,10 +186,11 @@ macro_rules! impl_point {
       fn bounds_to_range (bounds: Self::Bounds) -> Self::Range {
         ($(((bounds.0).$i,(bounds.1).$i)),+)
       }
-      fn format_at (buf: &[u8], level: usize) -> Result<String,Error> {
+      fn format_at (bincode: &bincode::Config, buf: &[u8], level: usize)
+      -> Result<String,Error> {
         Ok(match level % Self::dim() {
           $($i => {
-            let p: $T = deserialize(buf)?;
+            let p: $T = bincode.deserialize(buf)?;
             format!["{:?}", p]
           }),+
           _ => panic!("match case beyond dimension")
@@ -220,3 +222,5 @@ impl_dim![(A,B,C),(0,1,2),3];
 impl_dim![(A,B,C,D),(0,1,2,3),4];
 //impl_dim![(A,B,C,D,E),(0,1,2,3,4),5];
 //impl_dim![(A,B,C,D,E,F),(0,1,2,3,4,5),6];
+//impl_dim![(A,B,C,D,E,F,G),(0,1,2,3,4,5,6),7];
+//impl_dim![(A,B,C,D,E,F,G,H),(0,1,2,3,4,5,6,7),8];

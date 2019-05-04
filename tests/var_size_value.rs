@@ -15,9 +15,6 @@ use std::cmp::Ordering;
 type P = ((f32,f32),(f32,f32),f32);
 type V = Vec<u8>;
 
-struct Payload {
-}
-
 #[test]
 fn var_size_value() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
@@ -28,7 +25,7 @@ fn var_size_value() -> Result<(),Error> {
     }
   )?;
   let mut r = rand().seed([13,12]);
-  let size = 4000;
+  let size = 40_000;
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
     let xmin: f32 = r.read::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + r.read::<f32>().powf(64.0)*(1.0-xmin);

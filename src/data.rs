@@ -1,8 +1,6 @@
 use ::{Point,Value};
-use bincode::{serialize,deserialize};
-use std::mem::size_of;
 use random_access_storage::RandomAccess;
-use failure::{Error,format_err,ensure,bail};
+use failure::{Error,ensure,bail};
 use read_block::read_block;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -48,7 +46,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: S,
   bbox_cache: LruCache<u64,(P::Bounds,u64)>,
   list_cache: LruCache<u64,Vec<(P,V)>>,
-  pub max_data_size: usize
+  pub max_data_size: usize,
+  pub bincode: Rc<bincode::Config>
 }
 
 impl<S,P,V> DataBatch<P,V> for DataStore<S,P,V>
@@ -58,9 +57,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       "data size limit exceeded in data merge"];
     let mut data: Vec<u8> = vec![0;4];
     for row in rows.iter() {
-      let buf = serialize(row)?;
-      ensure_eq!(buf.len(), P::size_of() + size_of::<V>(),
-        "unexpected length in data batch");
+      let buf = self.bincode.serialize(row)?;
+      //ensure_eq!(buf.len(), P::size_of() + size_of::<V>(),
+      //  "unexpected length in data batch");
       data.extend(buf);
     }
     let len = data.len() as u32;
@@ -74,12 +73,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 impl<S,P,V> DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn open (store: S, max_data_size: usize, bbox_cache_size: usize,
-  list_cache_size: usize) -> Result<Self,Error> {
+  list_cache_size: usize, bincode: Rc<bincode::Config>) -> Result<Self,Error> {
     Ok(Self {
       store,
       bbox_cache: LruCache::new(bbox_cache_size),
       list_cache: LruCache::new(list_cache_size),
-      max_data_size
+      max_data_size,
+      bincode
     })
   }
   pub fn commit (&mut self) -> Result<(),Error> {
@@ -98,15 +98,20 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       Some(rows) => return Ok(rows.to_vec()),
       None => {}
     }
-    let rows = Self::parse(&self.read(offset)?)?;
+    let buf = self.read(offset)?;
+    let rows = self.parse(&buf)?;
     self.list_cache.put(offset, rows);
     Ok(self.list_cache.peek(&offset).unwrap().to_vec())
   }
-  pub fn parse (buf: &Vec<u8>) -> Result<Vec<(P,V)>,Error> {
-    let size = P::size_of() + size_of::<V>();
+  pub fn parse (&self, buf: &Vec<u8>) -> Result<Vec<(P,V)>,Error> {
     let mut results = vec![];
-    for i in 0..buf.len()/size {
-      results.push(deserialize(&buf[i*size..(i+1)*size])?);
+    let mut offset = 0;
+    while offset < buf.len() {
+      let psize = P::size_of();
+      let vsize = V::take_bytes(offset+psize, &buf);
+      let n = psize + vsize;
+      results.push(self.bincode.deserialize(&buf[offset..offset+n])?);
+      offset += n;
     }
     Ok(results)
   }

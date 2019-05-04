@@ -1,5 +1,5 @@
 use ::{Row,Point,Value};
-use failure::{Error,bail,format_err};
+use failure::{Error,bail};
 use random_access_storage::RandomAccess;
 use std::mem::size_of;
 use bincode::{serialize,deserialize};
@@ -61,19 +61,19 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   fn load (&mut self) -> Result<(),Error> {
     let len = self.store.len()?;
     let buf = self.store.read(0, len)?;
-    let n = size_of::<u8>() + P::size_of() + size_of::<V>();
-    let m = len/n;
     self.rows.clear();
-    self.rows.reserve(m);
-    for i in 0..m {
-      let offset = i*n;
-      let (pt_type,point,value): (u8,P,V)
-        = deserialize(&buf[offset..offset+n])?;
+    let mut offset = 0;
+    while offset < len {
+      let psize = P::size_of();
+      let vsize = V::take_bytes(offset+1+psize, &buf);
+      let n = 1 + psize + vsize;
+      let (pt_type,point,value):(u8,P,V) = deserialize(&buf[offset..offset+n])?;
       self.rows.push(match pt_type {
         0u8 => Row::Insert(point,value),
         1u8 => Row::Delete(point,value),
         _ => bail!("unexpected point type")
       });
+      offset += n;
     }
     Ok(())
   }
@@ -87,8 +87,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(len)
   }
   pub fn len (&mut self) -> Result<usize,Error> {
-    let n = size_of::<u8>() + P::size_of() + size_of::<V>();
-    Ok(self.bytes()?/n)
+    Ok(self.rows.len())
   }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
     let offset = self.store.len()?;
@@ -99,7 +98,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         Row::Insert(point,value) => (Self::INSERT,point,value),
         Row::Delete(point,value) => (Self::DELETE,point,value)
       })?;
-      ensure_eq!(bytes.len(), n, "unexpected byte length in staging batch");
+      //ensure_eq!(bytes.len(), n, "unexpected byte length in staging batch");
       buf.extend(bytes);
     }
     self.store.write(offset,&buf)?;

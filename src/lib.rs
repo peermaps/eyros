@@ -1,3 +1,4 @@
+#![recursion_limit="1024"]
 extern crate random_access_storage;
 extern crate failure;
 extern crate bincode;
@@ -18,6 +19,7 @@ mod data;
 mod read_block;
 mod pivots;
 mod write_cache;
+mod take_bytes;
 
 pub use setup::{Setup,SetupFields};
 use staging::{Staging,StagingIterator};
@@ -27,6 +29,7 @@ pub use tree::{Tree,TreeIterator,TreeOpts};
 pub use branch::Branch;
 use order::pivot_order;
 use data::DataStore;
+use take_bytes::TakeBytes;
 
 use random_access_storage::RandomAccess;
 use failure::{Error,format_err};
@@ -42,8 +45,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   Staging(StagingIterator<'a,'b,P,V>)
 }
 
-pub trait Value: Debug+Clone+Serialize+DeserializeOwned+'static {}
-impl<T> Value for T where T: Debug+Clone+Serialize+DeserializeOwned+'static {}
+pub trait Value: Debug+Clone+TakeBytes+Serialize+DeserializeOwned+'static {}
+impl<T> Value for T where T: Debug+Clone+TakeBytes+Serialize+DeserializeOwned+'static {}
 
 #[derive(Clone,Debug)]
 pub enum Row<P,V> where P: Point, V: Value {
@@ -61,7 +64,8 @@ P: Point, V: Value {
   pub staging: Staging<S,P,V>,
   pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
   meta: Meta<S>,
-  pub fields: SetupFields
+  pub fields: SetupFields,
+  pub bincode: Rc<bincode::Config>
 }
 
 impl<S,U,P,V> DB<S,U,P,V> where
@@ -74,13 +78,17 @@ P: Point, V: Value {
   pub fn open_from_setup(setup: Setup<S,U>) -> Result<Self,Error> {
     let meta = Meta::open((setup.open_store)("meta")?)?;
     let staging = Staging::open((setup.open_store)("staging")?)?;
+    let mut bcode = bincode::config();
+    bcode.big_endian();
+    let r_bcode = Rc::new(bcode);
     let data_store = DataStore::open((setup.open_store)("data")?,
       setup.fields.max_data_size, setup.fields.bbox_cache_size,
-      setup.fields.data_list_cache_size)?;
+      setup.fields.data_list_cache_size, Rc::clone(&r_bcode))?;
     let bf = setup.fields.branch_factor;
     let mut db = Self {
       open_store: setup.open_store,
       staging,
+      bincode: Rc::clone(&r_bcode),
       data_store: Rc::new(RefCell::new(data_store)),
       order: Rc::new(pivot_order(bf)),
       meta: meta,
@@ -176,6 +184,7 @@ P: Point, V: Value {
         index,
         data_store: Rc::clone(&self.data_store),
         order: Rc::clone(&self.order),
+        bincode: Rc::clone(&self.bincode),
         branch_factor: self.fields.branch_factor,
         max_data_size: self.fields.max_data_size
       })?);
