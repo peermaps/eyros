@@ -82,22 +82,10 @@ comb_array_size_of![(
 
 impl<T> TakeBytes for Vec<T> {
   fn take_bytes (offset: usize, buf: &[u8]) -> usize {
-    match size_of::<usize>() {
-      /*
-      4 => {
-        (4 + u32::from_be_bytes([
-          buf[offset+0], buf[offset+1], buf[offset+2], buf[offset+3]
-        ])) as usize
-      },
-      */
-      // bincode is always u64 on vectors:
-      8 => {
-        (8 + u64::from_be_bytes([
-          buf[offset+0], buf[offset+1], buf[offset+2], buf[offset+3],
-          buf[offset+4], buf[offset+5], buf[offset+6], buf[offset+7]
-        ])) as usize
-      },
-      _ => panic!["unsupported usize: {} bytes", size_of::<usize>()]
-    }
+    // bincode is always u64 on vectors:
+    (8 + u64::from_be_bytes([
+      buf[offset+0], buf[offset+1], buf[offset+2], buf[offset+3],
+      buf[offset+4], buf[offset+5], buf[offset+6], buf[offset+7]
+    ])) as usize
   }
 }
