@@ -13,10 +13,10 @@ use tempfile::Builder as Tmpfile;
 use std::cmp::Ordering;
 
 type P = ((f32,f32),(f32,f32),f32);
-type V = Vec<u8>;
+type V = [u8;20];
 
 #[test]
-fn var_size_value() -> Result<(),Error> {
+fn var_size_array_value() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
   let mut db: DB<_,_,P,V> = DB::open(
     |name: &str| -> Result<RandomAccessDisk,Error> {
@@ -32,10 +32,10 @@ fn var_size_value() -> Result<(),Error> {
     let ymin: f32 = r.read::<f32>()*2.0-1.0;
     let ymax: f32 = ymin + r.read::<f32>().powf(64.0)*(1.0-ymin);
     let time: f32 = r.read::<f32>()*1000.0;
-    let value: V = {
-      let size = (r.read::<f64>() * 200.0) as usize;
-      (0..size).map(|_| r.read::<u8>()).collect()
-    };
+    let mut value: V = [0;20];
+    for i in 0..20 {
+      value[i] = r.read::<u8>();
+    }
     let point = ((xmin,xmax),(ymin,ymax),time);
     Row::Insert(point, value)
   }).collect();
