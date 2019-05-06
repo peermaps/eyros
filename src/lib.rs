@@ -81,9 +81,14 @@ P: Point, V: Value {
     let mut bcode = bincode::config();
     bcode.big_endian();
     let r_bcode = Rc::new(bcode);
-    let data_store = DataStore::open((setup.open_store)("data")?,
-      setup.fields.max_data_size, setup.fields.bbox_cache_size,
-      setup.fields.data_list_cache_size, Rc::clone(&r_bcode))?;
+    let data_store = DataStore::open(
+      (setup.open_store)("data")?,
+      (setup.open_store)("bbox")?,
+      setup.fields.max_data_size,
+      setup.fields.bbox_cache_size,
+      setup.fields.data_list_cache_size,
+      Rc::clone(&r_bcode)
+    )?;
     let bf = setup.fields.branch_factor;
     let mut db = Self {
       open_store: setup.open_store,

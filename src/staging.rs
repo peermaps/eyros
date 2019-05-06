@@ -106,7 +106,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(())
   }
   pub fn commit (&mut self) -> Result<(),Error> {
-    self.store.commit()
+    //self.store.sync_all()
+    Ok(())
   }
   pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
   -> StagingIterator<'a,'b,P,V> {

@@ -44,6 +44,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: S,
+  bbox_store: S,
   bbox_cache: LruCache<u64,(P::Bounds,u64)>,
   list_cache: LruCache<u64,Vec<(P,V)>>,
   pub max_data_size: usize,
@@ -66,16 +67,27 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     data[0..4].copy_from_slice(&len.to_be_bytes());
     let offset = self.store.len()? as u64;
     self.store.write(offset as usize, &data)?;
+    let bbox = match P::bounds(&rows.iter().map(|(p,_)| *p).collect()) {
+      None => bail!["invalid data at offset {}", offset],
+      Some(bbox) => bbox
+    };
+    {
+      let bbox_data = self.bincode.serialize(&(bbox,rows.len() as u64))?;
+      let bbox_offset = self.bbox_store.len()?;
+      self.bbox_store.write(bbox_offset, &bbox_data);
+    }
     Ok(offset as u64)
   }
 }
 
 impl<S,P,V> DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (store: S, max_data_size: usize, bbox_cache_size: usize,
+  pub fn open (store: S, bbox_store: S,
+  max_data_size: usize, bbox_cache_size: usize,
   list_cache_size: usize, bincode: Rc<bincode::Config>) -> Result<Self,Error> {
     Ok(Self {
       store,
+      bbox_store,
       bbox_cache: LruCache::new(bbox_cache_size),
       list_cache: LruCache::new(list_cache_size),
       max_data_size,
