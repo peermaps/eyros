@@ -1,12 +1,9 @@
-use point::Point;
-use data::DataBatch;
-use ::{Value};
+use crate::{data::DataBatch,point::Point,Value,pivots};
 use std::cmp::Ordering;
 use std::mem::size_of;
 use std::rc::Rc;
 use std::cell::RefCell;
 use failure::{Error,bail,format_err};
-use pivots;
 
 #[derive(Clone)]
 pub enum Node<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {

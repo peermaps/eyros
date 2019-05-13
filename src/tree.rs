@@ -4,11 +4,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::mem::size_of;
 
-use ::{Row,Point,Value};
-
-use branch::{Branch,Node};
-use data::{DataStore,DataMerge,DataBatch};
-use read_block::read_block;
+use crate::{Row,Point,Value};
+use crate::branch::{Branch,Node};
+use crate::data::{DataStore,DataMerge,DataBatch};
+use crate::read_block::read_block;
 
 pub struct TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {

@@ -1,4 +1,4 @@
-use point::Point;
+use crate::point::Point;
 
 pub fn pad<P> (xs: &Vec<P>, n: usize) -> Vec<P> where P: Point {
   let mut len = xs.len();

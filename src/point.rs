@@ -8,18 +8,20 @@ use std::mem::size_of;
 pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
   type Bounds: Copy+Clone+Debug+Serialize+DeserializeOwned;
   type Range: Point+Copy+Clone+Debug+Serialize+DeserializeOwned;
-  fn cmp_at (&self, &Self, usize) -> Ordering where Self: Sized;
-  fn cmp_buf (&bincode::Config, &[u8], &Self::Bounds, usize)
-    -> Result<(bool,bool),Error>;
-  fn midpoint_upper (&self, &Self) -> Self where Self: Sized;
-  fn serialize_at (&self, &bincode::Config, usize) -> Result<Vec<u8>,Error>;
+  fn cmp_at (&self, other: &Self, level: usize) -> Ordering where Self: Sized;
+  fn cmp_buf (bincode: &bincode::Config, buf: &[u8], bbox: &Self::Bounds,
+    level: usize) -> Result<(bool,bool),Error>;
+  fn midpoint_upper (&self, other: &Self) -> Self where Self: Sized;
+  fn serialize_at (&self, bincode: &bincode::Config, level: usize)
+    -> Result<Vec<u8>,Error>;
   fn dim () -> usize;
-  fn overlaps (&self, &Self::Bounds) -> bool;
-  fn pivot_size_at (usize) -> usize;
+  fn overlaps (&self, bbox: &Self::Bounds) -> bool;
+  fn pivot_size_at (level: usize) -> usize;
   fn size_of () -> usize;
-  fn bounds (&Vec<Self>) -> Option<Self::Bounds>;
-  fn bounds_to_range (Self::Bounds) -> Self::Range;
-  fn format_at (&bincode::Config, &[u8], usize) -> Result<String,Error>;
+  fn bounds (coords: &Vec<Self>) -> Option<Self::Bounds>;
+  fn bounds_to_range (bbox: Self::Bounds) -> Self::Range;
+  fn format_at (bincode: &bincode::Config, buf: &[u8], level: usize)
+    -> Result<String,Error>;
 }
 
 pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
@@ -40,11 +42,11 @@ impl Scalar for i32 {}
 impl Scalar for i64 {}
 
 trait Coord<T> {
-  fn cmp (&self, &Self) -> Option<Ordering>;
-  fn midpoint_upper (&self, &Self) -> Self;
+  fn cmp (&self, other: &Self) -> Option<Ordering>;
+  fn midpoint_upper (&self, other: &Self) -> Self;
   fn upper (&self) -> T;
-  fn overlaps (&self, &T, &T) -> bool;
-  fn bounds (Vec<&Self>) -> Option<(T,T)>;
+  fn overlaps (&self, a: &T, b: &T) -> bool;
+  fn bounds (coords: Vec<&Self>) -> Option<(T,T)>;
 }
 
 impl<T> Coord<T> for T where T: Scalar+PartialOrd+Num<T> {

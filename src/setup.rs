@@ -1,4 +1,4 @@
-use ::{DB,Point,Value};
+use crate::{DB,Point,Value};
 use failure::Error;
 use random_access_storage::RandomAccess;
 

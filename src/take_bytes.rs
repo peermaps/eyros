@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
 pub trait TakeBytes {
-  fn take_bytes (usize, &[u8]) -> usize;
+  fn take_bytes (offset: usize, buf: &[u8]) -> usize;
 }
 
 macro_rules! take_bytes {

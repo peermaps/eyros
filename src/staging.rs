@@ -1,9 +1,8 @@
-use ::{Row,Point,Value};
+use crate::{Row,Point,Value,write_cache::WriteCache};
 use failure::{Error,bail};
 use random_access_storage::RandomAccess;
 use std::mem::size_of;
 use bincode::{serialize,deserialize};
-use write_cache::WriteCache;
 
 pub struct StagingIterator<'a,'b,P,V> where P: Point, V: Value {
   rows: &'a Vec<Row<P,V>>,

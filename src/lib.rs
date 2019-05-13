@@ -1,9 +1,4 @@
 #![recursion_limit="1024"]
-extern crate random_access_storage;
-extern crate failure;
-extern crate bincode;
-extern crate serde;
-extern crate lru;
 
 #[macro_use] mod ensure;
 mod setup;
@@ -21,20 +16,20 @@ mod pivots;
 mod write_cache;
 mod take_bytes;
 
-pub use setup::{Setup,SetupFields};
-use staging::{Staging,StagingIterator};
-use planner::plan;
-pub use point::{Point,Scalar};
-pub use tree::{Tree,TreeIterator,TreeOpts};
-pub use branch::Branch;
-use order::pivot_order;
-use data::DataStore;
-use take_bytes::TakeBytes;
+pub use crate::setup::{Setup,SetupFields};
+use crate::staging::{Staging,StagingIterator};
+use crate::planner::plan;
+pub use crate::point::{Point,Scalar};
+pub use crate::tree::{Tree,TreeIterator,TreeOpts};
+pub use crate::branch::Branch;
+use crate::order::pivot_order;
+pub use crate::data::{DataStore,DataBounds};
+use crate::take_bytes::TakeBytes;
+use crate::meta::Meta;
 
 use random_access_storage::RandomAccess;
 use failure::{Error,format_err};
 use serde::{Serialize,de::DeserializeOwned};
-use meta::Meta;
 use std::fmt::Debug;
 use std::cell::RefCell;
 use std::rc::Rc;
