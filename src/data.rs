@@ -174,8 +174,11 @@ where S: RandomAccess<Error=Error>, P: Point {
     let bsize = <P::Range as Point>::size_of();
     let n = 8 + bsize + 8;
     let len = self.store.len()?;
-    let buf_size = 1024 * 1024;
-    for j in 0..len/buf_size {
+    let buf_size = {
+      let x = 1024 * 1024;
+      x - (x % n) // ensure buf_size is a multiple of n
+    };
+    for j in 0..(len+buf_size-1)/buf_size {
       let buf = self.store.read(j*buf_size,((j+1)*buf_size).min(len))?;
       for i in 0..buf.len()/n {
         let offset = i * n;

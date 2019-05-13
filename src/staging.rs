@@ -105,7 +105,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(())
   }
   pub fn commit (&mut self) -> Result<(),Error> {
-    //self.store.sync_all()
+    self.store.commit()?;
     Ok(())
   }
   pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)

@@ -12,7 +12,13 @@ use std::path::PathBuf;
 use std::time;
 
 fn main() -> Result<(),Error> {
-  let mut db = Setup::new(storage)
+  let args: Vec<String> = std::env::args().collect();
+  let base = PathBuf::from(args[1].clone());
+  let mut db = Setup::new(|name| {
+    let mut p = base.clone();
+    p.push(name);
+    Ok(RandomAccessDisk::open(p)?)
+  })
     .branch_factor(5)
     .max_data_size(3_000)
     .base_size(1_000)
@@ -41,10 +47,4 @@ fn main() -> Result<(),Error> {
   println!["# wrote {} records in {} seconds\n# {} records / second",
     count, total, (count as f64) / total];
   Ok(())
-}
-
-fn storage(name:&str) -> Result<RandomAccessDisk,Error> {
-  let mut p = PathBuf::from("/tmp/eyros-db/");
-  p.push(name);
-  Ok(RandomAccessDisk::open(p)?)
 }
