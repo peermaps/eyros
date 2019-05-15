@@ -18,7 +18,7 @@ fn main() -> Result<(),Error> {
   //let mut b_offset = 0;
   for (b_index,bdir) in args[2..].iter().enumerate() {
     let mut bfile = PathBuf::from(bdir);
-    bfile.push("bbox");
+    bfile.push("range");
     let mut ranges = eyros::DataBounds::new(
       RandomAccessDisk::open(bfile)?,
       0,

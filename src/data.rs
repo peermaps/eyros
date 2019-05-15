@@ -43,7 +43,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: S,
-  bounds: DataBounds<S,P>,
+  range: DataRange<S,P>,
   list_cache: LruCache<u64,Vec<(P,V)>>,
   pub max_data_size: usize,
   pub bincode: Rc<bincode::Config>
@@ -69,20 +69,20 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       None => bail!["invalid data at offset {}", offset],
       Some(bbox) => bbox
     };
-    self.bounds.write(&(offset,P::bounds_to_range(bbox),rows.len() as u64))?;
+    self.range.write(&(offset,P::bounds_to_range(bbox),rows.len() as u64))?;
     Ok(offset as u64)
   }
 }
 
 impl<S,P,V> DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (store: S, bbox_store: S,
+  pub fn open (store: S, range_store: S,
   max_data_size: usize, bbox_cache_size: usize,
   list_cache_size: usize, bincode: Rc<bincode::Config>) -> Result<Self,Error> {
     Ok(Self {
       store,
-      bounds: DataBounds::new(
-        bbox_store, bbox_cache_size, Rc::clone(&bincode)
+      range: DataRange::new(
+        range_store, bbox_cache_size, Rc::clone(&bincode)
       ),
       list_cache: LruCache::new(list_cache_size),
       max_data_size,
@@ -130,7 +130,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(self.store.len()? as u64)
   }
   pub fn bbox (&mut self, offset: u64) -> Result<(P::Bounds,u64),Error> {
-    match self.bounds.cache.get(&offset) {
+    match self.range.cache.get(&offset) {
       None => {},
       Some(r) => return Ok(*r)
     };
@@ -143,19 +143,19 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       Some(bbox) => bbox
     };
     let result = (bbox,rows.len() as u64);
-    self.bounds.cache.put(offset, result.clone());
+    self.range.cache.put(offset, result.clone());
     Ok(result)
   }
 }
 
-pub struct DataBounds<S,P>
+pub struct DataRange<S,P>
 where S: RandomAccess<Error=Error>, P: Point {
   pub store: S,
   pub cache: LruCache<u64,(P::Bounds,u64)>,
   bincode: Rc<bincode::Config>
 }
 
-impl<S,P> DataBounds<S,P>
+impl<S,P> DataRange<S,P>
 where S: RandomAccess<Error=Error>, P: Point {
   pub fn new (store: S, cache_size: usize, bincode: Rc<bincode::Config>) -> Self {
     Self {

@@ -23,7 +23,7 @@ pub use crate::point::{Point,Scalar};
 pub use crate::tree::{Tree,TreeIterator,TreeOpts};
 pub use crate::branch::Branch;
 use crate::order::pivot_order;
-pub use crate::data::{DataStore,DataBounds};
+pub use crate::data::{DataStore,DataRange};
 use crate::take_bytes::TakeBytes;
 use crate::meta::Meta;
 
@@ -78,7 +78,7 @@ P: Point, V: Value {
     let r_bcode = Rc::new(bcode);
     let data_store = DataStore::open(
       (setup.open_store)("data")?,
-      (setup.open_store)("bbox")?,
+      (setup.open_store)("range")?,
       setup.fields.max_data_size,
       setup.fields.bbox_cache_size,
       setup.fields.data_list_cache_size,
