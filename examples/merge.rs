@@ -19,7 +19,7 @@ fn main() -> Result<(),Error> {
   for (b_index,bdir) in args[2..].iter().enumerate() {
     let mut bfile = PathBuf::from(bdir);
     bfile.push("range");
-    let mut ranges = eyros::DataBounds::new(
+    let mut ranges = eyros::DataRange::new(
       RandomAccessDisk::open(bfile)?,
       0,
       Rc::clone(&db.bincode)
