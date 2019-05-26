@@ -19,13 +19,6 @@ impl<S> WriteCache<S> where S: RandomAccess {
       enabled: true
     })
   }
-  pub fn commit (&mut self) -> Result<(),S::Error> {
-    for q in self.queue.iter() {
-      self.store.write(q.0, &q.1)?;
-    }
-    self.queue.clear();
-    Ok(())
-  }
 }
 
 impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
@@ -143,6 +136,13 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
   fn is_empty (&mut self) -> Result<bool,Self::Error> {
     if self.enabled { Ok(self.length == 0) }
     else { self.store.is_empty() }
+  }
+  fn sync_all (&mut self) -> Result<(),S::Error> {
+    for q in self.queue.iter() {
+      self.store.write(q.0, &q.1)?;
+    }
+    self.queue.clear();
+    Ok(())
   }
 }
 
