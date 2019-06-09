@@ -196,7 +196,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       self.bytes = 0;
       self.store.truncate(0)?;
     }
-    //self.store.sync_all()?;
+    self.store.sync_all()?;
     Ok(())
   }
   pub fn is_empty (&mut self) -> Result<bool,Error> {
@@ -269,7 +269,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       branches = nbranches;
     }
-    //self.store.sync_all()?;
+    self.store.sync_all()?;
     Ok(())
   }
   pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)

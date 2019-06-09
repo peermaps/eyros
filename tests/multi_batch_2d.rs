@@ -20,7 +20,9 @@ fn multi_batch_f32_f64_u16() -> Result<(),Error> {
   let mut db: DB<_,_,P,V> = DB::open(
     |name: &str| -> Result<RandomAccessDisk,Error> {
       let p = dir.path().join(name);
-      Ok(RandomAccessDisk::open(p)?)
+      Ok(RandomAccessDisk::builder(p)
+        .auto_sync(false)
+        .build()?)
     }
   )?;
   let mut r = rand().seed([13,12]);
@@ -93,7 +95,9 @@ fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
   let mut db: DB<_,_,P,V> = DB::open(
     |name: &str| -> Result<RandomAccessDisk,Error> {
       let p = dir.path().join(name);
-      Ok(RandomAccessDisk::open(p)?)
+      Ok(RandomAccessDisk::builder(p)
+        .auto_sync(false)
+        .build()?)
     }
   )?;
   let mut r = rand().seed([13,12]);

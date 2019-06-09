@@ -17,7 +17,9 @@ fn main() -> Result<(),Error> {
   let mut db = Setup::new(|name| {
     let mut p = base.clone();
     p.push(name);
-    Ok(RandomAccessDisk::open(p)?)
+    Ok(RandomAccessDisk::builder(p)
+      .auto_sync(false)
+      .build()?)
   })
     .branch_factor(5)
     .max_data_size(3_000)

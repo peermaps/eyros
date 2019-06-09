@@ -13,14 +13,18 @@ fn main() -> Result<(),Error> {
   let mut db: DB<_,_,R,V> = DB::open(|name| {
     let mut p = base.clone();
     p.push(name);
-    Ok(RandomAccessDisk::open(p)?)
+    Ok(RandomAccessDisk::builder(p)
+      .auto_sync(false)
+      .build()?)
   })?;
   //let mut b_offset = 0;
   for (b_index,bdir) in args[2..].iter().enumerate() {
     let mut bfile = PathBuf::from(bdir);
     bfile.push("range");
     let mut ranges = eyros::DataRange::new(
-      RandomAccessDisk::open(bfile)?,
+      RandomAccessDisk::builder(bfile)
+        .auto_sync(false)
+        .build()?,
       0,
       Rc::clone(&db.bincode)
     );

@@ -21,7 +21,9 @@ fn block_cache_full_write () -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
   {
     let mut store = BlockCache::new(
-      RandomAccessDisk::open(dir.path().join("0"))?, 10, 20);
+      RandomAccessDisk::builder(dir.path().join("0"))
+        .auto_sync(false)
+        .build()?, 10, 20);
     store.write(0, &vec![97,98,5])?;
     store.write(2, &vec![99,100,101,102,103,104,105,106,107,108,109])?;
     assert_eq![store.read(8, 4)?, vec![105,106,107,108]];
@@ -31,7 +33,9 @@ fn block_cache_full_write () -> Result<(),Error> {
   {
     for i in 1..10 {
       let mut store = BlockCache::new(
-        RandomAccessDisk::open(dir.path().join(i.to_string()))?, 50, 40);
+        RandomAccessDisk::builder(dir.path().join(i.to_string()))
+          .auto_sync(false)
+          .build()?, 50, 40);
       let size = 1_000;
       let mut data = vec![];
       for _ in 0..size {
@@ -69,7 +73,9 @@ fn block_cache_read_write_commit () -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
   for i in 10..20 {
     let mut store = BlockCache::new(
-      RandomAccessDisk::open(dir.path().join(i.to_string()))?, 50, 40);
+      RandomAccessDisk::builder(dir.path().join(i.to_string()))
+        .auto_sync(false)
+        .build()?, 50, 40);
     let size = 1_000;
     let mut data = vec![];
     for _ in 0..size {
@@ -106,7 +112,9 @@ fn block_cache_read_write_commit () -> Result<(),Error> {
 fn block_cache_cold_read () -> Result<(),Error> {
   let mut r = rand().seed([13,12]);
   let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
-  let mut store = RandomAccessDisk::open(dir.path().join("20"))?;
+  let mut store = RandomAccessDisk::builder(dir.path().join("20"))
+    .auto_sync(false)
+    .build()?;
   let size = 1_000;
   let mut data = vec![];
   for _ in 0..size {
@@ -129,7 +137,9 @@ fn block_cache_cold_read_write_read () -> Result<(),Error> {
   let size = 1_000;
   let mut data = vec![];
   {
-    let mut store = RandomAccessDisk::open(dir.path().join("20"))?;
+    let mut store = RandomAccessDisk::builder(dir.path().join("20"))
+      .auto_sync(false)
+      .build()?;
     for _ in 0..size {
       data.push(r.read::<u8>());
     }
@@ -166,7 +176,9 @@ fn block_cache_cold_read_write_read () -> Result<(),Error> {
     assert_eq![bstore.len()?, size, "expected length"];
   }
   {
-    let mut store = RandomAccessDisk::open(dir.path().join("20"))?;
+    let mut store = RandomAccessDisk::builder(dir.path().join("20"))
+      .auto_sync(false)
+      .builder()?;
     assert_eq![store.read(0,size)?, data];
     assert_eq![store.len()?, size, "expected length"];
   }
@@ -178,7 +190,9 @@ fn block_cache_append_low_count () -> Result<(),Error> {
   let mut r = rand().seed([13,12]);
   let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
   let file = dir.path().join("21");
-  let mut store = BlockCache::new(RandomAccessDisk::open(file)?, 50, 40);
+  let mut store = BlockCache::new(RandomAccessDisk::builder(file)
+    .auto_sync(false)
+    .build()?, 50, 40);
   let mut expected: Vec<u8> = vec![];
   for _level in 0..50 {
     for _ in 0..100 {
@@ -207,7 +221,9 @@ fn block_cache_append_high_count () -> Result<(),Error> {
   let mut r = rand().seed([13,12]);
   let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
   let file = dir.path().join("21");
-  let mut store = BlockCache::new(RandomAccessDisk::open(file)?, 50, 4000);
+  let mut store = BlockCache::new(RandomAccessDisk::builder(file)
+    .auto_sync(false)
+    .build()?, 50, 4000);
   let mut expected: Vec<u8> = vec![];
   for _level in 0..50 {
     for _ in 0..100 {
@@ -236,7 +252,9 @@ fn block_cache_read_append_interleaved () -> Result<(),Error> {
   let mut r = rand().seed([13,12]);
   let dir = Tmpfile::new().prefix("eyros-block-cache").tempdir()?;
   let file = dir.path().join("22");
-  let mut store = BlockCache::new(RandomAccessDisk::open(file)?, 500, 20);
+  let mut store = BlockCache::new(RandomAccessDisk::builder(file)
+    .auto_sync(false)
+    .build()?, 500, 20);
   let mut data: Vec<u8> = vec![];
   for _ in 0..5_000 {
     let c = r.read::<f64>();

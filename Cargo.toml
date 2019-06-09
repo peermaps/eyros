@@ -18,4 +18,7 @@ random = "0.12.2"
 tempfile = "3.0.7"
 
 [patch.crates-io.random-access-disk]
-path = "/home/substack/projects/random-access-disk"
+path = "../datrs/random-access-disk"
+
+[patch.crates-io.random-access-storage]
+path = "../datrs/random-access-storage"

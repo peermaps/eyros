@@ -22,7 +22,9 @@ fn multi_batch() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
   let storage = |name: &str| -> Result<RandomAccessDisk,Error> {
     let p = dir.path().join(name);
-    Ok(RandomAccessDisk::open(p)?)
+    Ok(RandomAccessDisk::builder(p)
+      .auto_sync(false)
+      .build()?)
   };
   let mut db: DB<_,_,P,V> = Setup::new(storage)
     .branch_factor(5)

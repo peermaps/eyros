@@ -37,7 +37,9 @@ fn load() -> Result<(),Error> {
     let mut db: DB<_,_,P,V> = DB::open(
       |name: &str| -> Result<RandomAccessDisk,Error> {
         let p = dir.path().join(name);
-        Ok(RandomAccessDisk::open(p)?)
+        Ok(RandomAccessDisk::builder(p)
+          .auto_sync(false)
+          .build()?)
       }
     )?;
     let n = 4;
@@ -54,7 +56,9 @@ fn load() -> Result<(),Error> {
     let mut db: DB<_,_,P,V> = DB::open(
       |name: &str| -> Result<RandomAccessDisk,Error> {
         let p = dir.path().join(name);
-        Ok(RandomAccessDisk::open(p)?)
+        Ok(RandomAccessDisk::builder(p)
+          .auto_sync(false)
+          .build()?)
       }
     )?;
     check(&mut db, &inserts, size)?;
@@ -76,7 +80,9 @@ fn load() -> Result<(),Error> {
     let mut db: DB<_,_,P,V> = DB::open(
       |name: &str| -> Result<RandomAccessDisk,Error> {
         let p = dir.path().join(name);
-        Ok(RandomAccessDisk::open(p)?)
+        Ok(RandomAccessDisk::builder(p)
+          .auto_sync(false)
+          .build()?)
       }
     )?;
     let n = 5;

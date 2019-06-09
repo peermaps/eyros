@@ -50,7 +50,9 @@ base_size: usize) -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
   let open = |name: &str| -> Result<RandomAccessDisk,Error> {
     let p = dir.path().join(name);
-    Ok(RandomAccessDisk::open(p)?)
+    Ok(RandomAccessDisk::builder(p)
+      .auto_sync(false)
+      .build()?)
   };
   let mut db = Setup::new(open)
     .branch_factor(bf)

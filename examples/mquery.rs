@@ -17,7 +17,9 @@ fn main() -> Result<(),Error> {
   let mut db: DB<_,_,R,I> = DB::open(|name| {
     let mut p = base.clone();
     p.push(name);
-    Ok(RandomAccessDisk::open(p)?)
+    Ok(RandomAccessDisk::builder(p)
+      .auto_sync(false)
+      .build()?)
   })?;
   let n = args.len()-1;
   let mut dstores = {
