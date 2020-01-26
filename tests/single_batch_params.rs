@@ -1,5 +1,3 @@
-#![feature(duration_float)]
-
 extern crate eyros;
 extern crate failure;
 extern crate random;
