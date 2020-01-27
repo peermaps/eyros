@@ -1,4 +1,3 @@
-#![feature(duration_float)]
 extern crate eyros;
 extern crate failure;
 extern crate random;
@@ -13,6 +12,7 @@ use tempfile::Builder as Tmpfile;
 
 use std::cmp::Ordering;
 use std::time;
+use std::collections::HashSet;
 
 type P = ((f32,f32),(f32,f32),f32);
 type V = u32;
@@ -58,11 +58,23 @@ fn delete() -> Result<(),Error> {
     eprintln!["total batch time: {}\nwrote {} records per second",
       total, (size as f64)/total];
   }
-  // delete half the records
-  let deletes = (0..size/10).map(|i| {
-    let Row::Insert(point,value) = inserts[i*10];
-    Row::Delete(point,value)
-  }).collect();
+
+  let mut deleted = HashSet::new();
+  {
+    // delete 1/10th of the records
+    let deletes: Vec<Row<P,V>> = (0..size/10).map(|i| {
+      deleted.insert(i);
+      match inserts[i*10] {
+        Row::Insert(point,value) => Row::Delete(point,value),
+        _ => panic!["unexpected row type"]
+      }
+    }).collect();
+    let start = time::Instant::now();
+    db.batch(&deletes)?;
+    let elapsed = start.elapsed().as_secs_f64();
+    eprintln!["batch delete for {} records in {} seconds",
+      deletes.len(), elapsed];
+  }
 
   {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
@@ -75,12 +87,14 @@ fn delete() -> Result<(),Error> {
       results.len(), start.elapsed().as_secs_f64()];
     assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(P,V)>
-    = inserts.iter().map(|r| {
-      match r {
-        Row::Insert(point,value) => (*point,*value),
-        _ => panic!["unexpected row type"]
-      }
-    }).collect();
+    = inserts.iter().enumerate()
+      .filter(|(i,_)| { deleted.contains(i) })
+      .map(|(_,r)| {
+        match r {
+          Row::Insert(point,value) => (*point,*value),
+          _ => panic!["unexpected row type"]
+        }
+      }).collect();
     results.sort_unstable_by(cmp);
     expected.sort_unstable_by(cmp);
     assert_eq!(results, expected, "incorrect results for full region");
@@ -96,8 +110,9 @@ fn delete() -> Result<(),Error> {
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
-    = inserts.iter()
-      .map(|r| {
+    = inserts.iter().enumerate()
+      .filter(|(i,_)| { deleted.contains(i) })
+      .map(|(_,r)| {
         match r {
           Row::Insert(point,value) => (*point,*value),
           _ => panic!["unexpected row type"]
