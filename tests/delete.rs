@@ -29,7 +29,7 @@ fn delete() -> Result<(),Error> {
     }
   )?;
   let mut r = rand().seed([13,12]);
-  let size = 200_000;
+  let size = 40_000;
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
     let xmin: f32 = r.read::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + r.read::<f32>().powf(64.0)*(1.0-xmin);
@@ -40,7 +40,7 @@ fn delete() -> Result<(),Error> {
     let point = ((xmin,xmax),(ymin,ymax),time);
     Row::Insert(point, value)
   }).collect();
-  let batch_size = 10_000;
+  let batch_size = 5_000;
   let n = size / batch_size;
   let batches: Vec<Vec<Row<P,V>>> = (0..n).map(|i| {
     inserts[i*batch_size..(i+1)*batch_size].to_vec()
@@ -59,7 +59,7 @@ fn delete() -> Result<(),Error> {
       total, (size as f64)/total];
   }
 
-  let mut deleted = HashSet::new();
+  let mut deleted: HashSet<usize> = HashSet::new();
   {
     // delete 1/10th of the records
     let deletes: Vec<Row<P,V>> = (0..size/10).map(|i| {
@@ -88,7 +88,7 @@ fn delete() -> Result<(),Error> {
     assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(P,V)>
     = inserts.iter().enumerate()
-      .filter(|(i,_)| { deleted.contains(i) })
+      .filter(|(i,_)| { !deleted.contains(i) })
       .map(|(_,r)| {
         match r {
           Row::Insert(point,value) => (*point,*value),
@@ -111,7 +111,7 @@ fn delete() -> Result<(),Error> {
       results.len(), start.elapsed().as_secs_f64()];
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
     = inserts.iter().enumerate()
-      .filter(|(i,_)| { deleted.contains(i) })
+      .filter(|(i,_)| { !deleted.contains(i) })
       .map(|(_,r)| {
         match r {
           Row::Insert(point,value) => (*point,*value),
@@ -141,8 +141,9 @@ fn delete() -> Result<(),Error> {
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
-    = inserts.iter()
-      .map(|r| {
+    = inserts.iter().enumerate()
+      .filter(|(i,_)| { !deleted.contains(i) })
+      .map(|(_,r)| {
         match r {
           Row::Insert(point,value) => (*point,*value),
           _ => panic!["unexpected row type"]
