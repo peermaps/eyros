@@ -97,6 +97,8 @@ fn delete() -> Result<(),Error> {
       }).collect();
     results.sort_unstable_by(cmp);
     expected.sort_unstable_by(cmp);
+    assert_eq!(results.len(), expected.len(),
+      "incorrect length for full result");
     assert_eq!(results, expected, "incorrect results for full region");
   }
 
