@@ -50,7 +50,7 @@ fn main() -> Result<(),Error> {
   let mut count = 0;
   let mut counts = std::collections::HashMap::new();
   for result in db.query(&bbox)? {
-    let (_,(b_index,offset)) = result?;
+    let (_,(b_index,offset),_) = result?;
     let ds = &mut dstores[b_index as usize];
     for _r in ds.query(offset, &bbox)? {
       count += 1;

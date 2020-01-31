@@ -18,7 +18,7 @@ impl<'a,'b,P,V> StagingIterator<'a,'b,P,V> where P: Point, V: Value {
 
 impl<'a,'b,P,V> Iterator for StagingIterator<'a,'b,P,V>
 where P: Point, V: Value {
-  type Item = Result<(P,V),Error>;
+  type Item = Result<(P,V,(u64,usize)),Error>;
   fn next (&mut self) -> Option<Self::Item> {
     let len = self.rows.len();
     while self.index < len {
@@ -27,7 +27,7 @@ where P: Point, V: Value {
       match &self.rows[i] {
         Row::Insert(point,value) => {
           if point.overlaps(self.bbox) {
-            return Some(Ok((*point,value.clone())))
+            return Some(Ok((*point,value.clone(),(0, i))))
           }
         },
         Row::Delete(_point,_value) => {}

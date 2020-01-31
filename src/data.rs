@@ -29,12 +29,15 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     } else { // combine addresses into a new block
       let mut dstore = self.data_store.try_borrow_mut()?;
       let max = dstore.max_data_size;
-      let mut combined = vec![];
+      let mut combined: Vec<(P,V)> = vec![];
       for row in rows {
-        combined.extend(dstore.list(row.1)?);
+        let pvs: Vec<(P,V)> = dstore.list(row.1)?.iter().map(|c| {
+          (c.0, c.1.clone())
+        }).collect();
+        combined.extend(pvs);
       }
       ensure![combined.len() <= max, "data size limit exceeded in data merge"];
-      dstore.batch(&combined.iter().map(|c| c).collect())
+      dstore.batch(&combined.iter().collect())
     }
   }
 }
@@ -44,7 +47,7 @@ pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: S,
   range: DataRange<S,P>,
-  list_cache: LruCache<u64,Vec<(P,V)>>,
+  list_cache: LruCache<u64,Vec<(P,V,(u64,usize))>>,
   pub max_data_size: usize,
   pub bincode: Rc<bincode::Config>
 }
@@ -94,30 +97,33 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(())
   }
   pub fn query (&mut self, offset: u64, bbox: &P::Bounds)
-  -> Result<Vec<(P,V)>,Error> {
+  -> Result<Vec<(P,V,(u64,usize))>,Error> {
     let rows = self.list(offset)?;
     Ok(rows.iter().filter(|row| {
       row.0.overlaps(bbox)
     }).map(|row| { row.clone() }).collect())
   }
-  pub fn list (&mut self, offset: u64) -> Result<Vec<(P,V)>,Error> {
+  pub fn list (&mut self, offset: u64) -> Result<Vec<(P,V,(u64,usize))>,Error> {
     match self.list_cache.get(&offset) {
       Some(rows) => return Ok(rows.to_vec()),
       None => {}
     }
     let buf = self.read(offset)?;
-    let rows = self.parse(&buf)?;
+    let rows = self.parse(&buf)?.iter().map(|row| {
+      (row.0,row.1.clone(),(offset+1,row.2))
+    }).collect();
     self.list_cache.put(offset, rows);
     Ok(self.list_cache.peek(&offset).unwrap().to_vec())
   }
-  pub fn parse (&self, buf: &Vec<u8>) -> Result<Vec<(P,V)>,Error> {
+  pub fn parse (&self, buf: &Vec<u8>) -> Result<Vec<(P,V,usize)>,Error> {
     let mut results = vec![];
     let mut offset = 0;
     while offset < buf.len() {
       let psize = P::size_of();
       let vsize = V::take_bytes(offset+psize, &buf);
       let n = psize + vsize;
-      results.push(self.bincode.deserialize(&buf[offset..offset+n])?);
+      let pv: (P,V) = self.bincode.deserialize(&buf[offset..offset+n])?;
+      results.push((pv.0,pv.1,offset));
       offset += n;
     }
     Ok(results)
@@ -138,7 +144,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     if rows.is_empty() {
       bail!["empty data block"]
     }
-    let bbox = match P::bounds(&rows.iter().map(|(p,_)| *p).collect()) {
+    let bbox = match P::bounds(&rows.iter().map(|(p,_,_)| *p).collect()) {
       None => bail!["invalid data at offset {}", offset],
       Some(bbox) => bbox
     };

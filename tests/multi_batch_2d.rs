@@ -45,7 +45,8 @@ fn multi_batch_f32_f64_u16() -> Result<(),Error> {
     let bbox = ((-1000.0,2000.0),(1000.0,6000.0));
     let mut results = vec![];
     for result in db.query(&bbox)? {
-      results.push(result?);
+      let r = result?;
+      results.push((r.0,r.1));
     }
     assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(P,V)>
@@ -64,7 +65,8 @@ fn multi_batch_f32_f64_u16() -> Result<(),Error> {
     let bbox = ((-800.0,1000.0),(-400.0,4000.0));
     let mut results = vec![];
     for result in db.query(&bbox)? {
-      results.push(result?);
+      let r = result?;
+      results.push((r.0,r.1));
     }
     let mut expected: Vec<(P,V)> = inserts.iter()
       .map(|r| {
@@ -121,7 +123,8 @@ fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
     let bbox = ((-1500.0,2000.0),(1500.0,6000.0));
     let mut results = vec![];
     for result in db.query(&bbox)? {
-      results.push(result?);
+      let r = result?;
+      results.push((r.0,r.1));
     }
     assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(P,V)> = inserts.iter().map(|r| {
@@ -139,7 +142,8 @@ fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
     let bbox = ((-800.0,1000.0),(-400.0,4000.0));
     let mut results = vec![];
     for result in db.query(&bbox)? {
-      results.push(result?);
+      let r = result?;
+      results.push((r.0,r.1));
     }
     let mut expected: Vec<(P,V)> = inserts.iter()
       .map(|r| {

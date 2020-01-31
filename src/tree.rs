@@ -15,7 +15,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   bbox: &'b P::Bounds,
   cursors: Vec<(u64,usize)>,
   blocks: Vec<u64>,
-  queue: Vec<(P,V)>,
+  queue: Vec<(P,V,(u64,usize))>,
   tree_size: u64
 }
 
@@ -46,7 +46,7 @@ macro_rules! iwrap {
 
 impl<'a,'b,S,P,V> Iterator for TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  type Item = Result<(P,V),Error>;
+  type Item = Result<(P,V,(u64,usize)),Error>;
   fn next (&mut self) -> Option<Self::Item> {
     let store = &mut self.tree.store;
     let order = &self.tree.order;
@@ -58,7 +58,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     while !self.cursors.is_empty() || !self.blocks.is_empty()
     || !self.queue.is_empty() {
       if !self.queue.is_empty() {
-        return Some(Ok(self.queue.pop().unwrap()))
+        return Some(Ok(self.queue.pop().unwrap()));
       }
       if !self.blocks.is_empty() { // data block:
         let offset = self.blocks.pop().unwrap();
@@ -188,7 +188,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       order: opts.order,
       bincode: opts.bincode,
       branch_factor: opts.branch_factor,
-      max_data_size: opts.max_data_size
+      max_data_size: opts.max_data_size,
     })
   }
   pub fn clear (&mut self) -> Result<(),Error> {

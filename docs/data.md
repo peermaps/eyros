@@ -60,7 +60,7 @@ During the batch construction, data points are written when the number of points
 in a branch drops below the max data threshold.
 
 Each point is composed of interval and scalar components, but the entire data
-block also has an interval that represents the boudning extents of all of its
+block also has an interval that represents the bounding extents of all of its
 interval and scalar members. This bounding interval is used during tree merges
 to keep data blocks in place and to avoid unnecessary I/O.
 

@@ -48,7 +48,7 @@ fn main() -> Result<(),Error> {
     )
   };
   for result in db.query(&bbox)? {
-    let (_,(b_index,offset)) = result?;
+    let (_,(b_index,offset),_) = result?;
     let ds = &mut dstores[b_index as usize];
     for r in ds.query(offset, &bbox)? {
       println!["{:?}", r];

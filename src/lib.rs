@@ -186,7 +186,7 @@ P: Point, V: Value {
         order: Rc::clone(&self.order),
         bincode: Rc::clone(&self.bincode),
         branch_factor: self.fields.branch_factor,
-        max_data_size: self.fields.max_data_size
+        max_data_size: self.fields.max_data_size,
       })?);
     }
     Ok(())
@@ -225,7 +225,7 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 impl<'a,'b,S,P,V> Iterator for QueryIterator<'a,'b,S,P,V> where
 S: RandomAccess<Error=Error>, P: Point, V: Value {
-  type Item = Result<(P,V),Error>;
+  type Item = Result<(P,V,(u64,usize)),Error>;
   fn next (&mut self) -> Option<Self::Item> {
     while !self.queries.is_empty() {
       let len = self.queries.len();

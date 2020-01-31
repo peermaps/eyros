@@ -119,7 +119,8 @@ U: (Fn(&str) -> Result<S,Error>) {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
     let mut results = vec![];
     for result in db.query(&bbox)? {
-      results.push(result?);
+      let r = result?;
+      results.push((r.0,r.1));
     }
     assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(P,V)>
@@ -137,7 +138,8 @@ U: (Fn(&str) -> Result<S,Error>) {
     let bbox = ((-0.8,0.1,0.0),(0.2,0.5,500.0));
     let mut results = vec![];
     for result in db.query(&bbox)? {
-      results.push(result?);
+      let r = result?;
+      results.push((r.0,r.1));
     }
     let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
     = inserts.iter()

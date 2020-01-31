@@ -63,7 +63,8 @@ fn mega_batch() -> Result<(),Error> {
     let mut results = vec![];
     let start = time::Instant::now();
     for result in db.query(&bbox)? {
-      results.push(result?);
+      let r = result?;
+      results.push((r.0,r.1));
     }
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
@@ -85,7 +86,8 @@ fn mega_batch() -> Result<(),Error> {
     let mut results = vec![];
     let start = time::Instant::now();
     for result in db.query(&bbox)? {
-      results.push(result?);
+      let r = result?;
+      results.push((r.0,r.1));
     }
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
@@ -115,7 +117,8 @@ fn mega_batch() -> Result<(),Error> {
     let mut results = vec![];
     let start = time::Instant::now();
     for result in db.query(&bbox)? {
-      results.push(result?);
+      let r = result?;
+      results.push((r.0,r.1));
     }
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
