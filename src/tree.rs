@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::mem::size_of;
 
-use crate::{Row,Point,Value};
+use crate::{Row,Point,Value,Location};
 use crate::branch::{Branch,Node};
 use crate::data::{DataStore,DataMerge,DataBatch};
 use crate::read_block::read_block;
@@ -15,7 +15,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   bbox: &'b P::Bounds,
   cursors: Vec<(u64,usize)>,
   blocks: Vec<u64>,
-  queue: Vec<(P,V,(u64,usize))>,
+  queue: Vec<(P,V,Location)>,
   tree_size: u64
 }
 
@@ -46,7 +46,7 @@ macro_rules! iwrap {
 
 impl<'a,'b,S,P,V> Iterator for TreeIterator<'a,'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  type Item = Result<(P,V,(u64,usize)),Error>;
+  type Item = Result<(P,V,Location),Error>;
   fn next (&mut self) -> Option<Self::Item> {
     let store = &mut self.tree.store;
     let order = &self.tree.order;

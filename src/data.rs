@@ -1,4 +1,4 @@
-use crate::{Point,Value,read_block::read_block};
+use crate::{Point,Value,Location,read_block::read_block};
 use random_access_storage::RandomAccess;
 use failure::{Error,ensure,bail};
 use std::rc::Rc;
@@ -47,7 +47,7 @@ pub struct DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: S,
   range: DataRange<S,P>,
-  list_cache: LruCache<u64,Vec<(P,V,(u64,usize))>>,
+  list_cache: LruCache<u64,Vec<(P,V,Location)>>,
   pub max_data_size: usize,
   pub bincode: Rc<bincode::Config>
 }
@@ -97,13 +97,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(())
   }
   pub fn query (&mut self, offset: u64, bbox: &P::Bounds)
-  -> Result<Vec<(P,V,(u64,usize))>,Error> {
+  -> Result<Vec<(P,V,Location)>,Error> {
     let rows = self.list(offset)?;
     Ok(rows.iter().filter(|row| {
       row.0.overlaps(bbox)
     }).map(|row| { row.clone() }).collect())
   }
-  pub fn list (&mut self, offset: u64) -> Result<Vec<(P,V,(u64,usize))>,Error> {
+  pub fn list (&mut self, offset: u64) -> Result<Vec<(P,V,Location)>,Error> {
     match self.list_cache.get(&offset) {
       Some(rows) => return Ok(rows.to_vec()),
       None => {}

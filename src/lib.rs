@@ -42,11 +42,12 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 pub trait Value: Debug+Clone+TakeBytes+Serialize+DeserializeOwned+'static {}
 impl<T> Value for T where T: Debug+Clone+TakeBytes+Serialize+DeserializeOwned+'static {}
+pub type Location = (u64,usize);
 
 #[derive(Clone,Debug)]
 pub enum Row<P,V> where P: Point, V: Value {
   Insert(P,V),
-  Delete(P,V)
+  Delete(Location)
 }
 
 pub struct DB<S,U,P,V> where
@@ -225,7 +226,7 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 impl<'a,'b,S,P,V> Iterator for QueryIterator<'a,'b,S,P,V> where
 S: RandomAccess<Error=Error>, P: Point, V: Value {
-  type Item = Result<(P,V,(u64,usize)),Error>;
+  type Item = Result<(P,V,Location),Error>;
   fn next (&mut self) -> Option<Self::Item> {
     while !self.queries.is_empty() {
       let len = self.queries.len();

@@ -4,7 +4,7 @@ extern crate random;
 extern crate random_access_disk;
 extern crate tempfile;
 
-use eyros::{DB,Row};
+use eyros::{DB,Row,Location};
 use failure::Error;
 use random_access_disk::RandomAccessDisk;
 use random::{Source,default as rand};
@@ -59,16 +59,27 @@ fn delete() -> Result<(),Error> {
       total, (size as f64)/total];
   }
 
-  let mut deleted: HashSet<usize> = HashSet::new();
+  let full: Vec<(P,V,Location)> = {
+    let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
+    let mut results = vec![];
+    for result in db.query(&bbox)? {
+      results.push(result?);
+    }
+    results
+  };
+  assert_eq![full.len(), inserts.len(),
+    "correct number of results before deleting"];
+
+  let mut deleted: HashSet<Location> = HashSet::new();
   {
     // delete 1/10th of the records
-    let deletes: Vec<Row<P,V>> = (0..size/10).map(|i| {
-      deleted.insert(i);
-      match inserts[i*10] {
-        Row::Insert(point,value) => Row::Delete(point,value),
-        _ => panic!["unexpected row type"]
+    let mut deletes = vec![];
+    for (i,r) in full.iter().enumerate() {
+      if i % 10 == 0 {
+        deletes.push(Row::Delete(r.2));
+        deleted.insert(r.2);
       }
-    }).collect();
+    };
     let start = time::Instant::now();
     db.batch(&deletes)?;
     let elapsed = start.elapsed().as_secs_f64();
@@ -81,21 +92,15 @@ fn delete() -> Result<(),Error> {
     let mut results = vec![];
     let start = time::Instant::now();
     for result in db.query(&bbox)? {
-      let r = result?;
-      results.push((r.0,r.1));
+      results.push(result?);
     }
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
     assert_eq!(results.len(), size, "incorrect length for full region");
-    let mut expected: Vec<(P,V)>
-    = inserts.iter().enumerate()
-      .filter(|(i,_)| { !deleted.contains(i) })
-      .map(|(_,r)| {
-        match r {
-          Row::Insert(point,value) => (*point,*value),
-          _ => panic!["unexpected row type"]
-        }
-      }).collect();
+    let mut expected: Vec<(P,V,Location)> = full.iter()
+      .filter(|r| !deleted.contains(&r.2))
+      .map(|r| *r)
+      .collect();
     results.sort_unstable_by(cmp);
     expected.sort_unstable_by(cmp);
     assert_eq!(results.len(), expected.len(),
@@ -108,25 +113,18 @@ fn delete() -> Result<(),Error> {
     let mut results = vec![];
     let start = time::Instant::now();
     for result in db.query(&bbox)? {
-      let r = result?;
-      results.push((r.0,r.1));
+      results.push(result?)
     }
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
-    let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
-    = inserts.iter().enumerate()
-      .filter(|(i,_)| { !deleted.contains(i) })
-      .map(|(_,r)| {
-        match r {
-          Row::Insert(point,value) => (*point,*value),
-          _ => panic!["unexpected row type"]
-        }
-      })
+    let mut expected: Vec<(P,V,Location)> = full.iter()
       .filter(|r| {
-        contains_iv((bbox.0).0,(bbox.1).0, (r.0).0)
+        !deleted.contains(&r.2)
+        && contains_iv((bbox.0).0,(bbox.1).0, (r.0).0)
         && contains_iv((bbox.0).1,(bbox.1).1, (r.0).1)
         && contains_pt((bbox.0).2,(bbox.1).2, (r.0).2)
       })
+      .map(|r| *r)
       .collect();
     results.sort_unstable_by(cmp);
     expected.sort_unstable_by(cmp);
@@ -140,25 +138,18 @@ fn delete() -> Result<(),Error> {
     let mut results = vec![];
     let start = time::Instant::now();
     for result in db.query(&bbox)? {
-      let r = result?;
-      results.push((r.0,r.1));
+      results.push(result?);
     }
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
-    let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
-    = inserts.iter().enumerate()
-      .filter(|(i,_)| { !deleted.contains(i) })
-      .map(|(_,r)| {
-        match r {
-          Row::Insert(point,value) => (*point,*value),
-          _ => panic!["unexpected row type"]
-        }
-      })
+    let mut expected: Vec<(P,V,Location)> = full.iter()
       .filter(|r| {
-        contains_iv((bbox.0).0,(bbox.1).0, (r.0).0)
+        !deleted.contains(&r.2)
+        && contains_iv((bbox.0).0,(bbox.1).0, (r.0).0)
         && contains_iv((bbox.0).1,(bbox.1).1, (r.0).1)
         && contains_pt((bbox.0).2,(bbox.1).2, (r.0).2)
       })
+      .map(|r| *r)
       .collect();
     results.sort_unstable_by(cmp);
     expected.sort_unstable_by(cmp);

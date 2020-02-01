@@ -1,4 +1,4 @@
-use crate::{Row,Point,Value,write_cache::WriteCache};
+use crate::{Row,Point,Value,Location,write_cache::WriteCache};
 use failure::{Error,bail};
 use random_access_storage::RandomAccess;
 use std::mem::size_of;
@@ -18,7 +18,7 @@ impl<'a,'b,P,V> StagingIterator<'a,'b,P,V> where P: Point, V: Value {
 
 impl<'a,'b,P,V> Iterator for StagingIterator<'a,'b,P,V>
 where P: Point, V: Value {
-  type Item = Result<(P,V,(u64,usize)),Error>;
+  type Item = Result<(P,V,Location),Error>;
   fn next (&mut self) -> Option<Self::Item> {
     let len = self.rows.len();
     while self.index < len {
@@ -27,10 +27,10 @@ where P: Point, V: Value {
       match &self.rows[i] {
         Row::Insert(point,value) => {
           if point.overlaps(self.bbox) {
-            return Some(Ok((*point,value.clone(),(0, i))))
+            return Some(Ok((*point,value.clone(),(0, i))));
           }
         },
-        Row::Delete(_point,_value) => {}
+        Row::Delete(_location) => {},
       }
     }
     None
@@ -66,10 +66,15 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let psize = P::size_of();
       let vsize = V::take_bytes(offset+1+psize, &buf);
       let n = 1 + psize + vsize;
-      let (pt_type,point,value):(u8,P,V) = deserialize(&buf[offset..offset+n])?;
-      self.rows.push(match pt_type {
-        0u8 => Row::Insert(point,value),
-        1u8 => Row::Delete(point,value),
+      self.rows.push(match buf[offset] {
+        0u8 => {
+          let (point,value): (P,V) = deserialize(&buf[offset+1..offset+n])?;
+          Row::Insert(point,value)
+        },
+        1u8 => {
+          let location: Location = deserialize(&buf[offset+1..offset+n])?;
+          Row::Delete(location)
+        },
         _ => bail!("unexpected point type")
       });
       offset += n;
@@ -93,10 +98,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let n = size_of::<u8>() + P::size_of() + size_of::<V>();
     let mut buf: Vec<u8> = Vec::with_capacity(n*rows.len());
     for row in rows {
-      let bytes: Vec<u8> = serialize(&match row {
-        Row::Insert(point,value) => (Self::INSERT,point,value),
-        Row::Delete(point,value) => (Self::DELETE,point,value)
-      })?;
+      let bytes: Vec<u8> = match row {
+        Row::Insert(point,value) => serialize(&(Self::INSERT,point,value)),
+        Row::Delete(location) => serialize(&(Self::DELETE,location))
+      }?;
       //ensure_eq!(bytes.len(), n, "unexpected byte length in staging batch");
       buf.extend(bytes);
     }

@@ -92,7 +92,7 @@ fn main() -> Result<(),Error> {
     for p in db.staging.rows {
       match p {
         Row::Insert(p,v) => println!["{:?}", (p,v)],
-        Row::Delete(p,v) => println!["{:?} [DELETE]", (p,v)],
+        Row::Delete(loc) => println!["{:?} [DELETE]", loc],
       }
     }
   } else if args[2] == "time-query" {
