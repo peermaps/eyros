@@ -45,6 +45,7 @@ fn delete() -> Result<(),Error> {
   let batches: Vec<Vec<Row<P,V>>> = (0..n).map(|i| {
     inserts[i*batch_size..(i+1)*batch_size].to_vec()
   }).collect();
+  eprintln!["inserts.len()={}", inserts.len()];
   {
     let mut total = 0f64;
     for batch in batches {

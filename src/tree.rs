@@ -289,13 +289,17 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     {
       let mut dstore = trees[dst].data_store.try_borrow_mut()?;
+      /*
       let mut inserts = vec![];
+      let mut deletes = vec![];
       for row in rows {
         match row {
-          Row::Insert(p,v) => { inserts.push((*p,v.clone())) },
+          Row::Insert(p,v) => inserts.push((*p,v.clone())),
+          Row::Delete(loc) => deletes.push(loc),
           _ => {}
         }
       }
+      */
       let m = trees[dst].max_data_size;
       let mut srow_len = 0;
       for i in 0..(rows.len()+m-1)/m {
@@ -373,8 +377,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let mut blocks = Vec::with_capacity(offsets.len());
     let mut dstore = self.data_store.try_borrow_mut()?;
     for offset in offsets {
-      let (bbox,len) = dstore.bbox(offset)?;
-      blocks.push((bbox,offset,len))
+      match dstore.bbox(offset)? {
+        Some((bbox,len)) => blocks.push((bbox,offset,len)),
+        None => {},
+      }
     }
     Ok(blocks)
   }

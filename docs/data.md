@@ -66,6 +66,8 @@ to keep data blocks in place and to avoid unnecessary I/O.
 
 ```
 [length: u32 (bytes)]
+[bitfield length: u16 (bytes)]
+[bitfield data]
 [point0][value0]
 [point1][value1]
 [point2][value2]

@@ -57,7 +57,11 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error> {
     ensure![rows.len() <= self.max_data_size,
       "data size limit exceeded in data merge"];
-    let mut data: Vec<u8> = vec![0;4];
+    let bitfield_len = (rows.len()+7)/8;
+    let mut data: Vec<u8> = vec![0;6+bitfield_len];
+    for (i,_row) in rows.iter().enumerate() {
+      data[6+i/8] |= 1<<(i%8);
+    }
     for row in rows.iter() {
       let buf = self.bincode.serialize(row)?;
       //ensure_eq!(buf.len(), P::size_of() + size_of::<V>(),
@@ -66,6 +70,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     let len = data.len() as u32;
     data[0..4].copy_from_slice(&len.to_be_bytes());
+    data[4..6].copy_from_slice(&(bitfield_len as u16).to_be_bytes());
     let offset = self.store.len()? as u64;
     self.store.write(offset as usize, &data)?;
     let bbox = match P::bounds(&rows.iter().map(|(p,_)| *p).collect()) {
@@ -118,13 +123,21 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn parse (&self, buf: &Vec<u8>) -> Result<Vec<(P,V,usize)>,Error> {
     let mut results = vec![];
     let mut offset = 0;
+    let bitfield_len = u16::from_be_bytes([buf[0],buf[1]]) as usize;
+    offset += 2;
+    let bitfield: &[u8] = &buf[offset..offset+bitfield_len];
+    offset += bitfield_len;
+    let mut index = 0;
     while offset < buf.len() {
       let psize = P::size_of();
       let vsize = V::take_bytes(offset+psize, &buf);
       let n = psize + vsize;
-      let pv: (P,V) = self.bincode.deserialize(&buf[offset..offset+n])?;
-      results.push((pv.0,pv.1,offset));
+      if ((bitfield[index/8]>>(index%8))&1) == 1 {
+        let pv: (P,V) = self.bincode.deserialize(&buf[offset..offset+n])?;
+        results.push((pv.0,pv.1,offset));
+      }
       offset += n;
+      index += 1;
     }
     Ok(results)
   }
@@ -135,14 +148,15 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn bytes (&mut self) -> Result<u64,Error> {
     Ok(self.store.len()? as u64)
   }
-  pub fn bbox (&mut self, offset: u64) -> Result<(P::Bounds,u64),Error> {
+  pub fn bbox (&mut self, offset: u64)
+  -> Result<Option<(P::Bounds,u64)>,Error> {
     match self.range.cache.get(&offset) {
       None => {},
-      Some(r) => return Ok(*r)
+      Some(r) => return Ok(Some(*r))
     };
     let rows = self.list(offset)?;
     if rows.is_empty() {
-      bail!["empty data block"]
+      return Ok(None);
     }
     let bbox = match P::bounds(&rows.iter().map(|(p,_,_)| *p).collect()) {
       None => bail!["invalid data at offset {}", offset],
@@ -150,7 +164,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     };
     let result = (bbox,rows.len() as u64);
     self.range.cache.put(offset, result.clone());
-    Ok(result)
+    Ok(Some(result))
   }
 }
 
