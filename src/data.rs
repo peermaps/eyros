@@ -4,6 +4,7 @@ use failure::{Error,ensure,bail};
 use std::rc::Rc;
 use std::cell::RefCell;
 use lru::LruCache;
+use std::collections::HashMap;
 
 pub trait DataBatch<P,V> where P: Point, V: Value {
   fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error>;
@@ -144,6 +145,33 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn read (&mut self, offset: u64) -> Result<Vec<u8>,Error> {
     let len = self.store.len()? as u64;
     read_block(&mut self.store, offset, len, 1024)
+  }
+  pub fn delete (&mut self, locations: Vec<Location>) -> Result<(),Error> {
+    let mut by_block: HashMap<u64,Vec<usize>> = HashMap::new();
+    for (block,index) in locations {
+      match by_block.get_mut(&block) {
+        Some(indexes) => {
+          indexes.push(index);
+        },
+        None => {
+          by_block.insert(block, vec![index]);
+        },
+      }
+    }
+    for (block,indexes) in by_block.iter() {
+      let max_i = match indexes.iter().max() {
+        Some(i) => *i as u64,
+        None => bail!["indexes is an empty array"],
+      };
+      let max_len = 2 + (max_i+7)/8;
+      let guess = max_len;
+      let header = read_block(&mut self.store, *block, max_len, guess)?;
+      for index in indexes.iter() {
+        header[2+index/8] &= 1<<(index%8);
+      }
+      self.store.write(*block+4, &header)?
+    }
+    Ok(())
   }
   pub fn bytes (&mut self) -> Result<u64,Error> {
     Ok(self.store.len()? as u64)
