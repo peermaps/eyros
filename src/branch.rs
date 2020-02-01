@@ -108,7 +108,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       matched: vec![false;blen]
     })
   }
-  pub fn alloc (&mut self, alloc: &mut FnMut (usize) -> u64) -> () {
+  pub fn alloc (&mut self, alloc: &mut dyn FnMut (usize) -> u64) -> () {
     self.offset = alloc(self.bytes());
   }
   fn bytes (&self) -> usize {
@@ -119,7 +119,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       + (n+bf+7)/8 // D
       + (n+bf)*size_of::<u64>() // I+B
   }
-  pub fn build (&mut self, alloc: &mut FnMut (usize) -> u64)
+  pub fn build (&mut self, alloc: &mut dyn FnMut (usize) -> u64)
   -> Result<(Vec<u8>,Vec<Node<D,P,V>>),Error> {
     let order = &self.order;
     let n = order.len();

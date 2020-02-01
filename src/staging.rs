@@ -110,6 +110,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
   -> StagingIterator<'a,'b,P,V> {
-    <(StagingIterator<'a,'b,P,V>)>::new(&self.rows, bbox)
+    <StagingIterator<'a,'b,P,V>>::new(&self.rows, bbox)
   }
 }
