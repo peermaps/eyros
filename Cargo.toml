@@ -8,17 +8,11 @@ bincode = "1.0.1"
 failure = "0.1.5"
 lru = "0.1.13"
 num-traits = "0.2.6"
-random-access-disk = "0.8.0"
-random-access-storage = "2.0.0"
+random-access-disk = "1.0.0"
+random-access-storage = "3.0.0"
 serde = "1.0.82"
 
 [dev-dependencies]
 rand = "0.6.1"
 random = "0.12.2"
 tempfile = "3.0.7"
-
-[patch.crates-io.random-access-disk]
-path = "../datrs/random-access-disk"
-
-[patch.crates-io.random-access-storage]
-path = "../datrs/random-access-storage"

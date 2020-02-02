@@ -7,7 +7,7 @@ pub fn read_block<S> (store: &mut S, offset: u64, max_size: u64, guess: u64)
 where S: RandomAccess<Error=Error> {
   let size_guess = guess.min(max_size - offset.min(max_size));
   if size_guess < 4 { bail!["block too small for length field"] }
-  let fbuf: Vec<u8> = store.read(offset as usize, size_guess as usize)?;
+  let fbuf: Vec<u8> = store.read(offset, size_guess)?;
   ensure_eq![fbuf.len() as u64, size_guess, "requested {} bytes, received {}",
     size_guess, fbuf.len()];
   let len = u32::from_be_bytes([fbuf[0],fbuf[1],fbuf[2],fbuf[3]]) as u64;
@@ -29,8 +29,8 @@ where S: RandomAccess<Error=Error> {
     Ordering::Less => {
       buf.extend_from_slice(&fbuf[4..]);
       buf.extend(store.read(
-        (offset+(fbuf.len() as u64)) as usize,
-        (len-(fbuf.len() as u64)) as usize
+        offset+(fbuf.len() as u64),
+        len-(fbuf.len() as u64)
       )?);
     }
   };

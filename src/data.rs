@@ -73,7 +73,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     data[0..4].copy_from_slice(&len.to_be_bytes());
     data[4..6].copy_from_slice(&(bitfield_len as u16).to_be_bytes());
     let offset = self.store.len()? as u64;
-    self.store.write(offset as usize, &data)?;
+    self.store.write(offset, &data)?;
     let bbox = match P::bounds(&rows.iter().map(|(p,_)| *p).collect()) {
       None => bail!["invalid data at offset {}", offset],
       Some(bbox) => bbox
@@ -165,7 +165,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       };
       let max_len = 2 + (max_i+7)/8;
       let guess = max_len;
-      let header = read_block(&mut self.store, *block, max_len, guess)?;
+      let mut header = read_block(&mut self.store, *block, max_len, guess)?;
       for index in indexes.iter() {
         header[2+index/8] &= 1<<(index%8);
       }
@@ -219,7 +219,7 @@ where S: RandomAccess<Error=Error>, P: Point {
   }
   pub fn list (&mut self) -> Result<Vec<(u64,P,u64)>,Error> {
     let mut results = vec![];
-    let bsize = <P::Range as Point>::size_of();
+    let bsize = <P::Range as Point>::size_of() as u64;
     let n = 8 + bsize + 8;
     let len = self.store.len()?;
     let buf_size = {
@@ -228,9 +228,11 @@ where S: RandomAccess<Error=Error>, P: Point {
     };
     for j in 0..(len+buf_size-1)/buf_size {
       let buf = self.store.read(j*buf_size,((j+1)*buf_size).min(len))?;
-      for i in 0..buf.len()/n {
-        let offset = i * n;
-        results.push(self.bincode.deserialize(&buf[offset..offset+n])?);
+      for i in 0..buf.len()/(n as usize) {
+        let offset = i * (n as usize);
+        results.push(self.bincode.deserialize(
+          &buf[offset..offset+(n as usize)])?
+        );
       }
     }
     Ok(results)

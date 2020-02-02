@@ -58,8 +58,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(staging)
   }
   fn load (&mut self) -> Result<(),Error> {
-    let len = self.store.len()?;
-    let buf = self.store.read(0, len)?;
+    let slen = self.store.len()?;
+    let buf = self.store.read(0, slen)?;
+    let len = slen as usize;
     self.rows.clear();
     let mut offset = 0;
     while offset < len {
@@ -86,7 +87,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.rows.clear();
     Ok(())
   }
-  pub fn bytes (&mut self) -> Result<usize,Error> {
+  pub fn bytes (&mut self) -> Result<u64,Error> {
     let len = self.store.len()?;
     Ok(len)
   }

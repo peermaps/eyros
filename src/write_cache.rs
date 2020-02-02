@@ -4,13 +4,13 @@ use std::io::Write;
 #[derive(Debug,Clone)]
 pub struct WriteCache<S> where S: RandomAccess {
   store: S,
-  queue: Vec<(usize,Vec<u8>)>,
-  length: usize,
+  queue: Vec<(u64,Vec<u8>)>,
+  length: u64,
   enabled: bool
 }
 
 impl<S> WriteCache<S> where S: RandomAccess {
-  pub fn open (mut store: S) -> Result<Self,S::Error> {
+  pub fn open (store: S) -> Result<Self,S::Error> {
     let length = store.len()?;
     Ok(Self {
       store,
@@ -23,13 +23,13 @@ impl<S> WriteCache<S> where S: RandomAccess {
 
 impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
   type Error = S::Error;
-  fn write (&mut self, offset: usize, data: &[u8]) -> Result<(),Self::Error> {
+  fn write (&mut self, offset: u64, data: &[u8]) -> Result<(),Self::Error> {
     if !self.enabled { return self.store.write(offset, data) }
 
-    let new_range = (offset,offset+data.len());
+    let new_range = (offset,offset+(data.len() as u64));
     let overlapping: Vec<usize> = (0..self.queue.len()).filter(|i| {
       let q = &self.queue[*i];
-      overlaps(new_range, (q.0,q.0+(q.1).len()))
+      overlaps(new_range, (q.0,q.0+((q.1).len() as u64)))
     }).collect();
 
     let mut start = new_range.0;
@@ -37,16 +37,17 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
     for i in overlapping.iter() {
       let q = &self.queue[*i];
       start = start.min(q.0);
-      end = end.max(q.0 + (q.1).len());
+      end = end.max(q.0 + ((q.1).len() as u64));
     }
-    let mut merged = (start,vec![0;end-start]);
+    let mut merged = (start,vec![0;(end-start) as usize]);
     for i in overlapping.iter() {
       let q = &self.queue[*i];
-      merged.1[q.0-start..q.0-start+q.1.len()]
+      merged.1[(q.0-start) as usize..(q.0-start+(q.1.len() as u64)) as usize]
         .copy_from_slice(&q.1.as_slice());
     }
-    merged.1[new_range.0-start..new_range.0-start+data.len()]
-      .copy_from_slice(data);
+    merged.1[(new_range.0-start) as usize
+      .. (new_range.0-start+(data.len() as u64)) as usize
+    ].copy_from_slice(data);
  
     for (i,ov) in overlapping.iter().enumerate() {
       self.queue.remove(ov-i);
@@ -65,7 +66,7 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
     self.length = self.length.max(end);
     Ok(())
   }
-  fn read (&mut self, offset: usize, length: usize)
+  fn read (&mut self, offset: u64, length: u64)
   -> Result<Vec<u8>,Self::Error> {
     if !self.enabled { return self.store.read(offset, length) }
     // TODO: analysis to know when to skip the read()
@@ -74,26 +75,26 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
       let slen = self.store.len()?;
       let mut d = if slen < offset { vec![] }
         else { self.store.read(offset, (slen-offset).min(length))? };
-      let dlen = d.len();
+      let dlen = d.len() as u64;
       if dlen < length {
-        d.extend(vec![0;length-dlen]);
+        d.extend(vec![0;(length-dlen) as usize]);
       }
       d
     };
     // TODO: turn these asserts into ensure_eq!
-    assert_eq![data.len(), length, "insufficient length"];
+    assert_eq![data.len() as u64, length, "insufficient length"];
     for q in self.queue.iter() {
-      if overlaps(range,(q.0,q.0+q.1.len())) {
-        let q1 = q.0 + q.1.len();
-        let dstart = q.0.max(range.0) - range.0;
-        let dend = q1.min(range.1) - range.0;
-        let qstart = q.0.max(range.0) - q.0;
-        let qend = q1.min(range.1) - q.0;
+      if overlaps(range,(q.0,q.0+(q.1.len() as u64))) {
+        let q1 = q.0 + (q.1.len() as u64);
+        let dstart = (q.0.max(range.0) - range.0) as usize;
+        let dend = (q1.min(range.1) - range.0) as usize;
+        let qstart = (q.0.max(range.0) - q.0) as usize;
+        let qend = (q1.min(range.1) - q.0) as usize;
         assert_eq![dend-dstart, qend-qstart, "data and range length mismatch"];
         data[dstart..dend].copy_from_slice(&q.1[qstart..qend]);
       }
     }
-    assert_eq![length, data.len(),
+    assert_eq![length, data.len() as u64,
       "requested read of {} bytes, returned {} bytes instead",
       length, data.len()];
     /*
@@ -103,23 +104,23 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
     */
     Ok(data)
   }
-  fn read_to_writer (&mut self, _offset: usize, _length: usize,
+  fn read_to_writer (&mut self, _offset: u64, _length: u64,
   _buf: &mut impl Write) -> Result<(),Self::Error> {
     unimplemented![];
   }
-  fn del (&mut self, offset: usize, length: usize) -> Result<(),Self::Error> {
+  fn del (&mut self, offset: u64, length: u64) -> Result<(),Self::Error> {
     self.store.del(offset, length)
   }
-  fn truncate (&mut self, length: usize) -> Result<(),Self::Error> {
+  fn truncate (&mut self, length: u64) -> Result<(),Self::Error> {
     if !self.enabled { return self.store.truncate(length) }
     let mut i = 0;
     while i < self.queue.len() {
       let q0 = self.queue[i].0;
-      let qlen = self.queue[i].1.len();
+      let qlen = self.queue[i].1.len() as u64;
       if q0 < length {
         self.queue.remove(i);
       } else if q0 + qlen < length {
-        self.queue[i].1.truncate(length - q0);
+        self.queue[i].1.truncate((length - q0 as u64) as usize);
         i += 1;
       } else {
         i += 1;
@@ -129,7 +130,7 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
     self.length = length;
     Ok(())
   }
-  fn len (&mut self) -> Result<usize,Self::Error> {
+  fn len (&self) -> Result<u64,Self::Error> {
     if self.enabled { Ok(self.length) }
     else { self.store.len() }
   }

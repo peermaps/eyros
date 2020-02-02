@@ -175,7 +175,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 impl<S,P,V> Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (mut opts: TreeOpts<S,P,V>) -> Result<Self,Error> {
+  pub fn open (opts: TreeOpts<S,P,V>) -> Result<Self,Error> {
     let bytes = opts.store.len()? as u64;
     let data_merge = Rc::new(RefCell::new(
       DataMerge::new(Rc::clone(&opts.data_store))));
@@ -261,7 +261,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
               let alloc = &mut {|bytes| self.alloc(bytes) };
               b.build(alloc)?
             };
-            self.store.write(b.offset as usize, &data)?;
+            self.store.write(b.offset, &data)?;
             self.bytes = self.bytes.max(b.offset + (data.len() as u64));
             nbranches.extend(nb);
           }
