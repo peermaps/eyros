@@ -45,7 +45,6 @@ fn delete() -> Result<(),Error> {
   let batches: Vec<Vec<Row<P,V>>> = (0..n).map(|i| {
     inserts[i*batch_size..(i+1)*batch_size].to_vec()
   }).collect();
-  eprintln!["inserts.len()={}", inserts.len()];
   {
     let mut total = 0f64;
     for batch in batches {
@@ -73,10 +72,10 @@ fn delete() -> Result<(),Error> {
 
   let mut deleted: HashSet<Location> = HashSet::new();
   {
-    // delete 1/10th of the records
+    // delete 50% of the records
     let mut deletes = vec![];
     for (i,r) in full.iter().enumerate() {
-      if i % 10 == 0 {
+      if i % 2 == 0 {
         deletes.push(Row::Delete(r.2));
         deleted.insert(r.2);
       }

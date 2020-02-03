@@ -1,10 +1,10 @@
 use random_access_storage::RandomAccess;
-use failure::{Error,format_err};
+use failure::{Error,format_err,bail};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::mem::size_of;
 
-use crate::{Row,Point,Value,Location};
+use crate::{Point,Value,Location};
 use crate::branch::{Branch,Node};
 use crate::data::{DataStore,DataMerge,DataBatch};
 use crate::read_block::read_block;
@@ -161,7 +161,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 pub struct Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  //pub store: BlockCache<S>,
   pub store: S,
   data_store: Rc<RefCell<DataStore<S,P,V>>>,
   data_merge: Rc<RefCell<DataMerge<S,P,V>>>,
@@ -203,44 +202,34 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let r = self.store.is_empty()?;
     Ok(r)
   }
-  pub fn build (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
+  pub fn build (&mut self, rows: &Vec<(P,V)>) -> Result<(),Error> {
     let dstore = Rc::clone(&self.data_store);
     self.builder(
-      &rows.iter().map(|row| { (row,1u64) }).collect(),
+      Rc::new(rows.iter().map(|row| { (row.clone(),1u64) }).collect()),
       dstore
     )
   }
   pub fn build_from_blocks (&mut self, blocks: Vec<(P::Bounds,u64,u64)>)
   -> Result<(),Error> {
-    let inserts: Vec<Row<P::Range,u64>> = blocks.iter()
-    .map(|(bbox,offset,_)| {
-      Row::Insert(P::bounds_to_range(*bbox),*offset)
-    }).collect();
+    let inserts: Vec<(P::Range,u64)> = blocks.iter()
+      .map(|(bbox,offset,_)| { (P::bounds_to_range(*bbox),*offset) })
+      .collect();
     let rows = blocks.iter().enumerate().map(|(i,(_,_,len))| {
-      (&inserts[i],*len)
+      (inserts[i],*len)
     }).collect();
     let dmerge = Rc::clone(&self.data_merge);
-    self.builder(&rows, dmerge)
+    self.builder(Rc::new(rows), dmerge)
   }
-  pub fn builder<D,T,U> (&mut self, rows: &Vec<(&Row<T,U>,u64)>,
+  pub fn builder<D,T,U> (&mut self, rows: Rc<Vec<((T,U),u64)>>,
   data_store: Rc<RefCell<D>>) -> Result<(),Error>
   where D: DataBatch<T,U>, T: Point, U: Value {
     self.clear()?;
-    let irows: Vec<((T,U),u64)> = rows.iter()
-      .filter(|(row,_)| {
-        match row { Row::Insert(_,_) => true, _ => false }
-      })
-      .map(|(row,len)| { match row {
-        Row::Insert(p,v) => ((*p,v.clone()),*len),
-        _ => panic!("unexpected")
-      } })
-      .collect();
     let bucket = (0..rows.len()).collect();
     let b = Branch::<D,T,U>::new(0, self.index, self.max_data_size,
       Rc::clone(&self.order),
       Rc::clone(&self.bincode),
       Rc::clone(&data_store),
-      bucket, Rc::new(irows)
+      bucket, rows
     )?;
     let mut branches = vec![Node::Branch(b)];
     match branches[0] {
@@ -248,7 +237,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         let alloc = &mut {|bytes| self.alloc(bytes) };
         b.alloc(alloc);
       },
-      _ => panic!("unexpected initial node type")
+      _ => panic!["unexpected initial node type"]
     };
     while !branches.is_empty() {
       let mut nbranches = vec![];
@@ -282,41 +271,23 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     addr
   }
   pub fn merge (trees: &mut Vec<Self>, dst: usize, src: Vec<usize>,
-  rows: &Vec<Row<P,V>>) -> Result<(),Error> {
+  rows: &Vec<(P,V)>) -> Result<(),Error> {
     let mut blocks = vec![];
     for i in src.iter() {
       blocks.extend(trees[*i].unbuild()?);
     }
     {
       let mut dstore = trees[dst].data_store.try_borrow_mut()?;
-      /*
-      let mut inserts = vec![];
-      let mut deletes = vec![];
-      for row in rows {
-        match row {
-          Row::Insert(p,v) => inserts.push((*p,v.clone())),
-          Row::Delete(loc) => deletes.push(loc),
-          _ => {}
-        }
-      }
-      */
       let m = trees[dst].max_data_size;
       let mut srow_len = 0;
       for i in 0..(rows.len()+m-1)/m {
         let srows = &rows[i*m..((i+1)*m).min(rows.len())];
         srow_len += srows.len();
-        let mut inserts = vec![];
-        for row in srows {
-          match row {
-            Row::Insert(p,v) => { inserts.push((*p,v.clone())) },
-            _ => {}
-          }
-        }
-        let offset = dstore.batch(
-          &inserts.iter().map(|pv| pv).collect()
-        )?;
+        let inserts: Vec<(P,V)> = srows.iter()
+          .map(|(p,v)| (*p,v.clone())).collect();
+        let offset = dstore.batch(&inserts.iter().map(|pv| pv).collect())?;
         match P::bounds(&inserts.iter().map(|(p,_)| *p).collect()) {
-          None => panic!["invalid data at offset {}", offset],
+          None => bail!["invalid data at offset {}", offset],
           Some(bbox) => blocks.push((bbox,offset,inserts.len() as u64))
         }
       }

@@ -73,7 +73,10 @@ P: Point, V: Value {
   }
   pub fn open_from_setup(setup: Setup<S,U>) -> Result<Self,Error> {
     let meta = Meta::open((setup.open_store)("meta")?)?;
-    let staging = Staging::open((setup.open_store)("staging")?)?;
+    let staging = Staging::open(
+      (setup.open_store)("staging_inserts")?,
+      (setup.open_store)("staging_deletes")?
+    )?;
     let mut bcode = bincode::config();
     bcode.big_endian();
     let r_bcode = Rc::new(bcode);
@@ -102,10 +105,24 @@ P: Point, V: Value {
     Ok(db)
   }
   pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
-    let n = (self.staging.rows.len() + rows.len()) as u64;
+    let inserts: Vec<(P,V)> = rows.iter()
+      .filter(|r| match r { Row::Insert(_p,_v) => true, _ => false })
+      .map(|r| match r {
+        Row::Insert(p,v) => (p.clone(),v.clone()),
+        _ => panic!["unexpected non-insert row type"]
+      })
+      .collect();
+    let deletes: Vec<Location> = rows.iter()
+      .filter(|r| match r { Row::Delete(_loc) => true, _ => false })
+      .map(|r| match r {
+        Row::Delete(loc) => *loc,
+        _ => panic!["unexpected non-delete row type"]
+      })
+      .collect();
+    let n = (self.staging.inserts.len() + inserts.len()) as u64;
     let base = self.fields.base_size as u64;
     if n <= base {
-      self.staging.batch(rows)?;
+      self.staging.batch(&inserts, &deletes)?;
       self.staging.commit()?;
       return Ok(())
     }
@@ -120,7 +137,7 @@ P: Point, V: Value {
       &mask
     );
     let mut offset = 0;
-    let slen = self.staging.rows.len();
+    let slen = self.staging.inserts.len();
     for (i,staging,trees) in p {
       let mut irows: Vec<(usize,usize)> = vec![];
       for j in staging {
@@ -135,12 +152,12 @@ P: Point, V: Value {
       for _ in self.meta.mask.len()..i+1 {
         self.meta.mask.push(false);
       }
-      let mut srows: Vec<Row<P,V>> = vec![];
+      let mut srows: Vec<(P,V)> = vec![];
       for (i,j) in irows {
         for k in i..j {
           srows.push(
-            if k < slen { self.staging.rows[k].clone() }
-            else { rows[k-slen].clone() }
+            if k < slen { self.staging.inserts[k].clone() }
+            else { inserts[k-slen].clone() }
           );
         }
       }
@@ -160,15 +177,15 @@ P: Point, V: Value {
     let mut rem_rows = vec![];
     for k in offset..n as usize {
       rem_rows.push(
-        if k < slen { self.staging.rows[k].clone() }
-        else { rows[k-slen].clone() }
+        if k < slen { self.staging.inserts[k].clone() }
+        else { inserts[k-slen].clone() }
       );
     }
     ensure_eq!(rem_rows.len(), rem as usize,
       "unexpected number of remaining rows (expected {}, actual {})",
       rem, rem_rows.len());
     self.staging.clear()?;
-    self.staging.batch(&rem_rows)?;
+    self.staging.batch(&rem_rows, &vec![])?;
     self.staging.commit()?;
     {
       let mut dstore = self.data_store.try_borrow_mut()?;

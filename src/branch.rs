@@ -57,8 +57,8 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         let z = n.min(sorted.len()-2);
         (0..z).map(|k| {
           let m = (k+1) * sorted.len() / (z+1);
-          let a = &(rows[bucket[sorted[m+0]]].0);
-          let b = &(rows[bucket[sorted[m+1]]].0);
+          let a = &rows[bucket[sorted[m+0]]].0;
+          let b = &rows[bucket[sorted[m+1]]].0;
           a.0.midpoint_upper(&b.0)
         }).collect()
       };

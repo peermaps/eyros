@@ -146,15 +146,17 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let len = self.store.len()? as u64;
     read_block(&mut self.store, offset, len, 1024)
   }
-  pub fn delete (&mut self, locations: Vec<Location>) -> Result<(),Error> {
+  // todo: replace() similar to delete but with an additional array of
+  // replacement candidates
+  pub fn delete (&mut self, locations: &Vec<Location>) -> Result<(),Error> {
     let mut by_block: HashMap<u64,Vec<usize>> = HashMap::new();
     for (block,index) in locations {
       match by_block.get_mut(&block) {
         Some(indexes) => {
-          indexes.push(index);
+          indexes.push(*index);
         },
         None => {
-          by_block.insert(block, vec![index]);
+          by_block.insert(*block, vec![*index]);
         },
       }
     }

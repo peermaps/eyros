@@ -6,7 +6,7 @@ extern crate random_access_storage;
 #[path="../ensure.rs"]
 #[macro_use] mod ensure;
 
-use eyros::{Setup,DB,Row};
+use eyros::{Setup,DB};
 use failure::{Error,bail};
 use random_access_disk::RandomAccessDisk;
 use random_access_storage::RandomAccess;
@@ -89,11 +89,11 @@ fn main() -> Result<(),Error> {
       println!["{:?}", p];
     }
   } else if args[2] == "staging-data" {
-    for p in db.staging.rows {
-      match p {
-        Row::Insert(p,v) => println!["{:?}", (p,v)],
-        Row::Delete(loc) => println!["{:?} [DELETE]", loc],
-      }
+    for pv in db.staging.inserts {
+      println!["{:?}", pv];
+    }
+    for loc in db.staging.deletes {
+      println!["{:?} [DELETE]", loc];
     }
   } else if args[2] == "time-query" {
     let bbox = (
