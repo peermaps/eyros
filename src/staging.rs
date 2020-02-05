@@ -3,16 +3,17 @@ use failure::{Error};
 use random_access_storage::RandomAccess;
 use std::mem::size_of;
 use bincode::{serialize,deserialize};
+use std::collections::HashSet;
 
 pub struct StagingIterator<'a,'b,P,V> where P: Point, V: Value {
   inserts: &'a Vec<(P,V)>,
-  deletes: &'a Vec<Location>,
+  deletes: &'a HashSet<usize>,
   bbox: &'b P::Bounds,
   index: usize
 }
 
 impl<'a,'b,P,V> StagingIterator<'a,'b,P,V> where P: Point, V: Value {
-  pub fn new (inserts: &'a Vec<(P,V)>, deletes: &'a Vec<Location>,
+  pub fn new (inserts: &'a Vec<(P,V)>, deletes: &'a HashSet<usize>,
   bbox: &'b P::Bounds) -> Self {
     Self { index: 0, bbox, inserts, deletes }
   }
@@ -25,6 +26,7 @@ where P: Point, V: Value {
     let len = self.inserts.len();
     while self.index < len {
       let i = self.index;
+      if self.deletes.contains(&i) { continue }
       self.index += 1;
       let (point,value) = &self.inserts[i];
       if point.overlaps(self.bbox) {
@@ -41,6 +43,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   delete_store: WriteCache<S>,
   pub inserts: Vec<(P,V)>,
   pub deletes: Vec<Location>,
+  delete_set: HashSet<usize>,
 }
 
 impl<S,P,V> Staging<S,P,V>
@@ -51,6 +54,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       delete_store: WriteCache::open(dstore)?,
       inserts: vec![],
       deletes: vec![],
+      delete_set: HashSet::new(),
     };
     staging.load()?;
     Ok(staging)
@@ -72,6 +76,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     if !self.delete_store.is_empty()? {
       self.deletes.clear();
+      self.delete_set.clear();
       let len = self.delete_store.len()?;
       let buf = self.delete_store.read(0, len)?;
       let mut offset = 0;
@@ -81,16 +86,26 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         let n = psize + vsize;
         let loc: Location = deserialize(&buf[offset..offset+n])?;
         self.deletes.push(loc);
+        self.delete_set.insert(loc.1);
         offset += n;
       }
     }
     Ok(())
   }
   pub fn clear (&mut self) -> Result<(),Error> {
+    self.clear_inserts()?;
+    self.clear_deletes()?;
+    Ok(())
+  }
+  pub fn clear_inserts (&mut self) -> Result<(),Error> {
     self.insert_store.truncate(0)?;
-    self.delete_store.truncate(0)?;
     self.inserts.clear();
+    Ok(())
+  }
+  pub fn clear_deletes (&mut self) -> Result<(),Error> {
+    self.delete_store.truncate(0)?;
     self.deletes.clear();
+    self.delete_set.clear();
     Ok(())
   }
   pub fn bytes (&mut self) -> Result<u64,Error> {
@@ -117,6 +132,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.delete_store.write(d_offset,&dbuf)?;
     self.inserts.extend_from_slice(inserts);
     self.deletes.extend_from_slice(deletes);
+    for delete in deletes {
+      self.delete_set.insert(delete.1);
+    }
     Ok(())
   }
   pub fn commit (&mut self) -> Result<(),Error> {
@@ -126,6 +144,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
   -> StagingIterator<'a,'b,P,V> {
-    <StagingIterator<'a,'b,P,V>>::new(&self.inserts, &self.deletes, bbox)
+    <StagingIterator<'a,'b,P,V>>::new(&self.inserts, &self.delete_set, bbox)
   }
 }
