@@ -151,6 +151,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn delete (&mut self, locations: &Vec<Location>) -> Result<(),Error> {
     let mut by_block: HashMap<u64,Vec<usize>> = HashMap::new();
     for (block,index) in locations {
+      if *block == 0 { continue } // staging block
       match by_block.get_mut(&block) {
         Some(indexes) => {
           indexes.push(*index);
@@ -165,13 +166,20 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         Some(i) => *i as u64,
         None => bail!["indexes is an empty array"],
       };
-      let max_len = 2 + (max_i+7)/8;
-      let guess = max_len;
-      let mut header = read_block(&mut self.store, *block, max_len, guess)?;
+      let len = 6 + (max_i+7)/8 + 1;
+      ensure![len <= self.store.len()?-*block-1,
+        "index length past the end of the block"];
+      let mut header = self.store.read(*block-1, len)?;
+      let block_size = u32::from_be_bytes(
+        [header[0],header[1],header[2],header[3]]
+      ) as u64;
+      ensure![len <= block_size, "data block is too small"];
       for index in indexes.iter() {
-        header[2+index/8] &= 1<<(index%8);
+        header[6+index/8] &= 0xff & (1<<(index%8));
+        eprintln!["header[6+{}/8] = 0xff & ({} & 1<<({}%8))",
+          index, header[6+index/8], index];
       }
-      self.store.write(*block+4, &header)?
+      self.store.write(*block-1+6, &header[6..])?
     }
     Ok(())
   }

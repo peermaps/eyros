@@ -112,7 +112,7 @@ P: Point, V: Value {
         _ => panic!["unexpected non-insert row type"]
       })
       .collect();
-    let deletes: Vec<Location> = rows.iter()
+    let mut deletes: Vec<Location> = rows.iter()
       .filter(|r| match r { Row::Delete(_loc) => true, _ => false })
       .map(|r| match r {
         Row::Delete(loc) => *loc,
@@ -120,8 +120,16 @@ P: Point, V: Value {
       })
       .collect();
     let n = (self.staging.inserts.len() + inserts.len()) as u64;
+    let ndel = (self.staging.deletes.len() + deletes.len()) as u64;
     let base = self.fields.base_size as u64;
     if n <= base {
+      if ndel >= base {
+        deletes.extend_from_slice(&self.staging.deletes);
+        self.staging.clear_deletes()?;
+        let mut dstore = self.data_store.try_borrow_mut()?;
+        dstore.delete(&deletes)?;
+        dstore.commit()?;
+      }
       self.staging.batch(&inserts, &deletes)?;
       self.staging.commit()?;
       return Ok(())
@@ -184,11 +192,13 @@ P: Point, V: Value {
     ensure_eq!(rem_rows.len(), rem as usize,
       "unexpected number of remaining rows (expected {}, actual {})",
       rem, rem_rows.len());
+    deletes.extend_from_slice(&self.staging.deletes);
     self.staging.clear()?;
     self.staging.batch(&rem_rows, &vec![])?;
     self.staging.commit()?;
     {
       let mut dstore = self.data_store.try_borrow_mut()?;
+      dstore.delete(&deletes)?;
       dstore.commit()?;
     }
     self.meta.save()?;

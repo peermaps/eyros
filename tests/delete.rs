@@ -79,7 +79,7 @@ fn delete() -> Result<(),Error> {
         deletes.push(Row::Delete(r.2));
         deleted.insert(r.2);
       }
-    };
+    }
     let start = time::Instant::now();
     db.batch(&deletes)?;
     let elapsed = start.elapsed().as_secs_f64();
@@ -96,7 +96,7 @@ fn delete() -> Result<(),Error> {
     }
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
-    assert_eq!(results.len(), size, "incorrect length for full region");
+    assert_eq!(results.len(), size/2, "incorrect length for full region");
     let mut expected: Vec<(P,V,Location)> = full.iter()
       .filter(|r| !deleted.contains(&r.2))
       .map(|r| *r)

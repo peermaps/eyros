@@ -26,8 +26,8 @@ where P: Point, V: Value {
     let len = self.inserts.len();
     while self.index < len {
       let i = self.index;
-      if self.deletes.contains(&i) { continue }
       self.index += 1;
+      if self.deletes.contains(&i) { continue }
       let (point,value) = &self.inserts[i];
       if point.overlaps(self.bbox) {
         return Some(Ok((*point,value.clone(),(0, i))));
