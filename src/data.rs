@@ -176,10 +176,17 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       ensure![len <= block_size, "data block is too small"];
       for index in indexes.iter() {
         header[6+index/8] &= 0xff & (1<<(index%8));
-        eprintln!["header[6+{}/8] = 0xff & ({} & 1<<({}%8))",
-          index, header[6+index/8], index];
       }
-      self.store.write(*block-1+6, &header[6..])?
+      self.store.write(*block-1+6, &header[6..])?;
+      self.list_cache.pop(&(*block-1));
+      /*
+      match self.list_cache.get_mut(&(*block-1)) {
+        Some(rows) => {
+          rows.drain_filter(|row| indexes.contains(&((row.2).1)));
+        },
+        None => {},
+      }
+      */
     }
     Ok(())
   }
