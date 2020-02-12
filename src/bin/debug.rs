@@ -44,10 +44,11 @@ fn main() -> Result<(),Error> {
       db.staging.bytes()?, db.staging.len()?];
     println!["# trees"];
     for (i,tree) in db.trees.iter().enumerate() {
-      if tree.bytes == 0 {
+      let bytes = tree.try_borrow()?.bytes;
+      if bytes == 0 {
         println!["[{}] empty", i];
       } else {
-        println!["[{}] {} bytes", i, tree.bytes];
+        println!["[{}] {} bytes", i, bytes];
       }
     }
   } else if args[2] == "branch" {
@@ -89,10 +90,10 @@ fn main() -> Result<(),Error> {
       println!["{:?}", p];
     }
   } else if args[2] == "staging-data" {
-    for pv in db.staging.inserts {
+    for pv in db.staging.inserts.try_borrow()?.iter() {
       println!["{:?}", pv];
     }
-    for loc in db.staging.deletes {
+    for loc in db.staging.deletes.try_borrow()?.iter() {
       println!["{:?} [DELETE]", loc];
     }
   } else if args[2] == "time-query" {
@@ -139,8 +140,10 @@ pub struct Branch {
 fn read_branch<S,U> (db: &mut DB<S,U,P,V>, tree_i: usize,
 offset: u64, depth: usize) -> Result<Branch,Error>
 where S: RandomAccess<Error=Error>, U: (Fn(&str) -> Result<S,Error>) {
-  let len = db.trees[tree_i].store.len()? as u64;
-  let buf = read_block(&mut db.trees[tree_i].store, offset, len, 1024)?;
+  let len = db.trees[tree_i].try_borrow()?.store.len()? as u64;
+  let buf = read_block(
+    &mut db.trees[tree_i].try_borrow_mut()?.store, offset, len, 1024
+  )?;
   let bf = db.fields.branch_factor;
   let n = bf*2-3;
 

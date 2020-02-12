@@ -9,9 +9,9 @@ use crate::branch::{Branch,Node};
 use crate::data::{DataStore,DataMerge,DataBatch};
 use crate::read_block::read_block;
 
-pub struct TreeIterator<'a,'b,S,P,V>
+pub struct TreeIterator<'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  tree: &'a mut Tree<S,P,V>,
+  tree: Rc<RefCell<Tree<S,P,V>>>,
   bbox: &'b P::Bounds,
   cursors: Vec<(u64,usize)>,
   blocks: Vec<u64>,
@@ -19,11 +19,11 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   tree_size: u64
 }
 
-impl<'a,'b,S,P,V> TreeIterator<'a,'b,S,P,V>
+impl<'b,S,P,V> TreeIterator<'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new (tree: &'a mut Tree<S,P,V>, bbox: &'b P::Bounds)
+  pub fn new (tree: Rc<RefCell<Tree<S,P,V>>>, bbox: &'b P::Bounds)
   -> Result<Self,Error> {
-    let tree_size = tree.store.len()? as u64;
+    let tree_size = tree.try_borrow()?.store.len()? as u64;
     Ok(Self {
       tree,
       tree_size,
@@ -35,6 +35,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
 }
 
+#[macro_export]
 macro_rules! iwrap {
   ($x:expr) => {
     match $x {
@@ -44,13 +45,11 @@ macro_rules! iwrap {
   };
 }
 
-impl<'a,'b,S,P,V> Iterator for TreeIterator<'a,'b,S,P,V>
+impl<'b,S,P,V> Iterator for TreeIterator<'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   type Item = Result<(P,V,Location),Error>;
   fn next (&mut self) -> Option<Self::Item> {
-    let store = &mut self.tree.store;
-    let order = &self.tree.order;
-    let bf = self.tree.branch_factor;
+    let bf = iwrap![self.tree.try_borrow()].branch_factor;
     let n = bf*2-3;
 
     // todo: used cached size or rolling max to implicitly read an appropriate
@@ -62,9 +61,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       if !self.blocks.is_empty() { // data block:
         let offset = self.blocks.pop().unwrap();
-        let mut dstore = iwrap![
-          self.tree.data_store.try_borrow_mut()
-        ];
+        let tree = iwrap![self.tree.try_borrow()];
+        let mut dstore = iwrap![tree.data_store.try_borrow_mut()];
         self.queue.extend(iwrap![dstore.query(offset, self.bbox)]);
         continue
       }
@@ -72,7 +70,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let (cursor,depth) = self.cursors.pop().unwrap();
       if cursor >= self.tree_size { continue }
 
-      let buf = iwrap![read_block(store, cursor, self.tree_size, 1024)];
+      let buf = {
+        let mut tree = iwrap![self.tree.try_borrow_mut()];
+        iwrap![read_block(&mut tree.store, cursor, self.tree_size, 1024)]
+      };
       let psize = P::pivot_size_at(depth % P::dim());
       let p_start = 0;
       let d_start = p_start + n*psize;
@@ -85,9 +86,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let mut bitfield: Vec<bool> = vec![false;bf]; // which buckets
       while !bcursors.is_empty() {
         let c = bcursors.pop().unwrap();
-        let i = order[c];
+        let i = iwrap![self.tree.try_borrow()].order[c];
         let cmp: (bool,bool) = iwrap![P::cmp_buf(
-          &self.tree.bincode,
+          &iwrap![self.tree.try_borrow()].bincode,
           &buf[p_start+i*psize..p_start+(i+1)*psize],
           &self.bbox,
           depth % P::dim()
@@ -261,24 +262,25 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.store.sync_all()?;
     Ok(())
   }
-  pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
-  -> Result<TreeIterator<'a,'b,S,P,V>,Error> {
-    TreeIterator::new(self, bbox)
+  pub fn query<'a,'b> (tree: Rc<RefCell<Self>>, bbox: &'b P::Bounds)
+  -> Result<TreeIterator<'b,S,P,V>,Error> {
+    TreeIterator::new(tree, bbox)
   }
   fn alloc (&mut self, bytes: usize) -> u64 {
     let addr = self.bytes;
     self.bytes += bytes as u64;
     addr
   }
-  pub fn merge (trees: &mut Vec<Self>, dst: usize, src: Vec<usize>,
+  pub fn merge (trees: &mut Vec<Rc<RefCell<Self>>>, dst: usize, src: Vec<usize>,
   rows: &Vec<(P,V)>) -> Result<(),Error> {
     let mut blocks = vec![];
     for i in src.iter() {
-      blocks.extend(trees[*i].unbuild()?);
+      blocks.extend(trees[*i].try_borrow_mut()?.unbuild()?);
     }
     {
-      let mut dstore = trees[dst].data_store.try_borrow_mut()?;
-      let m = trees[dst].max_data_size;
+      let tree = trees[dst].try_borrow()?;
+      let mut dstore = tree.data_store.try_borrow_mut()?;
+      let m = tree.max_data_size;
       let mut srow_len = 0;
       for i in 0..(rows.len()+m-1)/m {
         let srows = &rows[i*m..((i+1)*m).min(rows.len())];
@@ -293,9 +295,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       ensure_eq!(srow_len, rows.len(), "divided rows incorrectly");
     }
-    trees[dst].build_from_blocks(blocks)?;
+    trees[dst].try_borrow_mut()?.build_from_blocks(blocks)?;
     for i in src.iter() {
-      trees[*i].clear()?
+      trees[*i].try_borrow_mut()?.clear()?
     }
     Ok(())
   }

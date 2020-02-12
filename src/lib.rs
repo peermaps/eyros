@@ -4,7 +4,7 @@
 mod setup;
 mod meta;
 mod point;
-mod tree;
+#[macro_use] mod tree;
 mod branch;
 mod staging;
 mod planner;
@@ -33,11 +33,12 @@ use serde::{Serialize,de::DeserializeOwned};
 use std::fmt::Debug;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::collections::HashSet;
 
-enum SubIterator<'a,'b,S,P,V>
+pub enum SubIterator<'b,S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  Tree(TreeIterator<'a,'b,S,P,V>),
-  Staging(StagingIterator<'a,'b,P,V>)
+  Tree(TreeIterator<'b,S,P,V>),
+  Staging(StagingIterator<'b,P,V>)
 }
 
 pub trait Value: Debug+Clone+TakeBytes+Serialize+DeserializeOwned+'static {}
@@ -55,7 +56,7 @@ S: RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   open_store: U,
-  pub trees: Vec<Tree<S,P,V>>,
+  pub trees: Vec<Rc<RefCell<Tree<S,P,V>>>>,
   order: Rc<Vec<usize>>,
   pub staging: Staging<S,P,V>,
   pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
@@ -119,12 +120,12 @@ P: Point, V: Value {
         _ => panic!["unexpected non-delete row type"]
       })
       .collect();
-    let n = (self.staging.inserts.len() + inserts.len()) as u64;
-    let ndel = (self.staging.deletes.len() + deletes.len()) as u64;
+    let n = (self.staging.inserts.try_borrow()?.len()+inserts.len()) as u64;
+    let ndel = (self.staging.deletes.try_borrow()?.len()+deletes.len()) as u64;
     let base = self.fields.base_size as u64;
     if n <= base {
       if ndel >= base {
-        deletes.extend_from_slice(&self.staging.deletes);
+        deletes.extend_from_slice(&self.staging.deletes.try_borrow()?);
         self.staging.clear_deletes()?;
         let mut dstore = self.data_store.try_borrow_mut()?;
         dstore.delete(&deletes)?;
@@ -138,14 +139,14 @@ P: Point, V: Value {
     let rem = n - count;
     let mut mask = vec![];
     for tree in self.trees.iter_mut() {
-      mask.push(!tree.is_empty()?);
+      mask.push(!tree.try_borrow_mut()?.is_empty()?);
     }
     let p = plan(
       &bits::num_to_bits(n/base),
       &mask
     );
     let mut offset = 0;
-    let slen = self.staging.inserts.len();
+    let slen = self.staging.inserts.try_borrow()?.len();
     for (i,staging,trees) in p {
       let mut irows: Vec<(usize,usize)> = vec![];
       for j in staging {
@@ -164,14 +165,14 @@ P: Point, V: Value {
       for (i,j) in irows {
         for k in i..j {
           srows.push(
-            if k < slen { self.staging.inserts[k].clone() }
+            if k < slen { self.staging.inserts.try_borrow()?[k].clone() }
             else { inserts[k-slen].clone() }
           );
         }
       }
       if trees.is_empty() {
         self.meta.mask[i] = true;
-        self.trees[i].build(&srows)?;
+        self.trees[i].try_borrow_mut()?.build(&srows)?;
       } else {
         self.meta.mask[i] = true;
         for t in trees.iter() {
@@ -185,14 +186,14 @@ P: Point, V: Value {
     let mut rem_rows = vec![];
     for k in offset..n as usize {
       rem_rows.push(
-        if k < slen { self.staging.inserts[k].clone() }
+        if k < slen { self.staging.inserts.try_borrow()?[k].clone() }
         else { inserts[k-slen].clone() }
       );
     }
     ensure_eq!(rem_rows.len(), rem as usize,
       "unexpected number of remaining rows (expected {}, actual {})",
       rem, rem_rows.len());
-    deletes.extend_from_slice(&self.staging.deletes);
+    deletes.extend_from_slice(&self.staging.deletes.try_borrow()?);
     self.staging.clear()?;
     self.staging.batch(&rem_rows, &vec![])?;
     self.staging.commit()?;
@@ -207,7 +208,7 @@ P: Point, V: Value {
   fn create_tree (&mut self, index: usize) -> Result<(),Error> {
     for i in self.trees.len()..index+1 {
       let store = (self.open_store)(&format!("tree{}",i))?;
-      self.trees.push(Tree::open(TreeOpts {
+      self.trees.push(Rc::new(RefCell::new(Tree::open(TreeOpts {
         store,
         index,
         data_store: Rc::clone(&self.data_store),
@@ -215,43 +216,42 @@ P: Point, V: Value {
         bincode: Rc::clone(&self.bincode),
         branch_factor: self.fields.branch_factor,
         max_data_size: self.fields.max_data_size,
-      })?);
+      })?)));
     }
     Ok(())
   }
-  pub fn query<'a,'b> (&'a mut self, bbox: &'b P::Bounds)
-  -> Result<QueryIterator<'a,'b,S,P,V>,Error> {
-    QueryIterator::new(self, bbox)
+  pub fn query<'b> (&mut self, bbox: &'b P::Bounds)
+  -> Result<QueryIterator<'b,S,P,V>,Error> {
+    let mut mask: Vec<bool> = vec![];
+    for tree in self.trees.iter_mut() {
+      mask.push(!tree.try_borrow_mut()?.is_empty()?);
+    }
+    let mut queries = Vec::with_capacity(1+self.trees.len());
+    queries.push(SubIterator::Staging(self.staging.query(bbox)));
+    for (i,tree) in self.trees.iter_mut().enumerate() {
+      if !mask[i] { continue }
+      queries.push(SubIterator::Tree(Tree::query(Rc::clone(tree),bbox)?));
+    }
+    QueryIterator::new(queries, Rc::clone(&self.staging.delete_set))
   }
 }
 
-pub struct QueryIterator<'a,'b,S,P,V> where
+pub struct QueryIterator<'b,S,P,V> where
 S: RandomAccess<Error=Error>, P: Point, V: Value {
   index: usize,
-  queries: Vec<SubIterator<'a,'b,S,P,V>>
+  queries: Vec<SubIterator<'b,S,P,V>>,
+  deletes: Rc<RefCell<HashSet<Location>>>
 }
 
-impl<'a,'b,S,P,V> QueryIterator<'a,'b,S,P,V> where
+impl<'b,S,P,V> QueryIterator<'b,S,P,V> where
 S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new<U> (db: &'a mut DB<S,U,P,V>, bbox: &'b P::Bounds)
-  -> Result<Self,Error>
-  where U: (Fn(&str) -> Result<S,Error>) {
-    let mut mask: Vec<bool> = vec![];
-    for tree in db.trees.iter_mut() {
-      mask.push(!tree.is_empty()?);
-    }
-    let mut queries: Vec<SubIterator<'a,'b,S,P,V>>
-      = Vec::with_capacity(1+db.trees.len());
-    queries.push(SubIterator::Staging(db.staging.query(bbox)));
-    for (i,tree) in db.trees.iter_mut().enumerate() {
-      if !mask[i] { continue }
-      queries.push(SubIterator::Tree(tree.query(bbox)?));
-    }
-    Ok(Self { queries, index: 0 })
+  pub fn new (queries: Vec<SubIterator<'b,S,P,V>>,
+  deletes: Rc<RefCell<HashSet<Location>>>) -> Result<Self,Error> {
+    Ok(Self { deletes, queries, index: 0 })
   }
 }
 
-impl<'a,'b,S,P,V> Iterator for QueryIterator<'a,'b,S,P,V> where
+impl<'b,S,P,V> Iterator for QueryIterator<'b,S,P,V> where
 S: RandomAccess<Error=Error>, P: Point, V: Value {
   type Item = Result<(P,V,Location),Error>;
   fn next (&mut self) -> Option<Self::Item> {
