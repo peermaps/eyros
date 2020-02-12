@@ -175,7 +175,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       ) as u64;
       ensure![len <= block_size, "data block is too small"];
       for index in indexes.iter() {
-        header[6+index/8] &= 0xff & (1<<(index%8));
+        header[6+index/8] &= 0xff - (1<<(index%8));
       }
       self.store.write(*block-1+6, &header[6..])?;
       self.list_cache.pop(&(*block-1));

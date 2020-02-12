@@ -1,4 +1,5 @@
 #![recursion_limit="1024"]
+#![feature(drain_filter)]
 
 #[macro_use] mod ensure;
 mod setup;
@@ -260,7 +261,19 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
       {
         let q = &mut self.queries[self.index];
         let next = match q {
-          SubIterator::Tree(x) => x.next(),
+          SubIterator::Tree(x) => {
+            let result = x.next();
+            match &result {
+              Some(Ok((_,_,loc))) => {
+                if iwrap![self.deletes.try_borrow()].contains(loc) {
+                  self.index = (self.index+1) % len;
+                  continue;
+                }
+              },
+              _ => {}
+            };
+            result
+          },
           SubIterator::Staging(x) => x.next()
         };
         match next {
