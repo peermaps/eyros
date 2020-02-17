@@ -112,6 +112,19 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.delete_set.try_borrow_mut()?.clear();
     Ok(())
   }
+  pub fn delete (&mut self, deletes: &Vec<Location>) -> Result<(),Error> {
+    let mut del_set: HashSet<usize> = HashSet::new();
+    for delete in deletes {
+      if delete.0 == 0 { del_set.insert(delete.1); }
+    }
+    let mut i = 0;
+    self.inserts.try_borrow_mut()?.drain_filter(|_row| {
+      let j = i;
+      i += 1;
+      !del_set.contains(&j)
+    });
+    Ok(())
+  }
   pub fn bytes (&mut self) -> Result<u64,Error> {
     Ok(self.insert_store.len()? + self.delete_store.len()?)
   }

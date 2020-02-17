@@ -124,14 +124,16 @@ P: Point, V: Value {
     let n = (self.staging.inserts.try_borrow()?.len()+inserts.len()) as u64;
     let ndel = (self.staging.deletes.try_borrow()?.len()+deletes.len()) as u64;
     let base = self.fields.base_size as u64;
+    if ndel >= base {
+      deletes.extend_from_slice(&self.staging.deletes.try_borrow()?);
+      let mut dstore = self.data_store.try_borrow_mut()?;
+      dstore.delete(&deletes)?;
+      dstore.commit()?;
+      self.staging.delete(&deletes)?;
+      self.staging.clear_deletes()?;
+      deletes.clear();
+    }
     if n <= base {
-      if ndel >= base {
-        deletes.extend_from_slice(&self.staging.deletes.try_borrow()?);
-        self.staging.clear_deletes()?;
-        let mut dstore = self.data_store.try_borrow_mut()?;
-        dstore.delete(&deletes)?;
-        dstore.commit()?;
-      }
       self.staging.batch(&inserts, &deletes)?;
       self.staging.commit()?;
       return Ok(())
@@ -198,7 +200,7 @@ P: Point, V: Value {
     self.staging.clear()?;
     self.staging.batch(&rem_rows, &vec![])?;
     self.staging.commit()?;
-    {
+    if !deletes.is_empty() {
       let mut dstore = self.data_store.try_borrow_mut()?;
       dstore.delete(&deletes)?;
       dstore.commit()?;

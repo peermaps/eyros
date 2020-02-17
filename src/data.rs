@@ -152,12 +152,12 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let mut by_block: HashMap<u64,Vec<usize>> = HashMap::new();
     for (block,index) in locations {
       if *block == 0 { continue } // staging block
-      match by_block.get_mut(&block) {
+      match by_block.get_mut(&(*block-1)) {
         Some(indexes) => {
           indexes.push(*index);
         },
         None => {
-          by_block.insert(*block, vec![*index]);
+          by_block.insert(*block-1, vec![*index]);
         },
       }
     }
@@ -166,19 +166,24 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         Some(i) => *i as u64,
         None => bail!["indexes is an empty array"],
       };
-      let len = 6 + (max_i+7)/8 + 1;
-      ensure![len <= self.store.len()?-*block-1,
+      let len = 6 + (max_i+7)/8;
+      ensure![len <= self.store.len()?-block,
         "index length past the end of the block"];
-      let mut header = self.store.read(*block-1, len)?;
+      let mut header = self.store.read(*block, len)?;
       let block_size = u32::from_be_bytes(
         [header[0],header[1],header[2],header[3]]
       ) as u64;
+      let bitfield_len = u16::from_be_bytes([header[4],header[5]]);
+      ensure![len <= (bitfield_len as u64) + 6,
+        "index past expected bitfield length"];
+      eprintln!["max_i={}, len={}, bitfield_len={}", max_i, len,
+        u16::from_be_bytes([ header[4],header[5] ])];
       ensure![len <= block_size, "data block is too small"];
       for index in indexes.iter() {
         header[6+index/8] &= 0xff - (1<<(index%8));
       }
-      self.store.write(*block-1+6, &header[6..])?;
-      self.list_cache.pop(&(*block-1));
+      self.store.write(block+6, &header[6..])?;
+      self.list_cache.pop(&block);
       /*
       match self.list_cache.get_mut(&(*block-1)) {
         Some(rows) => {
