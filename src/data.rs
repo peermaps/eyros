@@ -135,7 +135,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let n = psize + vsize;
       if ((bitfield[index/8]>>(index%8))&1) == 1 {
         let pv: (P,V) = self.bincode.deserialize(&buf[offset..offset+n])?;
-        results.push((pv.0,pv.1,offset));
+        results.push((pv.0,pv.1,index));
       }
       offset += n;
       index += 1;
@@ -166,7 +166,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         Some(i) => *i as u64,
         None => bail!["indexes is an empty array"],
       };
-      let len = 6 + (max_i+7)/8;
+      let len = 7 + max_i/8; // indexes start at 0, unlike lengths
       ensure![len <= self.store.len()?-block,
         "index length past the end of the block"];
       let mut header = self.store.read(*block, len)?;
@@ -175,23 +175,21 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       ) as u64;
       let bitfield_len = u16::from_be_bytes([header[4],header[5]]);
       ensure![len <= (bitfield_len as u64) + 6,
-        "index past expected bitfield length"];
-      eprintln!["max_i={}, len={}, bitfield_len={}", max_i, len,
-        u16::from_be_bytes([ header[4],header[5] ])];
+        "read length {} from index {} past expected bitfield length {} \
+        for block size {} at offset {}",
+        len, max_i, bitfield_len, block_size, *block
+      ];
       ensure![len <= block_size, "data block is too small"];
       for index in indexes.iter() {
         header[6+index/8] &= 0xff - (1<<(index%8));
       }
       self.store.write(block+6, &header[6..])?;
-      self.list_cache.pop(&block);
-      /*
-      match self.list_cache.get_mut(&(*block-1)) {
+      match self.list_cache.get_mut(block) {
         Some(rows) => {
-          rows.drain_filter(|row| indexes.contains(&((row.2).1)));
+          rows.retain(|row| !indexes.contains(&((row.2).1)));
         },
         None => {},
       }
-      */
     }
     Ok(())
   }

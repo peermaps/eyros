@@ -118,7 +118,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       if delete.0 == 0 { del_set.insert(delete.1); }
     }
     let mut i = 0;
-    self.inserts.try_borrow_mut()?.drain_filter(|_row| {
+    self.inserts.try_borrow_mut()?.retain(|_row| {
       let j = i;
       i += 1;
       !del_set.contains(&j)
