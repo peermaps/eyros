@@ -96,7 +96,8 @@ the coords are `((xmin,xmax),(ymin,ymax),time)`.
 
 The `location` is used to quickly delete records without needing to perform
 additional lookups. You'll need to keep the `location` around from the result of
-a query when you intend to delete a record.
+a query when you intend to delete a record. Locations that begin with a `0` are
+stored in the staging cache, so their location may change after the next write.
 
 # status
 
