@@ -105,7 +105,7 @@ P: Point, V: Value {
     }
     Ok(db)
   }
-  pub fn batch (&mut self, rows: &Vec<Row<P,V>>) -> Result<(),Error> {
+  pub fn batch (&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     let inserts: Vec<(P,V)> = rows.iter()
       .filter(|r| match r { Row::Insert(_p,_v) => true, _ => false })
       .map(|r| match r {

@@ -37,9 +37,12 @@ use failure::Error;
 use random_access_disk::RandomAccessDisk;
 use std::path::PathBuf;
 
+type P = ((f32,f32),(f32,f32),f32);
+type V = u32;
+
 fn main() -> Result<(),Error> {
   let mut db: DB<_,_,((f32,f32),(f32,f32),f32),u32> = DB::open(storage)?;
-  let polygons = (0..800).map(|_| {
+  let polygons: Vec<Row<P,V>> = (0..800).map(|_| {
     let xmin: f32 = random::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + random::<f32>().powf(64.0)*(1.0-xmin);
     let ymin: f32 = random::<f32>()*2.0-1.0;

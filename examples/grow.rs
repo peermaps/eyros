@@ -10,6 +10,9 @@ use random_access_disk::RandomAccessDisk;
 use std::path::PathBuf;
 use std::time;
 
+type P = ((f32,f32),(f32,f32));
+type V = u32;
+
 fn main() -> Result<(),Error> {
   let args: Vec<String> = std::env::args().collect();
   let base = PathBuf::from(args[1].clone());
@@ -28,7 +31,7 @@ fn main() -> Result<(),Error> {
   let mut count = 0_u64;
   let mut total = 0f64;
   for _ in 0..100 {
-    let rows = (0..batch_size).map(|_| {
+    let rows: Vec<Row<P,V>> = (0..batch_size).map(|_| {
       let xmin: f32 = random::<f32>()*2.0-1.0;
       let xmax: f32 = xmin + random::<f32>().powf(64.0)*(1.0-xmin);
       let ymin: f32 = random::<f32>()*2.0-1.0;

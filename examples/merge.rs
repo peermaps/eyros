@@ -4,13 +4,13 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use random_access_disk::RandomAccessDisk;
 
-type R = ((f32,f32),(f32,f32));
+type P = ((f32,f32),(f32,f32));
 type V = (u32,u64);
 
 fn main() -> Result<(),Error> {
   let args: Vec<String> = std::env::args().collect();
   let base = PathBuf::from(args[1].clone());
-  let mut db: DB<_,_,R,V> = DB::open(|name| {
+  let mut db: DB<_,_,P,V> = DB::open(|name| {
     let mut p = base.clone();
     p.push(name);
     Ok(RandomAccessDisk::builder(p)
@@ -29,10 +29,11 @@ fn main() -> Result<(),Error> {
       Rc::clone(&db.bincode)
     );
     // TODO: incorporate len field and pre-set data offsets into Row enum
-    db.batch(&ranges.list()?.iter().map(|(offset,range,_len)| {
+    let batch: Vec<Row<P,V>> = ranges.list()?.iter().map(|(offset,range,_len)| {
       //Row::Insert(*range,(b_index as u32,b_offset+*offset))
       Row::Insert(*range,(b_index as u32,*offset))
-    }).collect())?;
+    }).collect();
+    db.batch(&batch)?;
     //b_offset += ranges.store.len()? as u64;
   }
   Ok(())

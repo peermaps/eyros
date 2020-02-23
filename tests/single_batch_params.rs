@@ -13,6 +13,9 @@ use std::time;
 
 use std::cmp::Ordering;
 
+type P = ((f32,f32),(f32,f32),f32);
+type V = u32;
+
 #[test]
 fn single_4k_batch_xxyyz_9_bf_10_data_16_base() -> Result<(),Error> {
   from_params(4000, 9, 10, 16)
@@ -58,7 +61,7 @@ base_size: usize) -> Result<(),Error> {
     .base_size(base_size)
     .build()?;
   let mut r = rand().seed([13,12]);
-  let inserts = (0..size).map(|_| {
+  let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
     let xmin: f32 = r.read::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + r.read::<f32>().powf(64.0)*(1.0-xmin);
     let ymin: f32 = r.read::<f32>()*2.0-1.0;

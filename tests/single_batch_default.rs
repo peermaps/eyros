@@ -12,6 +12,9 @@ use tempfile::Builder as Tmpfile;
 
 use std::cmp::Ordering;
 
+type P = ((f32,f32),(f32,f32),f32);
+type V = u32;
+
 #[test]
 fn single_batch() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
@@ -25,7 +28,7 @@ fn single_batch() -> Result<(),Error> {
   )?;
   let mut r = rand().seed([13,12]);
   let size = 4000;
-  let inserts = (0..size).map(|_| {
+  let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
     let xmin: f32 = r.read::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + r.read::<f32>().powf(64.0)*(1.0-xmin);
     let ymin: f32 = r.read::<f32>()*2.0-1.0;
