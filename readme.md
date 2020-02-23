@@ -9,8 +9,10 @@ The database is based on [bkd][] and [interval][] trees.
 * designed for peer-to-peer distribution and query-driven sparse replication
 * compiles to web assembly for use in the browser
 
-eyros operates on scalar or interval coordinates for each dimension. You can
-insert, delete, and query for features based on a bounding box.
+eyros operates on scalar (x) or interval (min,max) coordinates for each
+dimension. There are 2 operations: batched write (for inserting and deleting)
+and query by bounding box. All features that intersect the bounding box are
+returned in the query results.
 
 [bkd]: https://users.cs.duke.edu/~pankaj/publications/papers/bkd-sstd.pdf
 [interval]: http://www.dgp.toronto.edu/~jstewart/378notes/22intervals/
