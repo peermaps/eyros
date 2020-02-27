@@ -9,7 +9,6 @@ homepage = "https://github.com/peermaps/eyros"
 documentation = "https://docs.rs/eyros"
 keywords = [ "database", "multi-dimensional", "interval", "time-series", "geospatial" ]
 categories = [ "database" ]
-authors = [ "*" ]
 edition = "2018"
 
 [dependencies]
