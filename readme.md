@@ -104,3 +104,8 @@ additional lookups. You'll need to keep the `location` around from the result of
 a query when you intend to delete a record. Locations that begin with a `0` are
 stored in the staging cache, so their location may change after the next write.
 
+# license
+
+[license zero parity](https://licensezero.com/licenses/parity)
+and [apache 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt)
+(contributions)
