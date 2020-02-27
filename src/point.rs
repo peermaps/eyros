@@ -5,21 +5,76 @@ use serde::{Serialize,de::DeserializeOwned};
 use std::fmt::Debug;
 use std::mem::size_of;
 
+/// Points (scalar or interval) must implement these methods.
+/// There's a lot going on here, so you'll most likely want to use one of the
+/// built-in implementations rather than write your own.
+///
+/// Below, the term "element" refs to a value contained in a point which could
+/// be a scalar or interval.
+/// For example, for the point `((-2.0,4.5), 6.0, (9.0,11.0))`,
+/// each of `(-2.0,4.5)`, `6.0`, and `(9.0,11.0)` is an "element".
+///
+/// Presently only types with static sizes are supported.
+
 pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
+  /// Bounding-box corresponding to `(min,max)` as used by `db.query(bbox)`.
   type Bounds: Copy+Clone+Debug+Serialize+DeserializeOwned;
+
+  /// Range corresponding to `((minX,maxX),(minY,maxY),...)`
   type Range: Point+Copy+Clone+Debug+Serialize+DeserializeOwned;
+
+  /// Compare elements at a level of tree depth. The dimension under
+  /// consideration alternates each level, so you'll likely want the element
+  /// at an index corresponding to `level % dimension`.
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering where Self: Sized;
+
+  /// Determine whether an element in a buffer slice greater than the bbox
+  /// minimum and less than the bbox maximum for a particular tree depth.
+  /// Each of these comparisons `(isGTMin,isLTMax)` is returned in the result
+  /// type. A bincode configuration is required to avoid parsing the entire
+  /// buffer where possible, as only a single element is needed.
   fn cmp_buf (bincode: &bincode::Config, buf: &[u8], bbox: &Self::Bounds,
     level: usize) -> Result<(bool,bool),Error>;
+
+  /// For intervals, calculate the midpoint of the greater (upper) interval
+  /// bound (ex: `iv.1`) for two intervals, returning a new interval where both
+  /// elements are the midpoint result.
+  /// For scalars, return the midpoint of two scalars as a scalar.
   fn midpoint_upper (&self, other: &Self) -> Self where Self: Sized;
+
+  /// Return the byte presentation for the element corresponding to the tree
+  /// depth `level`.
   fn serialize_at (&self, bincode: &bincode::Config, level: usize)
     -> Result<Vec<u8>,Error>;
+
+  /// Get the number of dimensions for this point type.
   fn dim () -> usize;
+
+  /// Return whether the current point intersects with a bounding box.
   fn overlaps (&self, bbox: &Self::Bounds) -> bool;
+
+  /// Return the size in bytes of the element corresponding to the tree depth
+  /// `level`.
   fn pivot_size_at (level: usize) -> usize;
+
+  /// Return the size in bytes of the entire point when serialized.
   fn size_of () -> usize;
+
+  /// Return a bounding box for a set of coordinates, if possible.
   fn bounds (coords: &Vec<Self>) -> Option<Self::Bounds>;
+
+  /// Return a Range corresponding to a bounding box.
+  /// This involves transposing the items. For example:
+  ///
+  /// `((-1.0,0.0,-4.0),(3.0,0.8,2.5)` (bbox)
+  ///
+  /// becomes
+  ///
+  /// `((-1.0,3.0),(0.0,0.8),(-4.0,2.5))` (range)
   fn bounds_to_range (bbox: Self::Bounds) -> Self::Range;
+
+  /// Return a string representation of the element in a buffer slice
+  /// corresponding to the tree depth level.
   fn format_at (bincode: &bincode::Config, buf: &[u8], level: usize)
     -> Result<String,Error>;
 }
@@ -29,6 +84,10 @@ pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
 impl<T> Num<T> for T where T: PartialOrd+Copy+Serialize+DeserializeOwned
 +Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
 
+/// Types representing a single value (as opposed to an interval, which has
+/// minimum and maximum values).
+///
+/// This trait has no required methods.
 pub trait Scalar: Copy+Sized+'static {}
 impl Scalar for f32 {}
 impl Scalar for f64 {}

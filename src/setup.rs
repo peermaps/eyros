@@ -2,6 +2,7 @@ use crate::{DB,Point,Value};
 use failure::Error;
 use random_access_storage::RandomAccess;
 
+/// Struct for reading database properties.
 pub struct SetupFields {
   pub max_data_size: usize,
   pub base_size: usize,
@@ -10,6 +11,34 @@ pub struct SetupFields {
   pub data_list_cache_size: usize
 }
 
+/// Builder to configure and instantiate an eyros database.
+///
+/// The `Setup` builder lets you create a database with a more custom
+/// configuration:
+///
+/// ```rust,no_run
+/// use eyros::{DB,Setup};
+/// use random_access_disk::RandomAccessDisk;
+/// use std::path::PathBuf;
+/// # use failure::Error;
+///
+/// type P = ((f32,f32),(f32,f32));
+/// type V = u32;
+///
+/// # fn main () -> Result<(),Error> {
+/// let mut db: DB<_,_,P,V> = Setup::new(storage)
+///   .branch_factor(5)
+///   .max_data_size(3_000)
+///   .base_size(1_000)
+///   .build()?;
+/// # Ok(()) }
+///
+/// fn storage(name: &str) -> Result<RandomAccessDisk,Error> {
+///   let mut p = PathBuf::from("/tmp/eyros-db/");
+///   p.push(name);
+///   Ok(RandomAccessDisk::builder(p).auto_sync(false).build()?)
+/// }
+/// ```
 pub struct Setup<S,U> where
 S: RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>) {
@@ -20,6 +49,7 @@ U: (Fn(&str) -> Result<S,Error>) {
 impl<S,U> Setup<S,U> where
 S: RandomAccess<Error=Error>,
 U: (Fn(&str) -> Result<S,Error>) {
+  /// Create a new `Setup` builder from a storage function.
   pub fn new (open_store: U) -> Self {
     Self {
       open_store,

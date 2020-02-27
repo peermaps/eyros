@@ -1,3 +1,4 @@
+#[doc(hidden)]
 #[macro_export]
 macro_rules! ensure_eq {
   ($left:expr, $right:expr) => ({
@@ -24,6 +25,7 @@ macro_rules! ensure_eq {
   });
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! ensure_eq_some {
   ($left:expr, $right:expr) => ({

@@ -1,8 +1,3 @@
-extern crate eyros;
-extern crate failure;
-extern crate rand;
-extern crate random_access_disk;
-
 use eyros::{Setup,Row};
 use rand::random;
 use failure::Error;

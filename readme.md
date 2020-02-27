@@ -8,11 +8,16 @@ The database is based on [bkd][] and [interval][] trees.
   on modest hardware)
 * designed for peer-to-peer distribution and query-driven sparse replication
 * compiles to web assembly for use in the browser
+* good for geospatial and time-series data
 
 eyros operates on scalar (x) or interval (min,max) coordinates for each
 dimension. There are 2 operations: batched write (for inserting and deleting)
 and query by bounding box. All features that intersect the bounding box are
 returned in the query results.
+
+This is an early release missing important features such as atomicity and
+concurrency. The data format is still in flux and will likely change in the
+future, requiring data migrations.
 
 [bkd]: https://users.cs.duke.edu/~pankaj/publications/papers/bkd-sstd.pdf
 [interval]: http://www.dgp.toronto.edu/~jstewart/378notes/22intervals/
@@ -28,11 +33,6 @@ that overlaps `(-0.5,0.3)`, a `y` interval that overlaps `(-0.8,-0.5)`, and a
 `time` scalar that is between `0.0` and `100.0` are printed to stdout.
 
 ``` rust
-extern crate eyros;
-extern crate failure;
-extern crate rand;
-extern crate random_access_disk;
-
 use eyros::{DB,Row};
 use rand::random;
 use failure::Error;
@@ -103,10 +103,4 @@ The `location` is used to quickly delete records without needing to perform
 additional lookups. You'll need to keep the `location` around from the result of
 a query when you intend to delete a record. Locations that begin with a `0` are
 stored in the staging cache, so their location may change after the next write.
-
-# status
-
-Work in progress. under active development!
-
-This is an important foundational component for the peermaps roadmap.
 

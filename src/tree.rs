@@ -35,6 +35,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! iwrap {
   ($x:expr) => {
