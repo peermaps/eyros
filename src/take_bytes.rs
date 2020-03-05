@@ -1,14 +1,15 @@
+use failure::{Error,bail};
 use std::mem::size_of;
 
 pub trait TakeBytes {
-  fn take_bytes (offset: usize, buf: &[u8]) -> usize;
+  fn take_bytes (buf: &[u8]) -> Result<usize,Error>;
 }
 
 macro_rules! take_bytes {
   ($($T:tt),+) => {$(
     impl TakeBytes for $T {
-      fn take_bytes (_offset: usize, _buf: &[u8]) -> usize {
-        size_of::<$T>()
+      fn take_bytes (_buf: &[u8]) -> Result<usize,Error> {
+        Ok(size_of::<$T>())
       }
     }
   )*};
@@ -18,8 +19,8 @@ take_bytes![u8,u16,u32,u64,u128,i8,i16,i32,i64,i128,f32,f64,char];
 macro_rules! tuple_take_bytes {
   ($($T:tt),+) => {
     impl<$($T),+> TakeBytes for ($($T),+) where $($T: Sized),+ {
-      fn take_bytes (_offset: usize, _buf: &[u8]) -> usize {
-        0 $(+ size_of::<$T>())+
+      fn take_bytes (_buf: &[u8]) -> Result<usize,Error> {
+        Ok(0 $(+ size_of::<$T>())+)
       }
     }
   };
@@ -37,8 +38,8 @@ tuple_take_bytes![A,B,C,D,E,F,G,H,I,J];
 macro_rules! array_size_of {
   ($n:expr) => {
     impl<T> TakeBytes for [T;$n] where T: Sized {
-      fn take_bytes (_offset: usize, _buf: &[u8]) -> usize {
-        $n * size_of::<T>()
+      fn take_bytes (_buf: &[u8]) -> Result<usize,Error> {
+        Ok($n * size_of::<T>())
       }
     }
   };
@@ -81,11 +82,14 @@ comb_array_size_of![(
 )];
 
 impl<T> TakeBytes for Vec<T> {
-  fn take_bytes (offset: usize, buf: &[u8]) -> usize {
+  fn take_bytes (buf: &[u8]) -> Result<usize,Error> {
+    if buf.len() < 8 {
+      bail!["supplied buffer slice is too small"]
+    }
     // bincode is always u64 on vectors:
-    (8 + u64::from_be_bytes([
-      buf[offset+0], buf[offset+1], buf[offset+2], buf[offset+3],
-      buf[offset+4], buf[offset+5], buf[offset+6], buf[offset+7]
-    ])) as usize
+    Ok((8 + u64::from_be_bytes([
+      buf[0], buf[1], buf[2], buf[3],
+      buf[4], buf[5], buf[6], buf[7]
+    ])) as usize)
   }
 }

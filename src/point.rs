@@ -4,6 +4,7 @@ use failure::Error;
 use serde::{Serialize,de::DeserializeOwned};
 use std::fmt::Debug;
 use std::mem::size_of;
+use crate::take_bytes::TakeBytes;
 
 /// Points (scalar or interval) must implement these methods.
 /// There's a lot going on here, so you'll most likely want to use one of the
@@ -16,7 +17,7 @@ use std::mem::size_of;
 ///
 /// Presently only types with static sizes are supported.
 
-pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
+pub trait Point: Copy+Clone+Debug+TakeBytes+Serialize+DeserializeOwned {
   /// Bounding-box corresponding to `(min,max)` as used by `db.query(bbox)`.
   type Bounds: Copy+Clone+Debug+Serialize+DeserializeOwned;
 
@@ -43,7 +44,8 @@ pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
   fn midpoint_upper (&self, other: &Self) -> Self where Self: Sized;
 
   /// Return the byte presentation for the element corresponding to the tree
-  /// depth `level`.
+  /// depth `level` for the purpose of making a pivot. If you have an interval
+  /// type, return the upper bound.
   fn serialize_at (&self, bincode: &bincode::Config, level: usize)
     -> Result<Vec<u8>,Error>;
 
@@ -55,10 +57,8 @@ pub trait Point: Copy+Clone+Debug+Serialize+DeserializeOwned {
 
   /// Return the size in bytes of the element corresponding to the tree depth
   /// `level`.
+  // TODO: self
   fn pivot_size_at (level: usize) -> usize;
-
-  /// Return the size in bytes of the entire point when serialized.
-  fn size_of () -> usize;
 
   /// Return a bounding box for a set of coordinates, if possible.
   fn bounds (coords: &Vec<Self>) -> Option<Self::Bounds>;
@@ -226,9 +226,6 @@ macro_rules! impl_point {
           _ => panic!("dimension out of bounds")
         }
       }
-      fn size_of () -> usize {
-        $(size_of::<$U>()+)+0
-      }
       fn bounds (points: &Vec<Self>) -> Option<Self::Bounds> {
         if points.is_empty() { return None }
         let pairs = ($({
@@ -281,7 +278,7 @@ macro_rules! impl_dim {
 impl_dim![(A,B),(0,1),2];
 impl_dim![(A,B,C),(0,1,2),3];
 impl_dim![(A,B,C,D),(0,1,2,3),4];
-impl_dim![(A,B,C,D,E),(0,1,2,3,4),5];
-impl_dim![(A,B,C,D,E,F),(0,1,2,3,4,5),6];
-impl_dim![(A,B,C,D,E,F,G),(0,1,2,3,4,5,6),7];
-impl_dim![(A,B,C,D,E,F,G,H),(0,1,2,3,4,5,6,7),8];
+//impl_dim![(A,B,C,D,E),(0,1,2,3,4),5];
+//impl_dim![(A,B,C,D,E,F),(0,1,2,3,4,5),6];
+//impl_dim![(A,B,C,D,E,F,G),(0,1,2,3,4,5,6),7];
+//impl_dim![(A,B,C,D,E,F,G,H),(0,1,2,3,4,5,6,7),8];

@@ -1,4 +1,5 @@
 use crate::{Point,Value,Location,read_block::read_block};
+use crate::take_bytes::TakeBytes;
 use random_access_storage::RandomAccess;
 use failure::{Error,ensure,bail};
 use std::rc::Rc;
@@ -65,8 +66,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     for row in rows.iter() {
       let buf = self.bincode.serialize(row)?;
-      //ensure_eq!(buf.len(), P::size_of() + size_of::<V>(),
-      //  "unexpected length in data batch");
       data.extend(buf);
     }
     let len = data.len() as u32;
@@ -130,8 +129,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     offset += bitfield_len;
     let mut index = 0;
     while offset < buf.len() {
-      let psize = P::size_of();
-      let vsize = V::take_bytes(offset+psize, &buf);
+      let psize = P::take_bytes(&buf[offset..])?;
+      let vsize = V::take_bytes(&buf[offset+psize..])?;
       let n = psize + vsize;
       if ((bitfield[index/8]>>(index%8))&1) == 1 {
         let pv: (P,V) = self.bincode.deserialize(&buf[offset..offset+n])?;
@@ -233,27 +232,20 @@ where S: RandomAccess<Error=Error>, P: Point {
     }
   }
   pub fn write (&mut self, b: &(u64,P::Range,u64)) -> Result<(),Error> {
-    let data = self.bincode.serialize(b)?;
     let offset = self.store.len()?;
+    let data: Vec<u8> = self.bincode.serialize(b)?;
     self.store.write(offset, &data)
   }
   pub fn list (&mut self) -> Result<Vec<(u64,P,u64)>,Error> {
-    let mut results = vec![];
-    let bsize = <P::Range as Point>::size_of() as u64;
-    let n = 8 + bsize + 8;
     let len = self.store.len()?;
-    let buf_size = {
-      let x = 1024 * 1024;
-      x - (x % n) // ensure buf_size is a multiple of n
-    };
-    for j in 0..(len+buf_size-1)/buf_size {
-      let buf = self.store.read(j*buf_size,((j+1)*buf_size).min(len))?;
-      for i in 0..buf.len()/(n as usize) {
-        let offset = i * (n as usize);
-        results.push(self.bincode.deserialize(
-          &buf[offset..offset+(n as usize)])?
-        );
-      }
+    // TODO: read in chunks instead of all at once
+    let buf = self.store.read(0, len)?;
+    let mut offset = 0usize;
+    let mut results: Vec<(u64,P,u64)> = vec![];
+    while (offset as u64) < len {
+      let n = <Vec<u8>>::take_bytes(&buf[offset..])?;
+      results.push(self.bincode.deserialize(&buf[offset..offset+n])?);
+      offset += n;
     }
     Ok(results)
   }

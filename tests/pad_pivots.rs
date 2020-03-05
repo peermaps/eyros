@@ -1,6 +1,11 @@
+#![recursion_limit="1024"]
+
 extern crate failure;
 extern crate bincode;
 extern crate serde;
+
+#[path="../src/take_bytes.rs"]
+mod take_bytes;
 
 #[path="../src/point.rs"]
 mod point;

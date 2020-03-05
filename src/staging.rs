@@ -1,7 +1,6 @@
 use crate::{Point,Value,Location,write_cache::WriteCache};
 use failure::{Error};
 use random_access_storage::RandomAccess;
-use std::mem::size_of;
 use bincode::{serialize,deserialize};
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -70,8 +69,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let buf = self.insert_store.read(0, len)?;
       let mut offset = 0;
       while offset < len as usize {
-        let psize = P::size_of();
-        let vsize = V::take_bytes(offset+psize, &buf);
+        let psize = P::take_bytes(&buf[offset..])?;
+        let vsize = V::take_bytes(&buf[offset+psize..])?;
         let n = psize + vsize;
         let pv: (P,V) = deserialize(&buf[offset..offset+n])?;
         self.inserts.try_borrow_mut()?.push(pv);
@@ -85,8 +84,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let buf = self.delete_store.read(0, len)?;
       let mut offset = 0;
       while offset < len as usize {
-        let psize = P::size_of();
-        let vsize = V::take_bytes(offset+psize, &buf);
+        let psize = P::take_bytes(&buf[offset..])?;
+        let vsize = V::take_bytes(&buf[offset+psize..])?;
         let n = psize + vsize;
         let loc: Location = deserialize(&buf[offset..offset+n])?;
         self.deletes.try_borrow_mut()?.push(loc);
@@ -133,10 +132,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
   pub fn batch (&mut self, inserts: &Vec<(P,V)>, deletes: &Vec<Location>)
   -> Result<(),Error> {
-    let n = size_of::<u8>() + P::size_of() + size_of::<V>();
-    let mut ibuf: Vec<u8> = Vec::with_capacity(n*inserts.len());
-    let mut dbuf: Vec<u8> = Vec::with_capacity(
-      size_of::<Location>()*deletes.len());
+    // todo: calculate the necessary size before allocating
+    let mut ibuf: Vec<u8> = vec![];
+    let mut dbuf: Vec<u8> = vec![];
     for insert in inserts {
       ibuf.extend(serialize(&insert)?);
     }

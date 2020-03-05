@@ -18,7 +18,7 @@ lru = "0.1.13"
 num-traits = "0.2.6"
 random-access-disk = "1.0.0"
 random-access-storage = "3.0.0"
-serde = "1.0.82"
+serde = { version = "1.0.82", features = ["derive"] }
 
 [dev-dependencies]
 rand = "0.6.1"

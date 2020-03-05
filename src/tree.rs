@@ -90,6 +90,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         let i = iwrap![self.tree.try_borrow()].order[c];
         let cmp: (bool,bool) = iwrap![P::cmp_buf(
           &iwrap![self.tree.try_borrow()].bincode,
+          //&buf[p_start+i*psize..p_start+(i+1)*psize],
           &buf[p_start+i*psize..p_start+(i+1)*psize],
           &self.bbox,
           depth % P::dim()
