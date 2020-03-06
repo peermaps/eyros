@@ -130,7 +130,7 @@ pub use crate::point::{Point,Scalar};
 #[doc(hidden)] pub use crate::branch::Branch;
 use crate::order::pivot_order;
 #[doc(hidden)] pub use crate::data::{DataStore,DataRange};
-use crate::take_bytes::TakeBytes;
+pub use crate::take_bytes::TakeBytes;
 use crate::meta::Meta;
 
 use random_access_storage::RandomAccess;

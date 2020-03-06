@@ -1,6 +1,6 @@
-use eyros::{DB,Row,Point};
+use eyros::{DB,Row,Point,TakeBytes};
 use rand::random;
-use failure::Error;
+use failure::{Error,bail};
 use random_access_disk::RandomAccessDisk;
 use std::path::PathBuf;
 
@@ -12,6 +12,17 @@ use std::f32;
 enum P {
   Point(f32,f32),
   Interval((f32,f32),(f32,f32))
+}
+
+impl TakeBytes for P {
+  fn take_bytes (buf: &[u8]) -> Result<usize,Error> {
+    if buf.len() < 4 { bail!["buffer slice too small"] }
+    Ok(match u32::from_be_bytes([ buf[0], buf[1], buf[2], buf[3] ]) {
+      0 => 4 + 4*2, // point
+      1 => 4 + 4*4, // interval
+      t@_ => bail!["unexpected enum type {}", t]
+    })
+  }
 }
 
 impl Point for P {
@@ -117,10 +128,6 @@ impl Point for P {
   }
 
   fn pivot_size_at (level: usize) -> usize {
-    unimplemented![]
-  }
-
-  fn size_of () -> usize {
     unimplemented![]
   }
 

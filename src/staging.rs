@@ -1,7 +1,6 @@
 use crate::{Point,Value,Location,write_cache::WriteCache};
 use failure::{Error};
 use random_access_storage::RandomAccess;
-use bincode::{serialize,deserialize};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -47,17 +46,21 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub inserts: Rc<RefCell<Vec<(P,V)>>>,
   pub deletes: Rc<RefCell<Vec<Location>>>,
   pub delete_set: Rc<RefCell<HashSet<Location>>>,
+  bincode: bincode::Config
 }
 
 impl<S,P,V> Staging<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn open (istore: S, dstore: S) -> Result<Self,Error> {
+    let mut bcode = bincode::config();
+    bcode.big_endian();
     let mut staging = Self {
       insert_store: WriteCache::open(istore)?,
       delete_store: WriteCache::open(dstore)?,
       inserts: Rc::new(RefCell::new(vec![])),
       deletes: Rc::new(RefCell::new(vec![])),
       delete_set: Rc::new(RefCell::new(HashSet::new())),
+      bincode: bcode
     };
     staging.load()?;
     Ok(staging)
@@ -72,7 +75,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         let psize = P::take_bytes(&buf[offset..])?;
         let vsize = V::take_bytes(&buf[offset+psize..])?;
         let n = psize + vsize;
-        let pv: (P,V) = deserialize(&buf[offset..offset+n])?;
+        let pv: (P,V) = self.bincode.deserialize(&buf[offset..offset+n])?;
         self.inserts.try_borrow_mut()?.push(pv);
         offset += n;
       }
@@ -87,7 +90,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         let psize = P::take_bytes(&buf[offset..])?;
         let vsize = V::take_bytes(&buf[offset+psize..])?;
         let n = psize + vsize;
-        let loc: Location = deserialize(&buf[offset..offset+n])?;
+        let loc: Location = self.bincode.deserialize(&buf[offset..offset+n])?;
         self.deletes.try_borrow_mut()?.push(loc);
         self.delete_set.try_borrow_mut()?.insert(loc);
         offset += n;
@@ -136,10 +139,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let mut ibuf: Vec<u8> = vec![];
     let mut dbuf: Vec<u8> = vec![];
     for insert in inserts {
-      ibuf.extend(serialize(&insert)?);
+      ibuf.extend(self.bincode.serialize(&insert)?);
     }
     for delete in deletes {
-      dbuf.extend(serialize(&delete)?);
+      dbuf.extend(self.bincode.serialize(&delete)?);
     }
     let i_offset = self.insert_store.len()?;
     self.insert_store.write(i_offset,&ibuf)?;
