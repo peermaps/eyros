@@ -1,10 +1,11 @@
 use std::cmp::Ordering;
 use std::ops::{Div,Add};
-use failure::Error;
+use failure::{Error,format_err};
 use serde::{Serialize,de::DeserializeOwned};
 use std::fmt::Debug;
 use std::mem::size_of;
 use crate::take_bytes::TakeBytes;
+use crate::order;
 
 /// Points (scalar or interval) must implement these methods.
 /// There's a lot going on here, so you'll most likely want to use one of the
@@ -16,6 +17,9 @@ use crate::take_bytes::TakeBytes;
 /// each of `(-2.0,4.5)`, `6.0`, and `(9.0,11.0)` is an "element".
 ///
 /// Presently only types with static sizes are supported.
+
+pub type Cursor = (u64,usize);
+pub type Block = u64;
 
 pub trait Point: Copy+Clone+Debug+TakeBytes+Serialize+DeserializeOwned {
   /// Bounding-box corresponding to `(min,max)` as used by `db.query(bbox)`.
@@ -57,8 +61,11 @@ pub trait Point: Copy+Clone+Debug+TakeBytes+Serialize+DeserializeOwned {
 
   /// Return the size in bytes of the element corresponding to the tree depth
   /// `level`.
-  // TODO: self
   fn pivot_size_at (level: usize) -> usize;
+
+  fn query_branch (bincode: &bincode::Config, buf: &[u8],
+    bbox: &Self::Bounds, branch_factor: usize, level: usize)
+    -> Result<(Vec<Cursor>,Vec<Block>),Error>;
 
   /// Return a bounding box for a set of coordinates, if possible.
   fn bounds (coords: &Vec<Self>) -> Option<Self::Bounds>;
@@ -225,6 +232,86 @@ macro_rules! impl_point {
           $($i => size_of::<$T>(),)+
           _ => panic!("dimension out of bounds")
         }
+      }
+      fn query_branch (bcode: &bincode::Config, buf: &[u8],
+      bbox: &Self::Bounds, bf: usize, level: usize)
+      -> Result<(Vec<Cursor>,Vec<Block>),Error> {
+        let mut cursors = vec![];
+        let mut blocks = vec![];
+
+        let n = order::order_len(bf);
+        let psize = Self::pivot_size_at(level % Self::dim());
+        let p_start = 0; // pivots
+        let d_start = p_start + n*psize; // data bitfield
+        let i_start = d_start + (n+bf+7)/8; // intersections
+        let b_start = i_start + n*size_of::<u64>(); // buckets
+        let b_end = b_start+bf*size_of::<u64>();
+        ensure_eq!(b_end, buf.len(), "unexpected block length");
+
+        let mut bcursors = vec![0];
+        let mut bitfield: Vec<bool> = vec![false;bf]; // which buckets
+        while !bcursors.is_empty() {
+          let c = bcursors.pop().unwrap();
+          let i = order::order(bf, c);
+          let cmp: (bool,bool) = Self::cmp_buf(
+            bcode,
+            //&buf[p_start+i*psize..p_start+(i+1)*psize],
+            &buf[p_start+i*psize..p_start+(i+1)*psize],
+            &bbox,
+            level % Self::dim()
+          )?;
+          let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
+          let i_offset = i_start + i*8;
+          // intersection:
+          let offset = u64::from_be_bytes([
+            buf[i_offset+0], buf[i_offset+1],
+            buf[i_offset+2], buf[i_offset+3],
+            buf[i_offset+4], buf[i_offset+5],
+            buf[i_offset+6], buf[i_offset+7],
+          ]);
+          if is_data && offset > 0 {
+            blocks.push(offset-1);
+          } else if offset > 0 {
+            cursors.push((offset-1,level+1));
+          }
+          // internal branches:
+          if cmp.0 && c*2+1 < n { // left internal
+            bcursors.push(c*2+1);
+          } else if cmp.0 { // left branch
+            bitfield[i/2] = true;
+          }
+          if cmp.1 && c*2+2 < n { // right internal
+            bcursors.push(c*2+2);
+          } else if cmp.1 { // right branch
+            bitfield[i/2+1] = true;
+          }
+          // internal leaves are even integers in (0..n)
+          // which map to buckets `i/2+0` and/or `i/2+1`
+          // depending on left/right comparisons
+          /*                7
+                     3             11
+                  1     5       9      13
+                0   2 4  6    8  10  12  14
+            B: 0  1  2  3   4  5   6   7   8
+          */
+        }
+        for (i,b) in bitfield.iter().enumerate() {
+          if !b { continue }
+          let j = i+n;
+          let is_data = (buf[d_start+j/8]>>(j%8))&1 == 1;
+          let offset = u64::from_be_bytes([
+            buf[b_start+i*8+0], buf[b_start+i*8+1],
+            buf[b_start+i*8+2], buf[b_start+i*8+3],
+            buf[b_start+i*8+4], buf[b_start+i*8+5],
+            buf[b_start+i*8+6], buf[b_start+i*8+7]
+          ]);
+          if offset > 0 && is_data {
+            blocks.push(offset-1);
+          } else if offset > 0 {
+            cursors.push((offset-1,level+1));
+          }
+        }
+        Ok((cursors,blocks))
       }
       fn bounds (points: &Vec<Self>) -> Option<Self::Bounds> {
         if points.is_empty() { return None }

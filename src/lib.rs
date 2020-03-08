@@ -114,8 +114,8 @@ mod point;
 mod branch;
 mod staging;
 mod planner;
-mod bits;
 mod order;
+mod bits;
 mod data;
 mod read_block;
 mod pivots;
@@ -128,7 +128,6 @@ use crate::planner::plan;
 pub use crate::point::{Point,Scalar};
 #[doc(hidden)] pub use crate::tree::{Tree,TreeIterator,TreeOpts};
 #[doc(hidden)] pub use crate::branch::Branch;
-use crate::order::pivot_order;
 #[doc(hidden)] pub use crate::data::{DataStore,DataRange};
 pub use crate::take_bytes::TakeBytes;
 use crate::meta::Meta;
@@ -173,7 +172,6 @@ U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   open_store: U,
   pub trees: Vec<Rc<RefCell<Tree<S,P,V>>>>,
-  order: Rc<Vec<usize>>,
   pub staging: Staging<S,P,V>,
   pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
   meta: Meta<S>,
@@ -286,13 +284,11 @@ P: Point, V: Value {
       setup.fields.data_list_cache_size,
       Rc::clone(&r_bcode)
     )?;
-    let bf = setup.fields.branch_factor;
     let mut db = Self {
       open_store: setup.open_store,
       staging,
       bincode: Rc::clone(&r_bcode),
       data_store: Rc::new(RefCell::new(data_store)),
-      order: Rc::new(pivot_order(bf)),
       meta: meta,
       trees: vec![],
       fields: setup.fields
@@ -417,7 +413,6 @@ P: Point, V: Value {
         store,
         index,
         data_store: Rc::clone(&self.data_store),
-        order: Rc::clone(&self.order),
         bincode: Rc::clone(&self.bincode),
         branch_factor: self.fields.branch_factor,
         max_data_size: self.fields.max_data_size,

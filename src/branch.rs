@@ -1,4 +1,5 @@
 use crate::{data::DataBatch,point::Point,Value,pivots};
+use crate::order::{order,order_len};
 use std::cmp::Ordering;
 use std::mem::size_of;
 use std::rc::Rc;
@@ -24,8 +25,8 @@ pub struct Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   pub offset: u64,
   pub level: usize,
   pub index: usize,
+  branch_factor: usize,
   max_data_size: usize,
-  order: Rc<Vec<usize>>,
   bincode: Rc<bincode::Config>,
   data_batch: Rc<RefCell<D>>,
   bucket: Vec<usize>,
@@ -38,12 +39,11 @@ pub struct Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
 }
 
 impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
-  pub fn new (level: usize, index: usize, max_data_size: usize,
-  order: Rc<Vec<usize>>, bincode: Rc<bincode::Config>, data_batch: Rc<RefCell<D>>,
+  pub fn new (level: usize, index: usize, max_data_size: usize, bf: usize,
+  bincode: Rc<bincode::Config>, data_batch: Rc<RefCell<D>>,
   bucket: Vec<usize>, rows: Rc<Vec<((P,V),u64)>>)
   -> Result<Self,Error> {
-    let n = order.len();
-    let bf = (n+3)/2;
+    let n = order_len(bf);
     let mut sorted: Vec<usize> = (0..bucket.len()).collect();
     sorted.sort_unstable_by(|a,b| {
       (rows[bucket[*a]].0).0.cmp_at(&(rows[bucket[*b]].0).0, level)
@@ -97,7 +97,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       bincode,
       index,
       level,
-      order,
+      branch_factor: bf,
       data_batch,
       bucket,
       buckets: vec![vec![];bf],
@@ -121,17 +121,17 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   }
   pub fn build (&mut self, alloc: &mut dyn FnMut (usize) -> u64)
   -> Result<(Vec<u8>,Vec<Node<D,P,V>>),Error> {
-    let order = &self.order;
-    let n = order.len();
-    let bf = (n+3)/2;
-    for i in self.order.iter() {
-      let pivot = self.pivots[*i];
+    let n = order_len(self.branch_factor);
+    let bf = self.branch_factor;
+    for k in 0..n {
+      let i = order(bf, k);
+      let pivot = self.pivots[i];
       for j in self.sorted.iter() {
         let row = &self.rows[self.bucket[*j]];
         if self.matched[*j] { continue }
         if (row.0).0.cmp_at(&pivot, self.level) == Ordering::Equal {
           self.matched[*j] = true;
-          self.intersecting[*i].push(self.bucket[*j]);
+          self.intersecting[i].push(self.bucket[*j]);
         }
       }
     }
@@ -170,8 +170,10 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
           bitfield.push(true);
         } else {
           let mut b = Branch::new(
-            self.level+1, self.index, self.max_data_size,
-            Rc::clone(&self.order),
+            self.level+1,
+            self.index,
+            self.max_data_size,
+            self.branch_factor,
             Rc::clone(&self.bincode),
             Rc::clone(&self.data_batch),
             bucket.clone(), Rc::clone(&self.rows)

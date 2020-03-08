@@ -7,6 +7,12 @@ extern crate serde;
 #[path="../src/take_bytes.rs"]
 mod take_bytes;
 
+#[path="../src/ensure.rs"]
+#[macro_use] mod ensure;
+
+#[path="../src/order.rs"]
+mod order;
+
 #[path="../src/point.rs"]
 mod point;
 

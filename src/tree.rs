@@ -51,7 +51,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   type Item = Result<(P,V,Location),Error>;
   fn next (&mut self) -> Option<Self::Item> {
     let bf = iwrap![self.tree.try_borrow()].branch_factor;
-    let n = bf*2-3;
 
     // todo: used cached size or rolling max to implicitly read an appropriate
     // amount of data
@@ -75,77 +74,12 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         let mut tree = iwrap![self.tree.try_borrow_mut()];
         iwrap![read_block(&mut tree.store, cursor, self.tree_size, 1024)]
       };
-      let psize = P::pivot_size_at(depth % P::dim());
-      let p_start = 0;
-      let d_start = p_start + n*psize;
-      let i_start = d_start + (n+bf+7)/8;
-      let b_start = i_start + n*size_of::<u64>();
-      let b_end = b_start+bf*size_of::<u64>();
-      ensure_eq_some!(b_end, buf.len(), "unexpected block length");
-
-      let mut bcursors = vec![0];
-      let mut bitfield: Vec<bool> = vec![false;bf]; // which buckets
-      while !bcursors.is_empty() {
-        let c = bcursors.pop().unwrap();
-        let i = iwrap![self.tree.try_borrow()].order[c];
-        let cmp: (bool,bool) = iwrap![P::cmp_buf(
-          &iwrap![self.tree.try_borrow()].bincode,
-          //&buf[p_start+i*psize..p_start+(i+1)*psize],
-          &buf[p_start+i*psize..p_start+(i+1)*psize],
-          &self.bbox,
-          depth % P::dim()
-        )];
-        let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
-        let i_offset = i_start + i*8;
-        // intersection:
-        let offset = u64::from_be_bytes([
-          buf[i_offset+0], buf[i_offset+1],
-          buf[i_offset+2], buf[i_offset+3],
-          buf[i_offset+4], buf[i_offset+5],
-          buf[i_offset+6], buf[i_offset+7],
-        ]);
-        if is_data && offset > 0 {
-          self.blocks.push(offset-1);
-        } else if offset > 0 {
-          self.cursors.push((offset-1,depth+1));
-        }
-        // internal branches:
-        if cmp.0 && c*2+1 < n { // left internal
-          bcursors.push(c*2+1);
-        } else if cmp.0 { // left branch
-          bitfield[i/2] = true;
-        }
-        if cmp.1 && c*2+2 < n { // right internal
-          bcursors.push(c*2+2);
-        } else if cmp.1 { // right branch
-          bitfield[i/2+1] = true;
-        }
-        // internal leaves are even integers in (0..n)
-        // which map to buckets `i/2+0` and/or `i/2+1`
-        // depending on left/right comparisons
-        /*                7
-                   3             11
-                1     5       9      13
-              0   2 4  6    8  10  12  14
-          B: 0  1  2  3   4  5   6   7   8
-        */
-      }
-      for (i,b) in bitfield.iter().enumerate() {
-        if !b { continue }
-        let j = i+n;
-        let is_data = (buf[d_start+j/8]>>(j%8))&1 == 1;
-        let offset = u64::from_be_bytes([
-          buf[b_start+i*8+0], buf[b_start+i*8+1],
-          buf[b_start+i*8+2], buf[b_start+i*8+3],
-          buf[b_start+i*8+4], buf[b_start+i*8+5],
-          buf[b_start+i*8+6], buf[b_start+i*8+7]
-        ]);
-        if offset > 0 && is_data {
-          self.blocks.push(offset-1);
-        } else if offset > 0 {
-          self.cursors.push((offset-1,depth+1));
-        }
-      }
+      let (cursors,blocks) = {
+        let bcode = &iwrap![self.tree.try_borrow()].bincode;
+        iwrap![P::query_branch(bcode, &buf, &self.bbox, bf, depth)]
+      };
+      self.blocks.extend(blocks);
+      self.cursors.extend(cursors);
     }
     None
   }
@@ -158,7 +92,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub branch_factor: usize,
   pub max_data_size: usize,
   pub index: usize,
-  pub order: Rc<Vec<usize>>,
   pub bincode: Rc<bincode::Config>
 }
 
@@ -171,7 +104,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub bytes: u64,
   pub index: usize,
   max_data_size: usize,
-  order: Rc<Vec<usize>>,
   bincode: Rc<bincode::Config>
 }
 
@@ -187,7 +119,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       data_merge,
       index: opts.index,
       bytes,
-      order: opts.order,
       bincode: opts.bincode,
       branch_factor: opts.branch_factor,
       max_data_size: opts.max_data_size,
@@ -228,8 +159,11 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   where D: DataBatch<T,U>, T: Point, U: Value {
     self.clear()?;
     let bucket = (0..rows.len()).collect();
-    let b = Branch::<D,T,U>::new(0, self.index, self.max_data_size,
-      Rc::clone(&self.order),
+    let b = Branch::<D,T,U>::new(
+      0,
+      self.index,
+      self.max_data_size,
+      self.branch_factor,
       Rc::clone(&self.bincode),
       Rc::clone(&data_store),
       bucket, rows
