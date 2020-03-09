@@ -33,14 +33,6 @@ pub trait Point: Copy+Clone+Debug+TakeBytes+Serialize+DeserializeOwned {
   /// at an index corresponding to `level % dimension`.
   fn cmp_at (&self, other: &Self, level: usize) -> Ordering where Self: Sized;
 
-  /// Determine whether an element in a buffer slice greater than the bbox
-  /// minimum and less than the bbox maximum for a particular tree depth.
-  /// Each of these comparisons `(isGTMin,isLTMax)` is returned in the result
-  /// type. A bincode configuration is required to avoid parsing the entire
-  /// buffer where possible, as only a single element is needed.
-  fn cmp_buf (bincode: &bincode::Config, buf: &[u8], bbox: &Self::Bounds,
-    level: usize) -> Result<(bool,bool),Error>;
-
   /// For intervals, calculate the midpoint of the greater (upper) interval
   /// bound (ex: `iv.1`) for two intervals, returning a new interval where both
   /// elements are the midpoint result.
@@ -59,9 +51,11 @@ pub trait Point: Copy+Clone+Debug+TakeBytes+Serialize+DeserializeOwned {
   /// Return whether the current point intersects with a bounding box.
   fn overlaps (&self, bbox: &Self::Bounds) -> bool;
 
-  /// Return the size in bytes of the element corresponding to the tree depth
-  /// `level`.
-  fn pivot_size_at (level: usize) -> usize;
+  /// Return the size in bytes of the pivot-form of the element corresponding to
+  /// the tree depth `level`.
+  fn pivot_bytes_at (&self, level: usize) -> usize;
+
+  fn take_bytes_at (buf: &[u8], level: usize) -> Result<usize,Error>;
 
   fn query_branch (bincode: &bincode::Config, buf: &[u8],
     bbox: &Self::Bounds, branch_factor: usize, level: usize)
@@ -87,9 +81,9 @@ pub trait Point: Copy+Clone+Debug+TakeBytes+Serialize+DeserializeOwned {
 }
 
 pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
-+Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
++TakeBytes+Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
 impl<T> Num<T> for T where T: PartialOrd+Copy+Serialize+DeserializeOwned
-+Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
++TakeBytes+Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
 
 /// Types representing a single value (as opposed to an interval, which has
 /// minimum and maximum values).
@@ -197,19 +191,6 @@ macro_rules! impl_point {
         };
         match order { Some(x) => x, None => Ordering::Less }
       }
-      fn cmp_buf (bincode: &bincode::Config, buf: &[u8], bbox: &Self::Bounds,
-      level: usize) -> Result<(bool,bool),Error> {
-        match level % $dim {
-          $($i => {
-            let point: $T = bincode.deserialize(buf)?;
-            Ok((
-              (bbox.0).$i <= point,
-              point <= (bbox.1).$i
-            ))
-          },)+
-          _ => panic!("level out of bounds")
-        }
-      }
       fn midpoint_upper (&self, other: &Self) -> Self {
         ($(
           Coord::midpoint_upper(&self.$i, &other.$i)
@@ -227,9 +208,15 @@ macro_rules! impl_point {
       fn overlaps (&self, bbox: &Self::Bounds) -> bool {
         $(Coord::overlaps(&self.$i, &(bbox.0).$i, &(bbox.1).$i) &&)+ true
       }
-      fn pivot_size_at (i: usize) -> usize {
+      fn pivot_bytes_at (&self, i: usize) -> usize {
         match i % $dim {
           $($i => size_of::<$T>(),)+
+          _ => panic!("dimension out of bounds")
+        }
+      }
+      fn take_bytes_at (buf: &[u8], i: usize) -> Result<usize,Error> {
+        match i % $dim {
+          $($i => $T::take_bytes(buf),)+
           _ => panic!("dimension out of bounds")
         }
       }
@@ -240,9 +227,19 @@ macro_rules! impl_point {
         let mut blocks = vec![];
 
         let n = order::order_len(bf);
-        let psize = Self::pivot_size_at(level % Self::dim());
-        let p_start = 0; // pivots
-        let d_start = p_start + n*psize; // data bitfield
+        let mut offset = 0;
+        let mut pivots = ($({ $i; vec![] }),+);
+        for _i in 0..n {
+          match level % $dim {
+            $($i => {
+              let size = $T::take_bytes(&buf[offset..])?;
+              (pivots.$i).push(bcode.deserialize(&buf[offset..offset+size])?);
+              offset += size;
+            },)+
+            _ => panic!["dimension out of bounds"]
+          };
+        }
+        let d_start = offset; // data bitfield
         let i_start = d_start + (n+bf+7)/8; // intersections
         let b_start = i_start + n*size_of::<u64>(); // buckets
         let b_end = b_start+bf*size_of::<u64>();
@@ -253,13 +250,16 @@ macro_rules! impl_point {
         while !bcursors.is_empty() {
           let c = bcursors.pop().unwrap();
           let i = order::order(bf, c);
-          let cmp: (bool,bool) = Self::cmp_buf(
-            bcode,
-            //&buf[p_start+i*psize..p_start+(i+1)*psize],
-            &buf[p_start+i*psize..p_start+(i+1)*psize],
-            &bbox,
-            level % Self::dim()
-          )?;
+          let cmp = match level % $dim {
+            $($i => {
+              let pivot = (pivots.$i)[i];
+              (
+                (bbox.0).$i <= pivot,
+                pivot <= (bbox.1).$i
+              )
+            },)+
+            _ => panic!["dimension out of bounds"]
+          };
           let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
           let i_offset = i_start + i*8;
           // intersection:

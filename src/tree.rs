@@ -246,9 +246,11 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     while !cursors.is_empty() {
       let (c,depth) = cursors.pop().unwrap();
       let buf = read_block(&mut self.store, c, tree_size, 1024)?;
-      let psize = P::pivot_size_at(depth % P::dim());
       let p_start = 0;
-      let d_start = p_start + n*psize;
+      let mut d_start = p_start;
+      for _i in 0..n {
+        d_start += P::take_bytes_at(&buf[d_start..], depth)?;
+      }
       let i_start = d_start + (n+bf+7)/8;
       let b_start = i_start + n*size_of::<u64>();
       let b_end = b_start+bf*size_of::<u64>();

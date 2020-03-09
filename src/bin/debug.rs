@@ -2,6 +2,7 @@ extern crate eyros;
 extern crate failure;
 extern crate random_access_disk;
 extern crate random_access_storage;
+use crate::eyros::TakeBytes;
 
 #[path="../ensure.rs"]
 #[macro_use] mod ensure;
@@ -147,19 +148,23 @@ where S: RandomAccess<Error=Error>, U: (Fn(&str) -> Result<S,Error>) {
   let bf = db.fields.branch_factor;
   let n = bf*2-3;
 
-  let psize = P::pivot_size_at(depth % P::dim());
-  let p_start = 0;
-  let d_start = p_start + n*psize;
+  let mut offset = 0;
+  let mut str_pivots = vec![];
+  for _i in 0..n {
+    let size = P::take_bytes(&buf[offset..])?;
+    str_pivots.push(P::format_at(
+      &db.bincode,
+      &buf[offset..offset+size],
+      depth
+    )?);
+    offset += size;
+  }
+  let d_start = offset;
   let i_start = d_start + (n+bf+7)/8;
   let b_start = i_start + n*size_of::<u64>();
   let b_end = b_start+bf*size_of::<u64>();
   assert_eq!(b_end, buf.len(), "unexpected block length");
 
-  let mut str_pivots = vec![];
-  for i in 0..n {
-    let pbuf = &buf[p_start+i*psize..p_start+(i+1)*psize];
-    str_pivots.push(P::format_at(&db.bincode, pbuf, depth)?);
-  }
   let intersecting: Vec<(bool,u64)> = (0..n).map(|i| {
     let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
     let i_offset = i_start + i*8;

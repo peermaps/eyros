@@ -112,12 +112,16 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     self.offset = alloc(self.bytes());
   }
   fn bytes (&self) -> usize {
-    let n = self.pivots.len();
-    let bf = (n+3)/2;
-    4 // len
-      + n*P::pivot_size_at(self.level % P::dim()) // P
-      + (n+bf+7)/8 // D
-      + (n+bf)*size_of::<u64>() // I+B
+    let mut pivot_size = 0;
+    let bf = self.branch_factor;
+    let n = order_len(bf);
+    for p in self.pivots.iter() {
+      pivot_size += p.pivot_bytes_at(self.level % P::dim());
+    }
+    let bitfield_size = (n + bf + 7) / 8;
+    let intersect_size = n*size_of::<u64>();
+    let bucket_size = bf*size_of::<u64>();
+    4 + pivot_size + bitfield_size + intersect_size + bucket_size
   }
   pub fn build (&mut self, alloc: &mut dyn FnMut (usize) -> u64)
   -> Result<(Vec<u8>,Vec<Node<D,P,V>>),Error> {
@@ -186,10 +190,10 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     }
     ensure_eq!(nodes.len(), n+bf, "incorrect number of nodes");
     ensure_eq!(self.pivots.len(), n, "incorrect number of pivots");
-    let len = self.bytes();
-    let mut data: Vec<u8> = Vec::with_capacity(len);
+    // TODO: pre-calculate the expected size
+    let mut data: Vec<u8> = vec![];
     // length
-    data.extend_from_slice(&(len as u32).to_be_bytes());
+    data.extend_from_slice(&0u32.to_be_bytes());
     // pivots
     for pivot in self.pivots.iter() {
       data.extend(pivot.serialize_at(&self.bincode, self.level % P::dim())?);
@@ -210,7 +214,8 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         Node::Empty => 0u64
       }).to_be_bytes());
     }
-    ensure_eq!(data.len(), len, "incorrect data length");
+    let len = data.len() as u32;
+    data[0..4].copy_from_slice(&len.to_be_bytes());
     Ok((data,nodes))
   }
 }
