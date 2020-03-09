@@ -1,8 +1,9 @@
-use eyros::{DB,Row,Point,TakeBytes};
+use eyros::{DB,Row,Point,TakeBytes,Cursor,Block,order,order_len};
 use rand::random;
 use failure::{Error,bail};
 use random_access_disk::RandomAccessDisk;
 use std::path::PathBuf;
+use std::mem::size_of;
 
 use serde::{Serialize,Deserialize};
 use std::cmp::Ordering;
@@ -80,11 +81,6 @@ impl Point for P {
     match order { Some(x) => x, None => Ordering::Less }
   }
 
-  fn cmp_buf (bincode: &bincode::Config, buf: &[u8], bbox: &Self::Bounds,
-  level: usize)-> Result<(bool,bool),Error> {
-    unimplemented![]
-  }
-
   fn midpoint_upper (&self, other: &Self) -> Self where Self: Sized {
     match (self, other) {
       (P::Point(x0,y0),P::Point(x1,y1)) => {
@@ -127,8 +123,89 @@ impl Point for P {
     }
   }
 
-  fn pivot_size_at (level: usize) -> usize {
-    unimplemented![]
+  fn query_branch (bcode: &bincode::Config, buf: &[u8],
+  bbox: &Self::Bounds, bf: usize, level: usize)
+  -> Result<(Vec<Cursor>,Vec<Block>),Error> {
+    let mut cursors = vec![];
+    let mut blocks = vec![];
+    let n = order_len(bf);
+    let mut pivots: Vec<f32> = Vec::with_capacity(n);
+    let mut offset = 0;
+    for _i in 0..n {
+      let size = size_of::<f32>();
+      pivots.push(bcode.deserialize(&buf[offset..offset+size])?);
+      offset += size;
+    }
+    let d_start = offset; // data bitfield
+    let i_start = d_start + (n+bf+7)/8; // intersections
+    let b_start = i_start + n*size_of::<u64>(); // buckets
+    let b_end = b_start+bf*size_of::<u64>();
+    //ensure_eq!(b_end, buf.len(), "unexpected block length");
+
+    let mut bcursors = vec![0];
+    let mut bitfield: Vec<bool> = vec![false;bf]; // which buckets
+    while !bcursors.is_empty() {
+      let c = bcursors.pop().unwrap();
+      let i = order(bf, c);
+      let cmp = {
+        let pivot = pivots[i];
+        match level % Self::dim() {
+          0 => ((bbox.0).0 <= pivot, pivot <= (bbox.1).0),
+          1 => ((bbox.0).1 <= pivot, pivot <= (bbox.1).1),
+          _ => panic!["dimension not expected"]
+        }
+      };
+      let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
+      let i_offset = i_start + i*8;
+      // intersection:
+      let offset = u64::from_be_bytes([
+        buf[i_offset+0], buf[i_offset+1],
+        buf[i_offset+2], buf[i_offset+3],
+        buf[i_offset+4], buf[i_offset+5],
+        buf[i_offset+6], buf[i_offset+7],
+      ]);
+      if is_data && offset > 0 {
+        blocks.push(offset-1);
+      } else if offset > 0 {
+        cursors.push((offset-1,level+1));
+      }
+      // internal branches:
+      if cmp.0 && c*2+1 < n { // left internal
+        bcursors.push(c*2+1);
+      } else if cmp.0 { // left branch
+        bitfield[i/2] = true;
+      }
+      if cmp.1 && c*2+2 < n { // right internal
+        bcursors.push(c*2+2);
+      } else if cmp.1 { // right branch
+        bitfield[i/2+1] = true;
+      }
+    }
+    for (i,b) in bitfield.iter().enumerate() {
+      if !b { continue }
+      let j = i+n;
+      let is_data = (buf[d_start+j/8]>>(j%8))&1 == 1;
+      let offset = u64::from_be_bytes([
+        buf[b_start+i*8+0], buf[b_start+i*8+1],
+        buf[b_start+i*8+2], buf[b_start+i*8+3],
+        buf[b_start+i*8+4], buf[b_start+i*8+5],
+        buf[b_start+i*8+6], buf[b_start+i*8+7]
+      ]);
+      if offset > 0 && is_data {
+        blocks.push(offset-1);
+      } else if offset > 0 {
+        cursors.push((offset-1,level+1));
+      }
+    }
+    Ok((cursors,blocks))
+  }
+
+  fn pivot_bytes_at (&self, level: usize) -> usize {
+    size_of::<f32>()
+  }
+
+  fn take_bytes_at (buf: &[u8], _level: usize) -> Result<usize,Error> {
+    f32::take_bytes(buf)
   }
 
   fn bounds (points: &Vec<Self>) -> Option<Self::Bounds> {

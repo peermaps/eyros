@@ -125,12 +125,13 @@ mod take_bytes;
 pub use crate::setup::{Setup,SetupFields};
 use crate::staging::{Staging,StagingIterator};
 use crate::planner::plan;
-pub use crate::point::{Point,Scalar};
+pub use crate::point::{Point,Scalar,Cursor,Block};
 #[doc(hidden)] pub use crate::tree::{Tree,TreeIterator,TreeOpts};
 #[doc(hidden)] pub use crate::branch::Branch;
 #[doc(hidden)] pub use crate::data::{DataStore,DataRange};
 pub use crate::take_bytes::TakeBytes;
 use crate::meta::Meta;
+pub use order::{order,order_len};
 
 use random_access_storage::RandomAccess;
 use failure::{Error,format_err};
