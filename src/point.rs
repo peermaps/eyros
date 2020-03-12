@@ -55,8 +55,14 @@ pub trait Point: Copy+Clone+Debug+TakeBytes+Serialize+DeserializeOwned {
   /// the tree depth `level`.
   fn pivot_bytes_at (&self, level: usize) -> usize;
 
+  /// Calculate the number of bytes to read from `buf` for the tree depth
+  /// `level`.
   fn take_bytes_at (buf: &[u8], level: usize) -> Result<usize,Error>;
 
+  /// Return a set of `(branch_offset,tree_depth)` tuples (`Cursors`) for
+  /// sub-branches to load next and a set of `u64` (`Blocks`) to read data from
+  /// according to a traversal of the branch data in `buf` at the tree depth
+  /// `level` and subject to the bounds given in `bbox`.
   fn query_branch (bincode: &bincode::Config, buf: &[u8],
     bbox: &Self::Bounds, branch_factor: usize, level: usize)
     -> Result<(Vec<Cursor>,Vec<Block>),Error>;
