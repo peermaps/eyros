@@ -1,18 +1,30 @@
 use eyros::{DB,Row,Point,TakeBytes,Cursor,Block,order,order_len};
-use rand::random;
+use random::{Source,default as rand};
 use failure::{Error,bail};
 use random_access_disk::RandomAccessDisk;
-use std::path::PathBuf;
 use std::mem::size_of;
+use tempfile::Builder as Tmpfile;
 
 use serde::{Serialize,Deserialize};
-use std::cmp::Ordering;
+use std::cmp::{Ordering,PartialOrd};
 use std::f32;
 
 #[derive(Serialize,Deserialize,Copy,Clone,Debug)]
 enum P {
   Point(f32,f32),
   Interval((f32,f32),(f32,f32))
+}
+type V = u32;
+
+impl PartialEq for P {
+  fn eq (&self, other: &Self) -> bool {
+    match (self,other) {
+      (P::Point(x0,y0), P::Point(x1,y1)) => x0 == x1 && y0 == y1,
+      (P::Point(_,_), P::Interval(_,_)) => false,
+      (P::Interval(_,_), P::Point(_,_)) => false,
+      (P::Interval(x0,y0), P::Interval(x1,y1)) => x0 == x1 && y0 == y1
+    }
+  }
 }
 
 impl TakeBytes for P {
@@ -117,7 +129,7 @@ impl Point for P {
       P::Point(x,y) =>
         (bbox.0).0 <= *x && *x <= (bbox.1).0
         && (bbox.0).1 <= *y && *y <= (bbox.1).1,
-      P::Interval((x0,x1),(y0,y1)) =>
+      P::Interval((x0,x1),(y0,y1)) => 
         (bbox.0).0 <= *x1 && *x0 <= (bbox.1).0
         && (bbox.0).1 <= *y1 && *y0 <= (bbox.1).1,
     }
@@ -234,36 +246,99 @@ impl Point for P {
   }
 }
 
-type V = u32;
-
-fn main() -> Result<(),Error> {
-  let mut db: DB<_,_,P,V> = DB::open(storage)?;
-  let batch: Vec<Row<P,V>> = (0..1_000).map(|_| {
-    if random::<f32>() > 0.5 {
-      let xmin: f32 = random::<f32>()*2.0-1.0;
-      let xmax: f32 = xmin + random::<f32>().powf(64.0)*(1.0-xmin);
-      let ymin: f32 = random::<f32>()*2.0-1.0;
-      let ymax: f32 = ymin + random::<f32>().powf(64.0)*(1.0-ymin);
-      Row::Insert(P::Interval((xmin,xmax),(ymin,ymax)), random::<u32>())
-    } else {
-      let x: f32 = random::<f32>()*2.0-1.0;
-      let y: f32 = random::<f32>()*2.0-1.0;
-      Row::Insert(P::Point(x,y), random::<u32>())
+#[test]
+fn mix() -> Result<(),Error> {
+  let dir = Tmpfile::new().prefix("eyros").tempdir()?;
+  let mut db: DB<_,_,P,V> = DB::open(
+    |name: &str| -> Result<RandomAccessDisk,Error> {
+      let p = dir.path().join(name);
+      Ok(RandomAccessDisk::builder(p)
+        .auto_sync(false)
+        .build()?)
     }
-  }).collect();
-  db.batch(&batch)?;
-
-  let bbox = ((-0.5,-0.8),(0.3,-0.5));
-  for result in db.query(&bbox)? {
-    println!("{:?}", result?);
+  )?;
+  let mut inserted: Vec<(P,V)> = vec![];
+  let mut r = rand().seed([13,12]);
+  for _n in 0..50 {
+    let batch: Vec<Row<P,V>> = (0..1_000).map(|_| {
+      let (point,value) = {
+        if r.read::<f32>() > 0.5 {
+          let xmin: f32 = r.read::<f32>()*2.0-1.0;
+          let xmax: f32 = xmin + r.read::<f32>().powf(2.0)*(1.0-xmin);
+          let ymin: f32 = r.read::<f32>()*2.0-1.0;
+          let ymax: f32 = ymin + r.read::<f32>().powf(2.0)*(1.0-ymin);
+          (P::Interval((xmin,xmax),(ymin,ymax)), r.read::<u32>())
+        } else {
+          let x: f32 = r.read::<f32>()*2.0-1.0;
+          let y: f32 = r.read::<f32>()*2.0-1.0;
+          (P::Point(x,y), r.read::<u32>())
+        }
+      };
+      inserted.push((point,value));
+      Row::Insert(point,value)
+    }).collect();
+    db.batch(&batch)?;
   }
+  let bbox = ((-0.5,-0.8),(0.3,-0.5));
+  let mut expected: Vec<(P,V)> = inserted.iter()
+    .filter(|(p,_v)| { contains(p, &bbox) })
+    .map(|(p,v)| (*p,*v))
+    .collect();
+  let mut results = vec![];
+  for result in db.query(&bbox)? {
+    let r = result?;
+    results.push((r.0,r.1));
+  }
+  results.sort_unstable_by(cmp);
+  expected.sort_unstable_by(cmp);
+  assert_eq![results.len(), expected.len(), "expected number of results"];
+  assert_eq![results, expected, "incorrect results"];
   Ok(())
 }
 
-fn storage(name:&str) -> Result<RandomAccessDisk,Error> {
-  let mut p = PathBuf::from("/tmp/eyros-db/");
-  p.push(name);
-  Ok(RandomAccessDisk::builder(p)
-    .auto_sync(false)
-    .build()?)
+fn contains (point: &P, bbox: &<P as Point>::Bounds) -> bool {
+  match point {
+    P::Point(x,y) => {
+      contains_pt((bbox.0).0, (bbox.1).0, *x)
+      && contains_pt((bbox.0).1, (bbox.1).1, *y)
+    },
+    P::Interval(x,y) => {
+      contains_iv((bbox.0).0, (bbox.1).0, *x)
+      && contains_iv((bbox.0).1, (bbox.1).1, *y)
+    },
+  }
+}
+
+fn contains_iv<T> (min: T, max: T, iv: (T,T)) -> bool where T: PartialOrd {
+  min <= iv.1 && iv.0 <= max
+}
+fn contains_pt<T> (min: T, max: T, pt: T) -> bool where T: PartialOrd {
+  min <= pt && pt <= max
+}
+
+fn cmp (a: &(P,V), b: &(P,V)) -> Ordering {
+  match (a.0,b.0) {
+    (P::Point(x0,y0), P::Point(x1,y1)) => {
+      match x0.partial_cmp(&x1) {
+        Some(Ordering::Equal) => match y0.partial_cmp(&y1) {
+          Some(x) => x,
+          None => panic!["comparison failed"],
+        },
+        Some(x) => x,
+        None => panic!["comparison failed"],
+      }
+    },
+    (P::Interval(x0,y0), P::Interval(x1,y1)) => {
+      match x0.partial_cmp(&x1) {
+        Some(Ordering::Equal) => match y0.partial_cmp(&y1) {
+          Some(x) => x,
+          None => panic!["comparison failed"],
+        },
+        Some(x) => x,
+        None => panic!["comparison failed"],
+      }
+    },
+    (P::Point(_,_), P::Interval(_,_)) => { Ordering::Less },
+    (P::Interval(_,_), P::Point(_,_)) => { Ordering::Greater },
+  }
 }
