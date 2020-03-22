@@ -1,11 +1,11 @@
 use crate::{Point,Value,Location,read_block::read_block};
-use crate::take_bytes::TakeBytes;
 use random_access_storage::RandomAccess;
 use failure::{Error,ensure,bail};
 use std::rc::Rc;
 use std::cell::RefCell;
 use lru::LruCache;
 use std::collections::HashMap;
+use desert::{FromBytes,ToBytes,CountBytes};
 
 pub trait DataBatch<P,V> where P: Point, V: Value {
   fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error>;
@@ -50,8 +50,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   store: S,
   range: DataRange<S,P>,
   list_cache: LruCache<u64,Vec<(P,V,Location)>>,
-  pub max_data_size: usize,
-  pub bincode: Rc<bincode::Config>
+  pub max_data_size: usize
 }
 
 impl<S,P,V> DataBatch<P,V> for DataStore<S,P,V>
@@ -65,7 +64,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       data[6+i/8] |= 1<<(i%8);
     }
     for row in rows.iter() {
-      let buf = self.bincode.serialize(row)?;
+      let buf = row.to_bytes()?;
       data.extend(buf);
     }
     let len = data.len() as u32;
@@ -84,17 +83,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 impl<S,P,V> DataStore<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (store: S, range_store: S,
-  max_data_size: usize, bbox_cache_size: usize,
-  list_cache_size: usize, bincode: Rc<bincode::Config>) -> Result<Self,Error> {
+  pub fn open (store: S, range_store: S, max_data_size: usize,
+  bbox_cache_size: usize, list_cache_size: usize) -> Result<Self,Error> {
     Ok(Self {
       store,
-      range: DataRange::new(
-        range_store, bbox_cache_size, Rc::clone(&bincode)
-      ),
+      range: DataRange::new(range_store, bbox_cache_size),
       list_cache: LruCache::new(list_cache_size),
-      max_data_size,
-      bincode
+      max_data_size
     })
   }
   pub fn commit (&mut self) -> Result<(),Error> {
@@ -120,7 +115,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     self.list_cache.put(offset, rows);
     Ok(self.list_cache.peek(&offset).unwrap().to_vec())
   }
-  pub fn parse (&self, buf: &Vec<u8>) -> Result<Vec<(P,V,usize)>,Error> {
+  pub fn parse (&self, buf: &Vec<u8>) -> Result<Vec<(P,V,u32)>,Error> {
     let mut results = vec![];
     let mut offset = 0;
     let bitfield_len = u16::from_be_bytes([buf[0],buf[1]]) as usize;
@@ -129,14 +124,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     offset += bitfield_len;
     let mut index = 0;
     while offset < buf.len() {
-      let psize = P::take_bytes(&buf[offset..])?;
-      let vsize = V::take_bytes(&buf[offset+psize..])?;
-      let n = psize + vsize;
       if ((bitfield[index/8]>>(index%8))&1) == 1 {
-        let pv: (P,V) = self.bincode.deserialize(&buf[offset..offset+n])?;
-        results.push((pv.0,pv.1,index));
+        let (size,pv) = <(P,V)>::from_bytes(&buf[offset..])?;
+        results.push((pv.0,pv.1,index as u32));
+        offset += size;
+      } else {
+        offset += <(P,V)>::count_from_bytes(&buf[offset..])?;
       }
-      offset += n;
       index += 1;
     }
     Ok(results)
@@ -148,7 +142,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   // todo: replace() similar to delete but with an additional array of
   // replacement candidates
   pub fn delete (&mut self, locations: &Vec<Location>) -> Result<(),Error> {
-    let mut by_block: HashMap<u64,Vec<usize>> = HashMap::new();
+    let mut by_block: HashMap<u64,Vec<u32>> = HashMap::new();
     for (block,index) in locations {
       if *block == 0 { continue } // staging block
       match by_block.get_mut(&(*block-1)) {
@@ -169,10 +163,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       ensure![len <= self.store.len()?-block,
         "index length past the end of the block"];
       let mut header = self.store.read(*block, len)?;
-      let block_size = u32::from_be_bytes(
-        [header[0],header[1],header[2],header[3]]
-      ) as u64;
-      let bitfield_len = u16::from_be_bytes([header[4],header[5]]);
+      let block_size = u32::from_bytes(&header[0..])?.1 as u64;
+      let bitfield_len = u16::from_bytes(&header[4..])?.1;
       ensure![len <= (bitfield_len as u64) + 6,
         "read length {} from index {} past expected bitfield length {} \
         for block size {} at offset {}",
@@ -180,7 +172,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       ];
       ensure![len <= block_size, "data block is too small"];
       for index in indexes.iter() {
-        header[6+index/8] &= 0xff - (1<<(index%8));
+        let i = *index as usize;
+        header[6+i/8] &= 0xff - (1<<(i%8));
       }
       self.store.write(block+6, &header[6..])?;
       match self.list_cache.get_mut(block) {
@@ -218,22 +211,20 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 pub struct DataRange<S,P>
 where S: RandomAccess<Error=Error>, P: Point {
   pub store: S,
-  pub cache: LruCache<u64,(P::Bounds,u64)>,
-  bincode: Rc<bincode::Config>
+  pub cache: LruCache<u64,(P::Bounds,u64)>
 }
 
 impl<S,P> DataRange<S,P>
 where S: RandomAccess<Error=Error>, P: Point {
-  pub fn new (store: S, cache_size: usize, bincode: Rc<bincode::Config>) -> Self {
+  pub fn new (store: S, cache_size: usize) -> Self {
     Self {
       store,
-      bincode,
       cache: LruCache::new(cache_size)
     }
   }
   pub fn write (&mut self, b: &(u64,P::Range,u64)) -> Result<(),Error> {
     let offset = self.store.len()?;
-    let data: Vec<u8> = self.bincode.serialize(b)?;
+    let data = b.to_bytes()?;
     self.store.write(offset, &data)
   }
   pub fn list (&mut self) -> Result<Vec<(u64,P,u64)>,Error> {
@@ -243,9 +234,9 @@ where S: RandomAccess<Error=Error>, P: Point {
     let mut offset = 0usize;
     let mut results: Vec<(u64,P,u64)> = vec![];
     while (offset as u64) < len {
-      let n = <Vec<u8>>::take_bytes(&buf[offset..])?;
-      results.push(self.bincode.deserialize(&buf[offset..offset+n])?);
-      offset += n;
+      let (size, result) = <(u64,P,u64)>::from_bytes(&buf[offset..])?;
+      results.push(result);
+      offset += size;
     }
     Ok(results)
   }

@@ -1,7 +1,6 @@
 use eyros::DB;
 use failure::Error;
 use std::path::PathBuf;
-use std::rc::Rc;
 use random_access_disk::RandomAccessDisk;
 
 type S = RandomAccessDisk;
@@ -34,8 +33,7 @@ fn main() -> Result<(),Error> {
         RandomAccessDisk::open(bfile)?,
         db.fields.max_data_size,
         db.fields.bbox_cache_size,
-        db.fields.data_list_cache_size,
-        Rc::clone(&db.bincode)
+        db.fields.data_list_cache_size
       )?);
     }
     res

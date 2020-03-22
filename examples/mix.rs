@@ -1,27 +1,115 @@
-use eyros::{DB,Row,Point,TakeBytes,Cursor,Block,order,order_len};
+use eyros::{DB,Row,Point,Cursor,Block,order,order_len};
 use rand::random;
 use failure::{Error,bail};
 use random_access_disk::RandomAccessDisk;
 use std::path::PathBuf;
 use std::mem::size_of;
 
-use serde::{Serialize,Deserialize};
+use desert::{FromBytes,ToBytes,CountBytes};
 use std::cmp::Ordering;
 use std::f32;
 
-#[derive(Serialize,Deserialize,Copy,Clone,Debug)]
+#[derive(Copy,Clone,Debug)]
 enum P {
   Point(f32,f32),
   Interval((f32,f32),(f32,f32))
 }
+type V = u32;
 
-impl TakeBytes for P {
-  fn take_bytes (buf: &[u8]) -> Result<usize,Error> {
-    if buf.len() < 4 { bail!["buffer slice too small"] }
-    Ok(match u32::from_be_bytes([ buf[0], buf[1], buf[2], buf[3] ]) {
-      0 => 4 + 4*2, // point
-      1 => 4 + 4*4, // interval
-      t@_ => bail!["unexpected enum type {}", t]
+fn main() -> Result<(),Error> {
+  let mut db: DB<_,_,P,V> = DB::open(storage)?;
+  let batch: Vec<Row<P,V>> = (0..1_000).map(|_| {
+    if random::<f32>() > 0.5 {
+      let xmin: f32 = random::<f32>()*2.0-1.0;
+      let xmax: f32 = xmin + random::<f32>().powf(64.0)*(1.0-xmin);
+      let ymin: f32 = random::<f32>()*2.0-1.0;
+      let ymax: f32 = ymin + random::<f32>().powf(64.0)*(1.0-ymin);
+      Row::Insert(P::Interval((xmin,xmax),(ymin,ymax)), random::<u32>())
+    } else {
+      let x: f32 = random::<f32>()*2.0-1.0;
+      let y: f32 = random::<f32>()*2.0-1.0;
+      Row::Insert(P::Point(x,y), random::<u32>())
+    }
+  }).collect();
+  db.batch(&batch)?;
+
+  let bbox = ((-0.5,-0.8),(0.3,-0.5));
+  for result in db.query(&bbox)? {
+    println!("{:?}", result?);
+  }
+  Ok(())
+}
+
+fn storage(name:&str) -> Result<RandomAccessDisk,Error> {
+  let mut p = PathBuf::from("/tmp/eyros-db/");
+  p.push(name);
+  Ok(RandomAccessDisk::builder(p)
+    .auto_sync(false)
+    .build()?)
+}
+
+impl ToBytes for P {
+  fn to_bytes(&self) -> Result<Vec<u8>,Error> {
+    let count = self.count_bytes();
+    let mut bytes = vec![0u8;count];
+    let size = self.write_bytes(&mut bytes)?;
+    if size != count { bail!["unexpected size while writing into buffer"] }
+    Ok(bytes)
+  }
+  fn write_bytes(&self, dst: &mut [u8]) -> Result<usize,Error> {
+    if dst.len() < 1+4+4 { bail!["dst buffer too small"] }
+    match self {
+      P::Point(x,y) => {
+        dst[0] = 0;
+        let size = (*x,*y).write_bytes(&mut dst[1..])?;
+        Ok(1+size)
+      },
+      P::Interval(x,y) => {
+        dst[0] = 1;
+        let size = (*x,*y).write_bytes(&mut dst[1..])?;
+        Ok(1+size)
+      }
+    }
+  }
+}
+
+impl FromBytes for P {
+  fn from_bytes(src: &[u8]) -> Result<(usize,Self),Error> {
+    if src.len() < 1+4+4 {
+      bail!["buffer too small while loading from bytes"]
+    }
+    Ok(match src[0] {
+      0 => {
+        let (size,(x,y)) = <(f32,f32)>::from_bytes(&src[1..])?;
+        (1+size, P::Point(x,y))
+      },
+      1 => {
+        let (size,(x,y)) = <((f32,f32),(f32,f32))>::from_bytes(&src[1..])?;
+        (1+size, P::Interval(x,y))
+      }
+      v@_ => bail!["unexpected enum value: {}", v]
+    })
+  }
+}
+
+impl CountBytes for P {
+  fn count_bytes(&self) -> usize {
+    match self {
+      P::Point(_,_) => 1+4*2,
+      P::Interval(_,_) => 1+4*4,
+    }
+  }
+  fn count_from_bytes(buf: &[u8]) -> Result<usize,Error> {
+    if buf.len() < 1+4+4 { bail!["buffer too small for type in count"] }
+    Ok(match buf[0] {
+      0 => 1+4*2,
+      1 => {
+        if buf.len() < 1+4*4 {
+          bail!["buffer is too small for interval type in count"]
+        }
+        1+4*4
+      },
+      v@_ => bail!["unexpected enum value: {}", v]
     })
   }
 }
@@ -98,13 +186,12 @@ impl Point for P {
     }
   }
 
-  fn serialize_at (&self, bincode: &bincode::Config, level: usize)
-  -> Result<Vec<u8>,Error> {
+  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
     let buf: Vec<u8> = match (level % Self::dim(), self) {
-      (0,P::Point(x,_)) => bincode.serialize(&x)?,
-      (0,P::Interval((_,x),_)) => bincode.serialize(&x)?,
-      (1,P::Point(_,y)) => bincode.serialize(&y)?,
-      (1,P::Interval(_,(_,y))) => bincode.serialize(&y)?,
+      (0,P::Point(x,_)) => x.to_bytes()?,
+      (0,P::Interval((_,x),_)) => x.to_bytes()?,
+      (1,P::Point(_,y)) => y.to_bytes()?,
+      (1,P::Interval(_,(_,y))) => y.to_bytes()?,
       _ => panic!["match case beyond dimension"]
     };
     Ok(buf)
@@ -123,8 +210,7 @@ impl Point for P {
     }
   }
 
-  fn query_branch (bcode: &bincode::Config, buf: &[u8],
-  bbox: &Self::Bounds, bf: usize, level: usize)
+  fn query_branch (buf: &[u8], bbox: &Self::Bounds, bf: usize, level: usize)
   -> Result<(Vec<Cursor>,Vec<Block>),Error> {
     let mut cursors = vec![];
     let mut blocks = vec![];
@@ -132,8 +218,8 @@ impl Point for P {
     let mut pivots: Vec<f32> = Vec::with_capacity(n);
     let mut offset = 0;
     for _i in 0..n {
-      let size = size_of::<f32>();
-      pivots.push(bcode.deserialize(&buf[offset..offset+size])?);
+      let (size,pivot) = f32::from_bytes(&buf[offset..])?;
+      pivots.push(pivot);
       offset += size;
     }
     let d_start = offset; // data bitfield
@@ -198,12 +284,10 @@ impl Point for P {
     Ok((cursors,blocks))
   }
 
-  fn pivot_bytes_at (&self, _level: usize) -> usize {
-    size_of::<f32>()
-  }
+  fn pivot_bytes_at (&self, _level: usize) -> usize { 4 }
 
-  fn take_bytes_at (buf: &[u8], _level: usize) -> Result<usize,Error> {
-    f32::take_bytes(buf)
+  fn count_bytes_at (_buf: &[u8], _level: usize) -> Result<usize,Error> {
+    Ok(4)
   }
 
   fn bounds (points: &Vec<Self>) -> Option<Self::Bounds> {
@@ -228,42 +312,8 @@ impl Point for P {
     (((bbox.0).0,(bbox.1).0),((bbox.0).1,(bbox.1).1))
   }
 
-  fn format_at (_bincode: &bincode::Config, _buf: &[u8], _level: usize)
+  fn format_at (_buf: &[u8], _level: usize)
   -> Result<String,Error> {
     unimplemented![]
   }
-}
-
-type V = u32;
-
-fn main() -> Result<(),Error> {
-  let mut db: DB<_,_,P,V> = DB::open(storage)?;
-  let batch: Vec<Row<P,V>> = (0..1_000).map(|_| {
-    if random::<f32>() > 0.5 {
-      let xmin: f32 = random::<f32>()*2.0-1.0;
-      let xmax: f32 = xmin + random::<f32>().powf(64.0)*(1.0-xmin);
-      let ymin: f32 = random::<f32>()*2.0-1.0;
-      let ymax: f32 = ymin + random::<f32>().powf(64.0)*(1.0-ymin);
-      Row::Insert(P::Interval((xmin,xmax),(ymin,ymax)), random::<u32>())
-    } else {
-      let x: f32 = random::<f32>()*2.0-1.0;
-      let y: f32 = random::<f32>()*2.0-1.0;
-      Row::Insert(P::Point(x,y), random::<u32>())
-    }
-  }).collect();
-  db.batch(&batch)?;
-
-  let bbox = ((-0.5,-0.8),(0.3,-0.5));
-  for result in db.query(&bbox)? {
-    println!("{:?}", result?);
-  }
-  Ok(())
-}
-
-fn storage(name:&str) -> Result<RandomAccessDisk,Error> {
-  let mut p = PathBuf::from("/tmp/eyros-db/");
-  p.push(name);
-  Ok(RandomAccessDisk::builder(p)
-    .auto_sync(false)
-    .build()?)
 }

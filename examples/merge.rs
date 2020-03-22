@@ -1,7 +1,6 @@
 use eyros::{DB,Row};
 use failure::Error;
 use std::path::PathBuf;
-use std::rc::Rc;
 use random_access_disk::RandomAccessDisk;
 
 type P = ((f32,f32),(f32,f32));
@@ -25,8 +24,7 @@ fn main() -> Result<(),Error> {
       RandomAccessDisk::builder(bfile)
         .auto_sync(false)
         .build()?,
-      0,
-      Rc::clone(&db.bincode)
+      0
     );
     // TODO: incorporate len field and pre-set data offsets into Row enum
     let batch: Vec<Row<P,V>> = ranges.list()?.iter().map(|(offset,range,_len)| {

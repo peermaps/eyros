@@ -2,7 +2,7 @@ extern crate eyros;
 extern crate failure;
 extern crate random_access_disk;
 extern crate random_access_storage;
-use crate::eyros::TakeBytes;
+use desert::CountBytes;
 
 #[path="../ensure.rs"]
 #[macro_use] mod ensure;
@@ -151,9 +151,8 @@ where S: RandomAccess<Error=Error>, U: (Fn(&str) -> Result<S,Error>) {
   let mut offset = 0;
   let mut str_pivots = vec![];
   for _i in 0..n {
-    let size = P::take_bytes(&buf[offset..])?;
+    let size = P::count_from_bytes(&buf[offset..])?;
     str_pivots.push(P::format_at(
-      &db.bincode,
       &buf[offset..offset+size],
       depth
     )?);

@@ -1,11 +1,10 @@
 use std::cmp::Ordering;
 use std::ops::{Div,Add};
 use failure::{Error,format_err};
-use serde::{Serialize,de::DeserializeOwned};
 use std::fmt::Debug;
 use std::mem::size_of;
-use crate::take_bytes::TakeBytes;
 use crate::order;
+use desert::{ToBytes,FromBytes,CountBytes};
 
 /// Points (scalar or interval) must implement these methods.
 /// There's a lot going on here, so you'll most likely want to use one of the
@@ -21,12 +20,12 @@ use crate::order;
 pub type Cursor = (u64,usize);
 pub type Block = u64;
 
-pub trait Point: Copy+Clone+Debug+TakeBytes+Serialize+DeserializeOwned {
+pub trait Point: Copy+Clone+Debug+ToBytes+FromBytes+CountBytes {
   /// Bounding-box corresponding to `(min,max)` as used by `db.query(bbox)`.
-  type Bounds: Copy+Clone+Debug+Serialize+DeserializeOwned;
+  type Bounds: Copy+Clone+Debug+ToBytes+FromBytes+CountBytes;
 
   /// Range corresponding to `((minX,maxX),(minY,maxY),...)`
-  type Range: Point+Copy+Clone+Debug+Serialize+DeserializeOwned;
+  type Range: Point+Copy+Clone+Debug+ToBytes+FromBytes+CountBytes;
 
   /// Compare elements at a level of tree depth. The dimension under
   /// consideration alternates each level, so you'll likely want the element
@@ -42,8 +41,7 @@ pub trait Point: Copy+Clone+Debug+TakeBytes+Serialize+DeserializeOwned {
   /// Return the byte presentation for the element corresponding to the tree
   /// depth `level` for the purpose of making a pivot. If you have an interval
   /// type, return the upper bound.
-  fn serialize_at (&self, bincode: &bincode::Config, level: usize)
-    -> Result<Vec<u8>,Error>;
+  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error>;
 
   /// Get the number of dimensions for this point type.
   fn dim () -> usize;
@@ -57,15 +55,14 @@ pub trait Point: Copy+Clone+Debug+TakeBytes+Serialize+DeserializeOwned {
 
   /// Calculate the number of bytes to read from `buf` for the tree depth
   /// `level`.
-  fn take_bytes_at (buf: &[u8], level: usize) -> Result<usize,Error>;
+  fn count_bytes_at (buf: &[u8], level: usize) -> Result<usize,Error>;
 
   /// Return a set of `(branch_offset,tree_depth)` tuples (`Cursors`) for
   /// sub-branches to load next and a set of `u64` (`Blocks`) to read data from
   /// according to a traversal of the branch data in `buf` at the tree depth
   /// `level` and subject to the bounds given in `bbox`.
-  fn query_branch (bincode: &bincode::Config, buf: &[u8],
-    bbox: &Self::Bounds, branch_factor: usize, level: usize)
-    -> Result<(Vec<Cursor>,Vec<Block>),Error>;
+  fn query_branch (buf: &[u8], bbox: &Self::Bounds, branch_factor: usize,
+    level: usize) -> Result<(Vec<Cursor>,Vec<Block>),Error>;
 
   /// Return a bounding box for a set of coordinates, if possible.
   fn bounds (coords: &Vec<Self>) -> Option<Self::Bounds>;
@@ -82,14 +79,14 @@ pub trait Point: Copy+Clone+Debug+TakeBytes+Serialize+DeserializeOwned {
 
   /// Return a string representation of the element in a buffer slice
   /// corresponding to the tree depth level.
-  fn format_at (bincode: &bincode::Config, buf: &[u8], level: usize)
+  fn format_at (buf: &[u8], level: usize)
     -> Result<String,Error>;
 }
 
-pub trait Num<T>: PartialOrd+Copy+Serialize+DeserializeOwned
-+TakeBytes+Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
-impl<T> Num<T> for T where T: PartialOrd+Copy+Serialize+DeserializeOwned
-+TakeBytes+Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
+pub trait Num<T>: PartialOrd+Copy+ToBytes+FromBytes+CountBytes
+  +Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
+impl<T> Num<T> for T where T: PartialOrd+Copy+ToBytes+FromBytes+CountBytes
+  +Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
 
 /// Types representing a single value (as opposed to an interval, which has
 /// minimum and maximum values).
@@ -202,10 +199,9 @@ macro_rules! impl_point {
           Coord::midpoint_upper(&self.$i, &other.$i)
         ),+)
       }
-      fn serialize_at (&self, bincode: &bincode::Config, level: usize)
-      -> Result<Vec<u8>,Error> {
+      fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
         let buf: Vec<u8> = match level%Self::dim() {
-          $($i => bincode.serialize(&self.$i.upper())?,)+
+          $($i => self.$i.upper().to_bytes()?,)+
           _ => panic!("match case beyond dimension")
         };
         Ok(buf)
@@ -220,14 +216,13 @@ macro_rules! impl_point {
           _ => panic!("dimension out of bounds")
         }
       }
-      fn take_bytes_at (buf: &[u8], i: usize) -> Result<usize,Error> {
+      fn count_bytes_at (buf: &[u8], i: usize) -> Result<usize,Error> {
         match i % $dim {
-          $($i => $T::take_bytes(buf),)+
+          $($i => $T::count_from_bytes(buf),)+
           _ => panic!("dimension out of bounds")
         }
       }
-      fn query_branch (bcode: &bincode::Config, buf: &[u8],
-      bbox: &Self::Bounds, bf: usize, level: usize)
+      fn query_branch (buf: &[u8], bbox: &Self::Bounds, bf: usize, level: usize)
       -> Result<(Vec<Cursor>,Vec<Block>),Error> {
         let mut cursors = vec![];
         let mut blocks = vec![];
@@ -238,8 +233,8 @@ macro_rules! impl_point {
         for _i in 0..n {
           match level % $dim {
             $($i => {
-              let size = $T::take_bytes(&buf[offset..])?;
-              (pivots.$i).push(bcode.deserialize(&buf[offset..offset+size])?);
+              let (size,x) = $T::from_bytes(&buf[offset..])?;
+              (pivots.$i).push(x);
               offset += size;
             },)+
             _ => panic!["dimension out of bounds"]
@@ -337,11 +332,10 @@ macro_rules! impl_point {
       fn bounds_to_range (bounds: Self::Bounds) -> Self::Range {
         ($(((bounds.0).$i,(bounds.1).$i)),+)
       }
-      fn format_at (bincode: &bincode::Config, buf: &[u8], level: usize)
-      -> Result<String,Error> {
+      fn format_at (buf: &[u8], level: usize) -> Result<String,Error> {
         Ok(match level % Self::dim() {
           $($i => {
-            let p: $T = bincode.deserialize(buf)?;
+            let (_,p) = $T::from_bytes(buf)?;
             format!["{:?}", p]
           }),+
           _ => panic!("match case beyond dimension")

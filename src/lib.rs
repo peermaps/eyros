@@ -120,7 +120,6 @@ mod data;
 mod read_block;
 mod pivots;
 mod write_cache;
-mod take_bytes;
 
 pub use crate::setup::{Setup,SetupFields};
 use crate::staging::{Staging,StagingIterator};
@@ -129,13 +128,12 @@ pub use crate::point::{Point,Scalar,Cursor,Block};
 #[doc(hidden)] pub use crate::tree::{Tree,TreeIterator,TreeOpts};
 #[doc(hidden)] pub use crate::branch::Branch;
 #[doc(hidden)] pub use crate::data::{DataStore,DataRange};
-pub use crate::take_bytes::TakeBytes;
 use crate::meta::Meta;
 pub use order::{order,order_len};
 
 use random_access_storage::RandomAccess;
 use failure::{Error,format_err};
-use serde::{Serialize,de::DeserializeOwned};
+use desert::{ToBytes,FromBytes,CountBytes};
 use std::fmt::Debug;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -149,15 +147,15 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 }
 
 /// Data to use for the payload portion stored at a coordinate.
-pub trait Value: Debug+Clone+TakeBytes+Serialize+DeserializeOwned+'static {}
-impl<T> Value for T where T: Debug+Clone+TakeBytes+Serialize+DeserializeOwned+'static {}
+pub trait Value: Debug+Clone+ToBytes+FromBytes+CountBytes+'static {}
+impl<T> Value for T where T: Debug+Clone+ToBytes+FromBytes+CountBytes+'static {}
 
 /// Stores where a record is stored to avoid additional queries during deletes.
 /// Locations are only valid until the next `batch()`. There is no runtime check
 /// yet to ensure that batches will invalidate existing locations, so you will
 /// need to be careful of this yourself. Otherwise the wrong data could be
 /// deleted.
-pub type Location = (u64,usize);
+pub type Location = (u64,u32);
 
 /// Container to insert or delete data for a `batch()`.
 #[derive(Clone,Debug)]
@@ -176,8 +174,7 @@ P: Point, V: Value {
   pub staging: Staging<S,P,V>,
   pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
   meta: Meta<S>,
-  pub fields: SetupFields,
-  pub bincode: Rc<bincode::Config>
+  pub fields: SetupFields
 }
 
 impl<S,U,P,V> DB<S,U,P,V> where
@@ -274,21 +271,16 @@ P: Point, V: Value {
       (setup.open_store)("staging_inserts")?,
       (setup.open_store)("staging_deletes")?
     )?;
-    let mut bcode = bincode::config();
-    bcode.big_endian();
-    let r_bcode = Rc::new(bcode);
     let data_store = DataStore::open(
       (setup.open_store)("data")?,
       (setup.open_store)("range")?,
       setup.fields.max_data_size,
       setup.fields.bbox_cache_size,
-      setup.fields.data_list_cache_size,
-      Rc::clone(&r_bcode)
+      setup.fields.data_list_cache_size
     )?;
     let mut db = Self {
       open_store: setup.open_store,
       staging,
-      bincode: Rc::clone(&r_bcode),
       data_store: Rc::new(RefCell::new(data_store)),
       meta: meta,
       trees: vec![],
@@ -414,7 +406,6 @@ P: Point, V: Value {
         store,
         index,
         data_store: Rc::clone(&self.data_store),
-        bincode: Rc::clone(&self.bincode),
         branch_factor: self.fields.branch_factor,
         max_data_size: self.fields.max_data_size,
       })?)));

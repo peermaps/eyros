@@ -74,10 +74,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         let mut tree = iwrap![self.tree.try_borrow_mut()];
         iwrap![read_block(&mut tree.store, cursor, self.tree_size, 1024)]
       };
-      let (cursors,blocks) = {
-        let bcode = &iwrap![self.tree.try_borrow()].bincode;
-        iwrap![P::query_branch(bcode, &buf, &self.bbox, bf, depth)]
-      };
+      let (cursors,blocks) = iwrap![
+        P::query_branch(&buf, &self.bbox, bf, depth)
+      ];
       self.blocks.extend(blocks);
       self.cursors.extend(cursors);
     }
@@ -92,7 +91,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub branch_factor: usize,
   pub max_data_size: usize,
   pub index: usize,
-  pub bincode: Rc<bincode::Config>
 }
 
 pub struct Tree<S,P,V>
@@ -104,7 +102,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub bytes: u64,
   pub index: usize,
   max_data_size: usize,
-  bincode: Rc<bincode::Config>
 }
 
 impl<S,P,V> Tree<S,P,V>
@@ -119,7 +116,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       data_merge,
       index: opts.index,
       bytes,
-      bincode: opts.bincode,
       branch_factor: opts.branch_factor,
       max_data_size: opts.max_data_size,
     })
@@ -164,7 +160,6 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       self.index,
       self.max_data_size,
       self.branch_factor,
-      Rc::clone(&self.bincode),
       Rc::clone(&data_store),
       bucket, rows
     )?;
@@ -248,7 +243,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let buf = read_block(&mut self.store, c, tree_size, 1024)?;
       let mut offset = 0;
       for _i in 0..n {
-        offset += P::take_bytes_at(&buf[offset..], depth)?;
+        offset += P::count_bytes_at(&buf[offset..], depth)?;
       }
       let d_start = offset;
       let i_start = d_start + (n+bf+7)/8;

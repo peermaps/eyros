@@ -4,12 +4,13 @@ use random_access_storage::RandomAccess;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::cell::RefCell;
+use desert::{FromBytes,ToBytes};
 
 pub struct StagingIterator<'b,P,V> where P: Point, V: Value {
   inserts: Rc<RefCell<Vec<(P,V)>>>,
   deletes: Rc<RefCell<HashSet<Location>>>,
   bbox: &'b P::Bounds,
-  index: usize
+  index: u32
 }
 
 impl<'b,P,V> StagingIterator<'b,P,V> where P: Point, V: Value {
@@ -24,13 +25,13 @@ where P: Point, V: Value {
   type Item = Result<(P,V,Location),Error>;
   fn next (&mut self) -> Option<Self::Item> {
     let len = iwrap![self.inserts.try_borrow()].len();
-    while self.index < len {
+    while (self.index as usize) < len {
       let i = self.index;
       self.index += 1;
       if iwrap![self.deletes.try_borrow()].contains(&(0,i)) {
         continue;
       }
-      let (point,value) = &iwrap![self.inserts.try_borrow()][i];
+      let (point,value) = &iwrap![self.inserts.try_borrow()][i as usize];
       if point.overlaps(self.bbox) {
         return Some(Ok((*point,value.clone(),(0, i))));
       }
@@ -45,22 +46,18 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   delete_store: WriteCache<S>,
   pub inserts: Rc<RefCell<Vec<(P,V)>>>,
   pub deletes: Rc<RefCell<Vec<Location>>>,
-  pub delete_set: Rc<RefCell<HashSet<Location>>>,
-  bincode: bincode::Config
+  pub delete_set: Rc<RefCell<HashSet<Location>>>
 }
 
 impl<S,P,V> Staging<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn open (istore: S, dstore: S) -> Result<Self,Error> {
-    let mut bcode = bincode::config();
-    bcode.big_endian();
     let mut staging = Self {
       insert_store: WriteCache::open(istore)?,
       delete_store: WriteCache::open(dstore)?,
       inserts: Rc::new(RefCell::new(vec![])),
       deletes: Rc::new(RefCell::new(vec![])),
-      delete_set: Rc::new(RefCell::new(HashSet::new())),
-      bincode: bcode
+      delete_set: Rc::new(RefCell::new(HashSet::new()))
     };
     staging.load()?;
     Ok(staging)
@@ -72,12 +69,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let buf = self.insert_store.read(0, len)?;
       let mut offset = 0;
       while offset < len as usize {
-        let psize = P::take_bytes(&buf[offset..])?;
-        let vsize = V::take_bytes(&buf[offset+psize..])?;
-        let n = psize + vsize;
-        let pv: (P,V) = self.bincode.deserialize(&buf[offset..offset+n])?;
+        let (size,pv) = <(P,V)>::from_bytes(&buf[offset..])?;
         self.inserts.try_borrow_mut()?.push(pv);
-        offset += n;
+        offset += size;
       }
     }
     if !self.delete_store.is_empty()? {
@@ -87,13 +81,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       let buf = self.delete_store.read(0, len)?;
       let mut offset = 0;
       while offset < len as usize {
-        let psize = P::take_bytes(&buf[offset..])?;
-        let vsize = V::take_bytes(&buf[offset+psize..])?;
-        let n = psize + vsize;
-        let loc: Location = self.bincode.deserialize(&buf[offset..offset+n])?;
+        let (size,loc) = Location::from_bytes(&buf[offset..])?;
         self.deletes.try_borrow_mut()?.push(loc);
         self.delete_set.try_borrow_mut()?.insert(loc);
-        offset += n;
+        offset += size;
       }
     }
     Ok(())
@@ -115,7 +106,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     Ok(())
   }
   pub fn delete (&mut self, deletes: &Vec<Location>) -> Result<(),Error> {
-    let mut del_set: HashSet<usize> = HashSet::new();
+    let mut del_set: HashSet<u32> = HashSet::new();
     for delete in deletes {
       if delete.0 == 0 { del_set.insert(delete.1); }
     }
@@ -139,10 +130,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let mut ibuf: Vec<u8> = vec![];
     let mut dbuf: Vec<u8> = vec![];
     for insert in inserts {
-      ibuf.extend(self.bincode.serialize(&insert)?);
+      ibuf.extend(insert.to_bytes()?);
     }
     for delete in deletes {
-      dbuf.extend(self.bincode.serialize(&delete)?);
+      dbuf.extend(delete.to_bytes()?);
     }
     let i_offset = self.insert_store.len()?;
     self.insert_store.write(i_offset,&ibuf)?;
