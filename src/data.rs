@@ -59,25 +59,29 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     ensure![rows.len() <= self.max_data_size,
       "data size limit exceeded in data merge"];
     let bitfield_len = (rows.len()+7)/8;
-    let mut data: Vec<u8> = vec![0;6+bitfield_len];
+    let mut len = 6 + bitfield_len;
+    for row in rows.iter() {
+      len += row.count_bytes();
+    }
+    let mut data = vec![0u8;len];
+    let mut offset = 0;
+    offset += (len as u32).write_bytes(&mut data[offset..])?;
+    offset += (bitfield_len as u16).write_bytes(&mut data[offset..])?;
     for (i,_row) in rows.iter().enumerate() {
       data[6+i/8] |= 1<<(i%8);
     }
+    offset += bitfield_len;
     for row in rows.iter() {
-      let buf = row.to_bytes()?;
-      data.extend(buf);
+      offset += row.write_bytes(&mut data[offset..])?;
     }
-    let len = data.len() as u32;
-    data[0..4].copy_from_slice(&len.to_be_bytes());
-    data[4..6].copy_from_slice(&(bitfield_len as u16).to_be_bytes());
-    let offset = self.store.len()? as u64;
-    self.store.write(offset, &data)?;
+    let store_offset = self.store.len()?;
+    self.store.write(store_offset, &data)?;
     let bbox = match P::bounds(&rows.iter().map(|(p,_)| *p).collect()) {
-      None => bail!["invalid data at offset {}", offset],
+      None => bail!["failed to calculate bounds"],
       Some(bbox) => bbox
     };
-    self.range.write(&(offset,P::bounds_to_range(bbox),rows.len() as u64))?;
-    Ok(offset as u64)
+    self.range.write(&(store_offset,P::bounds_to_range(bbox),rows.len() as u64))?;
+    Ok(store_offset)
   }
 }
 

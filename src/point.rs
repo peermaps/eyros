@@ -41,7 +41,7 @@ pub trait Point: Copy+Clone+Debug+ToBytes+FromBytes+CountBytes {
   /// Return the byte presentation for the element corresponding to the tree
   /// depth `level` for the purpose of making a pivot. If you have an interval
   /// type, return the upper bound.
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error>;
+  fn serialize_at (&self, level: usize, dst: &mut [u8]) -> Result<usize,Error>;
 
   /// Get the number of dimensions for this point type.
   fn dim () -> usize;
@@ -199,12 +199,12 @@ macro_rules! impl_point {
           Coord::midpoint_upper(&self.$i, &other.$i)
         ),+)
       }
-      fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-        let buf: Vec<u8> = match level%Self::dim() {
-          $($i => self.$i.upper().to_bytes()?,)+
+      fn serialize_at (&self, level: usize, dst: &mut [u8])
+      -> Result<usize,Error> {
+        match level%Self::dim() {
+          $($i => self.$i.upper().write_bytes(dst),)+
           _ => panic!("match case beyond dimension")
-        };
-        Ok(buf)
+        }
       }
       fn dim () -> usize { $dim }
       fn overlaps (&self, bbox: &Self::Bounds) -> bool {

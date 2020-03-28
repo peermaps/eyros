@@ -4,7 +4,7 @@ use random_access_storage::RandomAccess;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::cell::RefCell;
-use desert::{FromBytes,ToBytes};
+use desert::{FromBytes,ToBytes,CountBytes};
 
 pub struct StagingIterator<'b,P,V> where P: Point, V: Value {
   inserts: Rc<RefCell<Vec<(P,V)>>>,
@@ -127,14 +127,30 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub fn batch (&mut self, inserts: &Vec<(P,V)>, deletes: &Vec<Location>)
   -> Result<(),Error> {
     // todo: calculate the necessary size before allocating
-    let mut ibuf: Vec<u8> = vec![];
-    let mut dbuf: Vec<u8> = vec![];
-    for insert in inserts {
-      ibuf.extend(insert.to_bytes()?);
+    let mut i_size = 0;
+    for insert in inserts.iter() {
+      i_size += insert.count_bytes();
     }
-    for delete in deletes {
-      dbuf.extend(delete.to_bytes()?);
+    let mut ibuf = vec![0u8;i_size];
+    {
+      let mut i_offset = 0;
+      for insert in inserts.iter() {
+        i_offset += insert.write_bytes(&mut ibuf[i_offset..])?;
+      }
     }
+
+    let mut d_size = 0;
+    for delete in deletes.iter() {
+      d_size += delete.count_bytes();
+    }
+    let mut dbuf = vec![0u8;d_size];
+    {
+      let mut d_offset = 0;
+      for delete in deletes.iter() {
+        d_offset += delete.write_bytes(&mut dbuf[d_offset..])?;
+      }
+    }
+
     let i_offset = self.insert_store.len()?;
     self.insert_store.write(i_offset,&ibuf)?;
     let d_offset = self.delete_store.len()?;

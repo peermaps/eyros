@@ -5,6 +5,7 @@ use std::mem::size_of;
 use std::rc::Rc;
 use std::cell::RefCell;
 use failure::{Error,bail,format_err};
+use desert::ToBytes;
 
 #[derive(Clone)]
 pub enum Node<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
@@ -186,32 +187,38 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     }
     ensure_eq!(nodes.len(), n+bf, "incorrect number of nodes");
     ensure_eq!(self.pivots.len(), n, "incorrect number of pivots");
-    // TODO: pre-calculate the expected size
-    let mut data: Vec<u8> = vec![];
+
+    let bitfield_len = (n+bf+7)/8; // in bytes
+    let node_len = (n+bf) * 8; // in bytes
+    let mut len = 4 + bitfield_len + node_len;
+    for pivot in self.pivots.iter() {
+      len += pivot.pivot_bytes_at(self.level);
+    }
+    let mut data = vec![0u8;len];
+    let mut offset = 0;
     // length
-    data.extend_from_slice(&0u32.to_be_bytes());
+    offset += (len as u32).write_bytes(&mut data[offset..])?;
     // pivots
     for pivot in self.pivots.iter() {
-      data.extend(pivot.serialize_at(self.level % P::dim())?);
+      offset += pivot.serialize_at(self.level, &mut data[offset..])?;
     }
     // data bitfield
-    for i in 0..(n+bf+7)/8 {
+    for i in 0..bitfield_len {
       let mut byte = 0u8;
       for j in 0..8.min(n+bf-i*8) {
         byte += (1 << j) * (bitfield[i*8+j] as u8);
       }
-      data.push(byte);
+      data[offset] = byte;
+      offset += 1;
     }
     // intersecting + buckets
     for node in nodes.iter() {
-      data.extend(&(match node {
+      offset += match node {
         Node::Branch(b) => b.offset+1,
         Node::Data(d) => *d+1,
         Node::Empty => 0u64
-      }).to_be_bytes());
+      }.write_bytes(&mut data[offset..])?;
     }
-    let len = data.len() as u32;
-    data[0..4].copy_from_slice(&len.to_be_bytes());
     Ok((data,nodes))
   }
 }
