@@ -186,15 +186,15 @@ impl Point for P {
     }
   }
 
-  fn serialize_at (&self, level: usize) -> Result<Vec<u8>,Error> {
-    let buf: Vec<u8> = match (level % Self::dim(), self) {
-      (0,P::Point(x,_)) => x.to_bytes()?,
-      (0,P::Interval((_,x),_)) => x.to_bytes()?,
-      (1,P::Point(_,y)) => y.to_bytes()?,
-      (1,P::Interval(_,(_,y))) => y.to_bytes()?,
+  fn serialize_at (&self, level: usize, dst: &mut [u8])
+  -> Result<usize,Error> {
+    match (level % Self::dim(), self) {
+      (0,P::Point(x,_)) => x.write_bytes(dst),
+      (0,P::Interval((_,x),_)) => x.write_bytes(dst),
+      (1,P::Point(_,y)) => y.write_bytes(dst),
+      (1,P::Interval(_,(_,y))) => y.write_bytes(dst),
       _ => panic!["match case beyond dimension"]
-    };
-    Ok(buf)
+    }
   }
 
   fn dim () -> usize { 2 }
