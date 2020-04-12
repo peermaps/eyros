@@ -133,10 +133,10 @@ macro_rules! impl_mix {
 
       fn midpoint_upper (&self, other: &Self) -> Self where Self: Sized {
         $(let $v = Mix::Scalar(match (self.$v, other.$v) {
-          (Mix::Scalar(a),Mix::Scalar(b)) => (a+b)/2.into(),
-          (Mix::Interval(_,a),Mix::Scalar(b)) => (a+b)/2.into(),
-          (Mix::Scalar(a),Mix::Interval(_,b)) => (a+b)/2.into(),
-          (Mix::Interval(_,a),Mix::Interval(_,b)) => (a+b)/2.into(),
+          (Mix::Scalar(a),Mix::Scalar(b)) => a/2.into()+b/2.into(),
+          (Mix::Interval(_,a),Mix::Scalar(b)) => a/2.into()+b/2.into(),
+          (Mix::Scalar(a),Mix::Interval(_,b)) => a/2.into()+b/2.into(),
+          (Mix::Interval(_,a),Mix::Interval(_,b)) => a/2.into()+b/2.into(),
         });)+
         Self { $($v),+ }
       }
@@ -151,7 +151,7 @@ macro_rules! impl_mix {
         }
       }
 
-      fn dim () -> usize { 2 }
+      fn dim () -> usize { $dim }
 
       fn overlaps (&self, bbox: &Self::Bounds) -> bool {
         true $(&& (match self.$v {

@@ -153,7 +153,7 @@ impl<T> Coord<T> for (T,T) where T: Scalar+PartialOrd+Num<T> {
     }
   }
   fn midpoint_upper (&self, other: &Self) -> Self {
-    let x = (self.1 + other.1) / 2.into();
+    let x = self.1/2.into() + other.1/2.into();
     (x,x)
   }
   fn upper (&self) -> T { self.1 }
