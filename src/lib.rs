@@ -22,7 +22,7 @@
 //! [bkd]: https://users.cs.duke.edu/~pankaj/publications/papers/bkd-sstd.pdf
 //! [interval]: http://www.dgp.toronto.edu/~jstewart/378notes/22intervals/
 //!
-//! # example
+//! # fixed example
 //!
 //! This example generates 800 random features in 3 dimensions: `x`, `y`, and `time`
 //! with a `u32` `value` payload. The `x` and `y` dimensions are both intervals with

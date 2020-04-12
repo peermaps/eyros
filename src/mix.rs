@@ -25,6 +25,18 @@ macro_rules! impl_mix {
       }
     }
 
+    impl<$($T),+> Into<($(Mix<$T>),+)> for $M<$($T),+> {
+      fn into (self) -> ($(Mix<$T>),+) {
+        ($(self.$v),+)
+      }
+    }
+
+    impl<$($T),+> Into<$M<$($T),+>> for ($(Mix<$T>),+) {
+      fn into (self) -> $M<$($T),+> {
+        $M { $($v: self.$i),+ }
+      }
+    }
+
     impl<$($T),+> CountBytes for $M<$($T),+> where $($T: CountBytes),+ {
       fn count_bytes(&self) -> usize {
         1 $(+ match &self.$v {
