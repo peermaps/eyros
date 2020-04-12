@@ -29,7 +29,7 @@ fn main() -> Result<(),Error> {
 }
 
 fn storage(name:&str) -> Result<RandomAccessDisk,Error> {
-  let mut p = PathBuf::from("/tmp/eyros-db/");
+  let mut p = PathBuf::from("/tmp/eyros-polygons-db/");
   p.push(name);
   Ok(RandomAccessDisk::builder(p)
     .auto_sync(false)
