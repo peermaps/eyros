@@ -9,7 +9,7 @@ type P = Mix2<f32,f32>;
 type V = u32;
 
 #[test]
-fn mix() -> Result<(),Error> {
+fn mix2() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
   let mut db: DB<_,_,P,V> = DB::open(
     |name: &str| -> Result<RandomAccessDisk,Error> {

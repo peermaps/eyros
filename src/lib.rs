@@ -126,7 +126,7 @@ pub use crate::setup::{Setup,SetupFields};
 use crate::staging::{Staging,StagingIterator};
 use crate::planner::plan;
 pub use crate::point::{Point,Scalar,Cursor,Block};
-pub use crate::mix::{Mix,Mix2};
+pub use crate::mix::{Mix,Mix2,Mix3,Mix4,Mix5,Mix6,Mix7,Mix8};
 #[doc(hidden)] pub use crate::tree::{Tree,TreeIterator,TreeOpts};
 #[doc(hidden)] pub use crate::branch::Branch;
 #[doc(hidden)] pub use crate::data::{DataStore,DataRange};
