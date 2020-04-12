@@ -12,7 +12,6 @@ categories = [ "database" ]
 edition = "2018"
 
 [dependencies]
-bincode = "1.0.1"
 failure = "0.1.5"
 lru = "0.1.13"
 num-traits = "0.2.6"

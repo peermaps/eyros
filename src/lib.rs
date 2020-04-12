@@ -110,6 +110,7 @@
 mod setup;
 mod meta;
 mod point;
+mod mix;
 #[macro_use] mod tree;
 mod branch;
 mod staging;
@@ -125,6 +126,7 @@ pub use crate::setup::{Setup,SetupFields};
 use crate::staging::{Staging,StagingIterator};
 use crate::planner::plan;
 pub use crate::point::{Point,Scalar,Cursor,Block};
+pub use crate::mix::{Mix,Mix2};
 #[doc(hidden)] pub use crate::tree::{Tree,TreeIterator,TreeOpts};
 #[doc(hidden)] pub use crate::branch::Branch;
 #[doc(hidden)] pub use crate::data::{DataStore,DataRange};
