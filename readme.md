@@ -22,7 +22,7 @@ future, requiring data migrations.
 [bkd]: https://users.cs.duke.edu/~pankaj/publications/papers/bkd-sstd.pdf
 [interval]: http://www.dgp.toronto.edu/~jstewart/378notes/22intervals/
 
-# example
+# fixed example
 
 This example generates 800 random features in 3 dimensions: `x`, `y`, and `time`
 with a `u32` `value` payload. The `x` and `y` dimensions are both intervals with
@@ -103,6 +103,67 @@ The `location` is used to quickly delete records without needing to perform
 additional lookups. You'll need to keep the `location` around from the result of
 a query when you intend to delete a record. Locations that begin with a `0` are
 stored in the staging cache, so their location may change after the next write.
+
+# mix example
+
+You can also mix and match scalar and interval values for each dimension.
+
+An example of where these mixed types might be useful is storing geographic
+features to display on a map. Some of the features will be points and some will
+be lines or polygons which are contained in bounding boxes (intervals).
+
+This example stores 2 dimensional points and regions in the same database, so
+that bounding box queries will return both types of features.
+
+``` rust
+use eyros::{DB,Row,Mix,Mix2};
+use rand::random;
+use failure::Error;
+use random_access_disk::RandomAccessDisk;
+use std::path::PathBuf;
+
+type P = Mix2<f32,f32>;
+type V = u32;
+
+fn main() -> Result<(),Error> {
+  let mut db: DB<_,_,P,V> = DB::open(storage)?;
+  let batch: Vec<Row<P,V>> = (0..1_000).map(|_| {
+    let value = random::<u32>();
+    if random::<f32>() > 0.5 {
+      let xmin: f32 = random::<f32>()*2.0-1.0;
+      let xmax: f32 = xmin + random::<f32>().powf(64.0)*(1.0-xmin);
+      let ymin: f32 = random::<f32>()*2.0-1.0;
+      let ymax: f32 = ymin + random::<f32>().powf(64.0)*(1.0-ymin);
+      Row::Insert(Mix2::new(
+        Mix::Interval(xmin,xmax),
+        Mix::Interval(ymin,ymax)
+      ), value)
+    } else {
+      let x: f32 = random::<f32>()*2.0-1.0;
+      let y: f32 = random::<f32>()*2.0-1.0;
+      Row::Insert(Mix2::new(
+        Mix::Scalar(x),
+        Mix::Scalar(y)
+      ), value)
+    }
+  }).collect();
+  db.batch(&batch)?;
+
+  let bbox = ((-0.5,-0.8),(0.3,-0.5));
+  for result in db.query(&bbox)? {
+    println!("{:?}", result?);
+  }
+  Ok(())
+}
+
+fn storage(name:&str) -> Result<RandomAccessDisk,Error> {
+  let mut p = PathBuf::from("/tmp/eyros-mix-db/");
+  p.push(name);
+  Ok(RandomAccessDisk::builder(p)
+    .auto_sync(false)
+    .build()?)
+}
+```
 
 # license
 

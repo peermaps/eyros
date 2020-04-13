@@ -365,7 +365,7 @@ macro_rules! impl_dim {
 impl_dim![(A,B),(0,1),2];
 impl_dim![(A,B,C),(0,1,2),3];
 impl_dim![(A,B,C,D),(0,1,2,3),4];
-//impl_dim![(A,B,C,D,E),(0,1,2,3,4),5];
-//impl_dim![(A,B,C,D,E,F),(0,1,2,3,4,5),6];
-//impl_dim![(A,B,C,D,E,F,G),(0,1,2,3,4,5,6),7];
-//impl_dim![(A,B,C,D,E,F,G,H),(0,1,2,3,4,5,6,7),8];
+impl_dim![(A,B,C,D,E),(0,1,2,3,4),5];
+impl_dim![(A,B,C,D,E,F),(0,1,2,3,4,5),6];
+impl_dim![(A,B,C,D,E,F,G),(0,1,2,3,4,5,6),7];
+impl_dim![(A,B,C,D,E,F,G,H),(0,1,2,3,4,5,6,7),8];

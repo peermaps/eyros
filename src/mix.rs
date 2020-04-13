@@ -7,6 +7,58 @@ use std::ops::{Add,Div};
 use desert::{FromBytes,ToBytes,CountBytes};
 use std::fmt::Debug;
 
+/// The Mix implementations allow you to use scalar or interval values for each
+/// dimension. The storage overhead is a one-byte bitfield (for up to 8
+/// dimensions) at the beginning of each record to specify which dimensions in
+/// the given record are scalars and which are intervals.
+///
+/// To define a Mix coordinate, call the appropriate `Mix{2..8}::new()` method
+/// for the dimension of your database, wrapping each item in the constructor
+/// with either `Mix::Interval(min,max)` or `Mix::Scalar(x)`.
+///
+/// For example, to construct a 3-dimensional row using Mix coordinates:
+///
+/// ```rust
+/// use eyros::{Row,Mix,Mix3};
+///
+/// let rows = vec![
+///   Row::Insert(Mix3::new(
+///     Mix::Interval(3.0_f32, 10.0_f32),
+///     Mix::Scalar(-4.5_f32),
+///     Mix::Scalar(1234_u32)
+///   ), 55555_u64),
+///   Row::Insert(Mix3::new(
+///     Mix::Scalar(32.8_f32),
+///     Mix::Scalar(-12.5_f32),
+///     Mix::Interval(500_u32,800_u32)
+///   ), 33333_u64)
+/// ];
+/// ```
+///
+/// When you get a `Mix` result from a query, you can access the elements for
+/// each dimension with the `v0`, `v1`, ... properties or by calling `.into()`
+/// to convert into a tuple.
+///
+/// ```rust
+/// use eyros::{Mix,Mix2};
+///
+/// let mix_point: Mix2<f32,f32> = Mix2::new(
+///   Mix::Scalar(2.0),
+///   Mix::Interval(-3.0,1.0)
+/// );
+/// assert_eq![mix_point.v0, Mix::Scalar(2.0)];
+/// assert_eq![mix_point.v1, Mix::Interval(-3.0,1.0)];
+///
+/// let tuple: (Mix<f32>,Mix<f32>) = mix_point.into();
+/// assert_eq![tuple, (Mix::Scalar(2.0),Mix::Interval(-3.0,1.0))];
+///
+/// // Likewise, you can cast a tuple back into a mix:
+/// let m: Mix2<f32,f32> = tuple.into();
+/// assert_eq![m, Mix2::new(Mix::Scalar(2.0),Mix::Interval(-3.0,1.0))];
+/// ```
+
+/// Define a value to use for a single dimension: either a scalar
+/// (a single value) or an interval (min, max).
 #[derive(Copy,Clone,Debug,Eq,PartialEq)]
 pub enum Mix<T> {
   Scalar(T),
@@ -16,10 +68,15 @@ pub enum Mix<T> {
 macro_rules! impl_mix {
   ($M:ident,$dim:expr,($($T:tt),+),($($v:tt),+),($($i:tt),+)) => {
     #[derive(Copy,Clone,Debug,Eq,PartialEq)]
+    /// Mix coordinate container
     pub struct $M<$($T),+> {
-      $(pub $v: Mix<$T>,)+
+      $(
+        /// Access the i-th element.
+        pub $v: Mix<$T>,
+      )+
     }
     impl<$($T),+> $M<$($T),+> {
+      /// Create a new Mix container from a Mix element for each dimension.
       pub fn new($($v: Mix<$T>),+) -> Self {
         Self { $($v),+ }
       }
