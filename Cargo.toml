@@ -2,7 +2,7 @@
 name = "eyros"
 version = "1.0.0"
 description = "multi-dimensional interval database"
-license = "Parity-6.0.0 AND Apache-2.0"
+license = "Parity-7.0.0 AND Apache-2.0"
 readme = "readme.md"
 repository = "https://github.com/peermaps/eyros"
 homepage = "https://github.com/peermaps/eyros"

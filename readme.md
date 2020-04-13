@@ -167,6 +167,6 @@ fn storage(name:&str) -> Result<RandomAccessDisk,Error> {
 
 # license
 
-[license zero parity](https://licensezero.com/licenses/parity)
+[license zero parity 7.0.0](https://paritylicense.com/versions/7.0.0.html)
 and [apache 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt)
 (contributions)
