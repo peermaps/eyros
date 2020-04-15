@@ -8,14 +8,13 @@ repository = "https://github.com/peermaps/eyros"
 homepage = "https://github.com/peermaps/eyros"
 documentation = "https://docs.rs/eyros"
 keywords = [ "database", "multi-dimensional", "interval", "time-series", "geospatial" ]
-categories = [ "database" ]
+categories = [ "database-implementations" ]
 authors = [ " " ]
 edition = "2018"
 
 [dependencies]
 failure = "0.1.5"
 lru = "0.1.13"
-num-traits = "0.2.6"
 random-access-disk = "1.0.0"
 random-access-storage = "3.0.0"
 desert = "1.0.3"
