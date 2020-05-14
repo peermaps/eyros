@@ -1,45 +1,50 @@
 use crate::{Point,Value,Location,read_block::read_block};
 use random_access_storage::RandomAccess;
 use failure::{Error,ensure,bail};
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::{sync::{Arc,Mutex},pin::Pin};
+use std::ops::Deref;
+
 use lru::LruCache;
 use std::collections::HashMap;
 use desert::{FromBytes,ToBytes,CountBytes};
 
-pub trait DataBatch<P,V> where P: Point, V: Value {
-  fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error>;
+#[async_trait::async_trait]
+pub trait DataBatch<P,V>: Send+Sync where P: Point, V: Value {
+  async fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error>;
 }
 
 pub struct DataMerge<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  data_store: Rc<RefCell<DataStore<S,P,V>>>
+  data_store: Pin<Box<DataStore<S,P,V>>>
 }
 
 impl<S,P,V> DataMerge<S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new (data_store: Rc<RefCell<DataStore<S,P,V>>>) -> Self {
-    Self { data_store }
+where S: RandomAccess<Error=Error>+Unpin, P: Point, V: Value {
+  pub fn new (data_store: Arc<Mutex<DataStore<S,P,V>>>) -> Self {
+    Self {
+      data_store: Box::pin(*data_store.lock().unwrap().deref().clone())
+    }
   }
 }
 
+#[async_trait::async_trait]
 impl<S,P,V> DataBatch<P::Range,u64> for DataMerge<S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  fn batch (&mut self, rows: &Vec<&(P::Range,u64)>) -> Result<u64,Error> {
+where S: RandomAccess<Error=Error>+Send+Sync+Unpin, P: Point, V: Value {
+  async fn batch (&mut self, rows: &Vec<&(P::Range,u64)>) -> Result<u64,Error> {
     if rows.len() == 1 { // use existing address
       Ok(rows[0].1)
     } else { // combine addresses into a new block
-      let mut dstore = self.data_store.try_borrow_mut()?;
-      let max = dstore.max_data_size;
+      let mut dstore = self.data_store.as_mut();
       let mut combined: Vec<(P,V)> = vec![];
+      let max = dstore.max_data_size;
       for row in rows {
-        let pvs: Vec<(P,V)> = dstore.list(row.1)?.iter().map(|c| {
+        let pvs: Vec<(P,V)> = dstore.list(row.1).await?.iter().map(|c| {
           (c.0, c.1.clone())
         }).collect();
         combined.extend(pvs);
       }
       ensure![combined.len() <= max, "data size limit exceeded in data merge"];
-      dstore.batch(&combined.iter().collect())
+      Ok(dstore.batch(&combined.iter().collect()).await?)
     }
   }
 }
@@ -53,9 +58,10 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub max_data_size: usize
 }
 
+#[async_trait::async_trait]
 impl<S,P,V> DataBatch<P,V> for DataStore<S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error> {
+where S: RandomAccess<Error=Error>+Send+Sync+Unpin, P: Point, V: Value {
+  async fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error> {
     ensure![rows.len() <= self.max_data_size,
       "data size limit exceeded in data merge"];
     let bitfield_len = (rows.len()+7)/8;
@@ -74,13 +80,15 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     for row in rows.iter() {
       offset += row.write_bytes(&mut data[offset..])?;
     }
-    let store_offset = self.store.len()?;
-    self.store.write(store_offset, &data)?;
+    let store_offset = self.store.len().await?;
+    self.store.write(store_offset, &data).await?;
     let bbox = match P::bounds(&rows.iter().map(|(p,_)| *p).collect()) {
       None => bail!["failed to calculate bounds"],
       Some(bbox) => bbox
     };
-    self.range.write(&(store_offset,P::bounds_to_range(bbox),rows.len() as u64))?;
+    self.range.write(
+      &(store_offset,P::bounds_to_range(bbox),rows.len() as u64)
+    ).await?;
     Ok(store_offset)
   }
 }
@@ -96,23 +104,23 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       max_data_size
     })
   }
-  pub fn commit (&mut self) -> Result<(),Error> {
-    self.store.sync_all()?;
+  pub async fn commit (&mut self) -> Result<(),Error> {
+    self.store.sync_all().await?;
     Ok(())
   }
-  pub fn query (&mut self, offset: u64, bbox: &P::Bounds)
+  pub async fn query (&mut self, offset: u64, bbox: &P::Bounds)
   -> Result<Vec<(P,V,Location)>,Error> {
-    let rows = self.list(offset)?;
+    let rows = self.list(offset).await?;
     Ok(rows.iter().filter(|row| {
       row.0.overlaps(bbox)
     }).map(|row| { row.clone() }).collect())
   }
-  pub fn list (&mut self, offset: u64) -> Result<Vec<(P,V,Location)>,Error> {
+  pub async fn list (&mut self, offset: u64) -> Result<Vec<(P,V,Location)>,Error> {
     match self.list_cache.get(&offset) {
       Some(rows) => return Ok(rows.to_vec()),
       None => {}
     }
-    let buf = self.read(offset)?;
+    let buf = self.read(offset).await?;
     let rows = self.parse(&buf)?.iter().map(|row| {
       (row.0,row.1.clone(),(offset+1,row.2))
     }).collect();
@@ -139,13 +147,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     Ok(results)
   }
-  pub fn read (&mut self, offset: u64) -> Result<Vec<u8>,Error> {
-    let len = self.store.len()? as u64;
-    read_block(&mut self.store, offset, len, 1024)
+  pub async fn read (&mut self, offset: u64) -> Result<Vec<u8>,Error> {
+    let len = self.store.len().await? as u64;
+    read_block(&mut self.store, offset, len, 1024).await
   }
   // todo: replace() similar to delete but with an additional array of
   // replacement candidates
-  pub fn delete (&mut self, locations: &Vec<Location>) -> Result<(),Error> {
+  pub async fn delete (&mut self, locations: &Vec<Location>) -> Result<(),Error> {
     let mut by_block: HashMap<u64,Vec<u32>> = HashMap::new();
     for (block,index) in locations {
       if *block == 0 { continue } // staging block
@@ -164,9 +172,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         None => bail!["indexes is an empty array"],
       };
       let len = 7 + max_i/8; // indexes start at 0, unlike lengths
-      ensure![len <= self.store.len()?-block,
+      ensure![len <= self.store.len().await?-block,
         "index length past the end of the block"];
-      let mut header = self.store.read(*block, len)?;
+      let mut header = self.store.read(*block, len).await?;
       let block_size = u32::from_bytes(&header[0..])?.1 as u64;
       let bitfield_len = u16::from_bytes(&header[4..])?.1;
       ensure![len <= (bitfield_len as u64) + 6,
@@ -179,7 +187,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         let i = *index as usize;
         header[6+i/8] &= 0xff - (1<<(i%8));
       }
-      self.store.write(block+6, &header[6..])?;
+      self.store.write(block+6, &header[6..]).await?;
       match self.list_cache.get_mut(block) {
         Some(rows) => {
           rows.retain(|row| !indexes.contains(&((row.2).1)));
@@ -189,16 +197,16 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     }
     Ok(())
   }
-  pub fn bytes (&mut self) -> Result<u64,Error> {
-    Ok(self.store.len()? as u64)
+  pub async fn bytes (&mut self) -> Result<u64,Error> {
+    Ok(self.store.len().await? as u64)
   }
-  pub fn bbox (&mut self, offset: u64)
+  pub async fn bbox (&mut self, offset: u64)
   -> Result<Option<(P::Bounds,u64)>,Error> {
     match self.range.cache.get(&offset) {
       None => {},
       Some(r) => return Ok(Some(*r))
     };
-    let rows = self.list(offset)?;
+    let rows = self.list(offset).await?;
     if rows.is_empty() {
       return Ok(None);
     }
@@ -226,15 +234,15 @@ where S: RandomAccess<Error=Error>, P: Point {
       cache: LruCache::new(cache_size)
     }
   }
-  pub fn write (&mut self, b: &(u64,P::Range,u64)) -> Result<(),Error> {
-    let offset = self.store.len()?;
+  pub async fn write (&mut self, b: &(u64,P::Range,u64)) -> Result<(),Error> {
+    let offset = self.store.len().await?;
     let data = b.to_bytes()?;
-    self.store.write(offset, &data)
+    self.store.write(offset, &data).await
   }
-  pub fn list (&mut self) -> Result<Vec<(u64,P,u64)>,Error> {
-    let len = self.store.len()?;
+  pub async fn list (&mut self) -> Result<Vec<(u64,P,u64)>,Error> {
+    let len = self.store.len().await?;
     // TODO: read in chunks instead of all at once
-    let buf = self.store.read(0, len)?;
+    let buf = self.store.read(0, len).await?;
     let mut offset = 0usize;
     let mut results: Vec<(u64,P,u64)> = vec![];
     while (offset as u64) < len {

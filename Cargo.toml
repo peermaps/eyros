@@ -15,9 +15,11 @@ edition = "2018"
 [dependencies]
 failure = "0.1.5"
 lru = "0.1.13"
-random-access-disk = "1.0.0"
-random-access-storage = "3.0.0"
+random-access-disk = "2.0.0"
+random-access-storage = "4.0.0"
 desert = "1.0.3"
+async-std = "1.5.0"
+async-trait = "0.1.30"
 
 [dev-dependencies]
 rand = "0.6.1"

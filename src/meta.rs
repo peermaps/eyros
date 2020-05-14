@@ -10,20 +10,20 @@ pub struct Meta<S> where S: RandomAccess<Error=Error> {
 }
 
 impl<S> Meta<S> where S: RandomAccess<Error=Error> {
-  pub fn open(store: S) -> Result<Self,Error> {
+  pub async fn open(store: S) -> Result<Self,Error> {
     let mut meta = Self {
       store,
       mask: vec![],
       branch_factor: 9
     };
-    if !meta.store.is_empty()? {
-      let len = meta.store.len()?;
-      let buf = meta.store.read(0,len)?;
+    if !meta.store.is_empty().await? {
+      let len = meta.store.len().await?;
+      let buf = meta.store.read(0,len).await?;
       meta.load_buffer(&buf)?;
     }
     Ok(meta)
   }
-  pub fn save (&mut self) -> Result<(),Error> {
+  pub async fn save (&mut self) -> Result<(),Error> {
     let mut bytes = vec![];
     bytes.extend(&self.branch_factor.to_be_bytes());
     bytes.extend(&(self.mask.len() as u32).to_be_bytes());
@@ -35,7 +35,7 @@ impl<S> Meta<S> where S: RandomAccess<Error=Error> {
       b
     }).collect();
     bytes.extend(&mbytes);
-    self.store.write(0, &bytes)?;
+    self.store.write(0, &bytes).await?;
     Ok(())
   }
   fn load_buffer(&mut self, buf: &Vec<u8>) -> Result<(),Error> {

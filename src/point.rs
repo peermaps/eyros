@@ -20,12 +20,12 @@ use desert::{ToBytes,FromBytes,CountBytes};
 pub type Cursor = (u64,usize);
 pub type Block = u64;
 
-pub trait Point: Copy+Clone+Debug+ToBytes+FromBytes+CountBytes {
+pub trait Point: Copy+Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes+Unpin {
   /// Bounding-box corresponding to `(min,max)` as used by `db.query(bbox)`.
-  type Bounds: Copy+Clone+Debug+ToBytes+FromBytes+CountBytes;
+  type Bounds: Copy+Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes;
 
   /// Range corresponding to `((minX,maxX),(minY,maxY),...)`
-  type Range: Point+Copy+Clone+Debug+ToBytes+FromBytes+CountBytes;
+  type Range: Point+Copy+Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes;
 
   /// Compare elements at a level of tree depth. The dimension under
   /// consideration alternates each level, so you'll likely want the element
@@ -83,9 +83,10 @@ pub trait Point: Copy+Clone+Debug+ToBytes+FromBytes+CountBytes {
     -> Result<String,Error>;
 }
 
-pub trait Num<T>: PartialOrd+Copy+ToBytes+FromBytes+CountBytes
+pub trait Num<T>: PartialOrd+Copy+Send+Sync+ToBytes+FromBytes+CountBytes+Unpin
   +Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
-impl<T> Num<T> for T where T: PartialOrd+Copy+ToBytes+FromBytes+CountBytes
+impl<T> Num<T> for T where T: PartialOrd+Copy+Send+Sync+Unpin
+  +ToBytes+FromBytes+CountBytes
   +Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
 
 /// Types representing a single value (as opposed to an interval, which has
@@ -365,7 +366,7 @@ macro_rules! impl_dim {
 impl_dim![(A,B),(0,1),2];
 impl_dim![(A,B,C),(0,1,2),3];
 impl_dim![(A,B,C,D),(0,1,2,3),4];
-impl_dim![(A,B,C,D,E),(0,1,2,3,4),5];
-impl_dim![(A,B,C,D,E,F),(0,1,2,3,4,5),6];
-impl_dim![(A,B,C,D,E,F,G),(0,1,2,3,4,5,6),7];
-impl_dim![(A,B,C,D,E,F,G,H),(0,1,2,3,4,5,6,7),8];
+//impl_dim![(A,B,C,D,E),(0,1,2,3,4),5];
+//impl_dim![(A,B,C,D,E,F),(0,1,2,3,4,5),6];
+//impl_dim![(A,B,C,D,E,F,G),(0,1,2,3,4,5,6),7];
+//impl_dim![(A,B,C,D,E,F,G,H),(0,1,2,3,4,5,6,7),8];

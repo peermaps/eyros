@@ -1,5 +1,5 @@
 use random_access_storage::RandomAccess;
-use std::io::Write;
+use async_std::io::Write;
 
 #[derive(Debug,Clone)]
 pub struct WriteCache<S> where S: RandomAccess {
@@ -10,8 +10,8 @@ pub struct WriteCache<S> where S: RandomAccess {
 }
 
 impl<S> WriteCache<S> where S: RandomAccess {
-  pub fn open (store: S) -> Result<Self,S::Error> {
-    let length = store.len()?;
+  pub async fn open (store: S) -> Result<Self,S::Error> {
+    let length = store.len().await?;
     Ok(Self {
       store,
       queue: vec![],
@@ -21,10 +21,11 @@ impl<S> WriteCache<S> where S: RandomAccess {
   }
 }
 
-impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
+#[async_trait::async_trait]
+impl<S> RandomAccess for WriteCache<S> where S: RandomAccess+Send+Sync {
   type Error = S::Error;
-  fn write (&mut self, offset: u64, data: &[u8]) -> Result<(),Self::Error> {
-    if !self.enabled { return self.store.write(offset, data) }
+  async fn write (&mut self, offset: u64, data: &[u8]) -> Result<(),Self::Error> {
+    if !self.enabled { return self.store.write(offset, data).await }
 
     let new_range = (offset,offset+(data.len() as u64));
     let overlapping: Vec<usize> = (0..self.queue.len()).filter(|i| {
@@ -66,15 +67,15 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
     self.length = self.length.max(end);
     Ok(())
   }
-  fn read (&mut self, offset: u64, length: u64)
+  async fn read (&mut self, offset: u64, length: u64)
   -> Result<Vec<u8>,Self::Error> {
-    if !self.enabled { return self.store.read(offset, length) }
+    if !self.enabled { return self.store.read(offset, length).await }
     // TODO: analysis to know when to skip the read()
     let range = (offset,offset+length);
     let mut data = {
-      let slen = self.store.len()?;
+      let slen = self.store.len().await?;
       let mut d = if slen < offset { vec![] }
-        else { self.store.read(offset, (slen-offset).min(length))? };
+        else { self.store.read(offset, (slen-offset).min(length)).await? };
       let dlen = d.len() as u64;
       if dlen < length {
         d.extend(vec![0;(length-dlen) as usize]);
@@ -104,15 +105,15 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
     */
     Ok(data)
   }
-  fn read_to_writer (&mut self, _offset: u64, _length: u64,
-  _buf: &mut impl Write) -> Result<(),Self::Error> {
+  async fn read_to_writer (&mut self, _offset: u64, _length: u64,
+  _buf: &mut (impl Write + Send)) -> Result<(),Self::Error> {
     unimplemented![];
   }
-  fn del (&mut self, offset: u64, length: u64) -> Result<(),Self::Error> {
-    self.store.del(offset, length)
+  async fn del (&mut self, offset: u64, length: u64) -> Result<(),Self::Error> {
+    self.store.del(offset, length).await
   }
-  fn truncate (&mut self, length: u64) -> Result<(),Self::Error> {
-    if !self.enabled { return self.store.truncate(length) }
+  async fn truncate (&mut self, length: u64) -> Result<(),Self::Error> {
+    if !self.enabled { return self.store.truncate(length).await; }
     let mut i = 0;
     while i < self.queue.len() {
       let q0 = self.queue[i].0;
@@ -126,21 +127,21 @@ impl<S> RandomAccess for WriteCache<S> where S: RandomAccess {
         i += 1;
       }
     }
-    self.store.truncate(length)?;
+    self.store.truncate(length).await?;
     self.length = length;
     Ok(())
   }
-  fn len (&self) -> Result<u64,Self::Error> {
+  async fn len (&self) -> Result<u64,Self::Error> {
     if self.enabled { Ok(self.length) }
-    else { self.store.len() }
+    else { self.store.len().await }
   }
-  fn is_empty (&mut self) -> Result<bool,Self::Error> {
+  async fn is_empty (&mut self) -> Result<bool,Self::Error> {
     if self.enabled { Ok(self.length == 0) }
-    else { self.store.is_empty() }
+    else { self.store.is_empty().await }
   }
-  fn sync_all (&mut self) -> Result<(),S::Error> {
+  async fn sync_all (&mut self) -> Result<(),Self::Error> {
     for q in self.queue.iter() {
-      self.store.write(q.0, &q.1)?;
+      self.store.write(q.0, &q.1).await?;
     }
     self.queue.clear();
     Ok(())

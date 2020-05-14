@@ -162,7 +162,7 @@ macro_rules! impl_mix {
     }
 
     impl<$($T),+> Point for $M<$($T),+> where ($(($T,$T)),+): Point,
-    $($T: ToBytes+FromBytes+CountBytes+Copy+Debug+PartialOrd
+    $($T: ToBytes+FromBytes+CountBytes+Copy+Send+Sync+Debug+PartialOrd+Unpin
     +Add<Output=$T>+Div<Output=$T>+From<u8>),+ {
       type Bounds = (($($T),+),($($T),+));
       type Range = ($(($T,$T)),+);

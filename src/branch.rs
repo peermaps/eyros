@@ -2,8 +2,7 @@ use crate::{data::DataBatch,point::Point,Value,pivots};
 use crate::order::{order,order_len};
 use std::cmp::Ordering;
 use std::mem::size_of;
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::sync::{Arc,Mutex};
 use failure::{Error,bail,format_err};
 use desert::ToBytes;
 
@@ -18,7 +17,7 @@ pub enum Node<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
 pub struct Data<P,V> where P: Point, V: Value {
   pub offset: u64,
   bucket: Vec<usize>,
-  rows: Rc<Vec<((P,V),u64)>>
+  rows: Arc<Vec<((P,V),u64)>>
 }
 
 #[derive(Clone)]
@@ -28,10 +27,10 @@ pub struct Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   pub index: usize,
   branch_factor: usize,
   max_data_size: usize,
-  data_batch: Rc<RefCell<D>>,
+  data_batch: Arc<Mutex<D>>,
   bucket: Vec<usize>,
   buckets: Vec<Vec<usize>>,
-  rows: Rc<Vec<((P,V),u64)>>,
+  rows: Arc<Vec<((P,V),u64)>>,
   pivots: Vec<P>,
   sorted: Vec<usize>,
   intersecting: Vec<Vec<usize>>,
@@ -40,7 +39,7 @@ pub struct Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
 
 impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
   pub fn new (level: usize, index: usize, max_data_size: usize, bf: usize,
-  data_batch: Rc<RefCell<D>>, bucket: Vec<usize>, rows: Rc<Vec<((P,V),u64)>>)
+  data_batch: Arc<Mutex<D>>, bucket: Vec<usize>, rows: Arc<Vec<((P,V),u64)>>)
   -> Result<Self,Error> {
     let n = order_len(bf);
     let mut sorted: Vec<usize> = (0..bucket.len()).collect();
@@ -121,7 +120,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     let bucket_size = bf*size_of::<u64>();
     4 + pivot_size + bitfield_size + intersect_size + bucket_size
   }
-  pub fn build (&mut self, alloc: &mut dyn FnMut (usize) -> u64)
+  pub async fn build (&mut self, alloc: &mut dyn FnMut (usize) -> u64)
   -> Result<(Vec<u8>,Vec<Node<D,P,V>>),Error> {
     let n = order_len(self.branch_factor);
     let bf = self.branch_factor;
@@ -164,10 +163,10 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
           nodes.push(Node::Empty);
           bitfield.push(false);
         } else if size as usize <= self.max_data_size {
-          let mut dstore = self.data_batch.try_borrow_mut()?;
+          let mut dstore = self.data_batch.lock().unwrap();
           let offset = dstore.batch(&bucket.iter().map(|b| {
             &self.rows[*b].0
-          }).collect())?;
+          }).collect()).await?;
           nodes.push(Node::Data(offset));
           bitfield.push(true);
         } else {
@@ -176,8 +175,8 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
             self.index,
             self.max_data_size,
             self.branch_factor,
-            Rc::clone(&self.data_batch),
-            bucket.clone(), Rc::clone(&self.rows)
+            Arc::clone(&self.data_batch),
+            bucket.clone(), Arc::clone(&self.rows)
           )?;
           b.alloc(alloc);
           nodes.push(Node::Branch(b));

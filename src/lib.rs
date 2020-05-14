@@ -166,6 +166,7 @@
 //! ```
 
 #![recursion_limit="1024"]
+#![feature(nll)]
 
 #[macro_use] mod ensure;
 mod setup;
@@ -188,7 +189,7 @@ use crate::staging::{Staging,StagingIterator};
 use crate::planner::plan;
 pub use crate::point::{Point,Scalar,Cursor,Block};
 pub use crate::mix::{Mix,Mix2,Mix3,Mix4,Mix5,Mix6,Mix7,Mix8};
-#[doc(hidden)] pub use crate::tree::{Tree,TreeIterator,TreeOpts};
+#[doc(hidden)] pub use crate::tree::{Tree,TreeStream,TreeOpts};
 #[doc(hidden)] pub use crate::branch::Branch;
 #[doc(hidden)] pub use crate::data::{DataStore,DataRange};
 use crate::meta::Meta;
@@ -198,20 +199,25 @@ use random_access_storage::RandomAccess;
 use failure::{Error,format_err};
 use desert::{ToBytes,FromBytes,CountBytes};
 use std::fmt::Debug;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc,Mutex};
 use std::collections::HashSet;
 
+//use std::{future::Future,pin::Pin,task::{Poll,Context}};
+use std::pin::Pin;
+use async_std::{prelude::*,stream::Stream,future::Future,task::{Poll,Context}};
+
 #[doc(hidden)]
-pub enum SubIterator<'b,S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  Tree(TreeIterator<'b,S,P,V>),
-  Staging(StagingIterator<'b,P,V>)
+pub enum SubStream<S,P,V> where
+S: RandomAccess<Error=Error>, P: Point, V: Value {
+  Tree(TreeStream<S,P,V>),
+  Staging(StagingIterator<P,V>)
 }
 
 /// Data to use for the payload portion stored at a coordinate.
-pub trait Value: Debug+Clone+ToBytes+FromBytes+CountBytes+'static {}
-impl<T> Value for T where T: Debug+Clone+ToBytes+FromBytes+CountBytes+'static {}
+pub trait Value: Debug+Clone+Send+Sync
+  +ToBytes+FromBytes+CountBytes+Unpin+'static {}
+impl<T> Value for T where T: Debug+Clone+Send+Sync
+  +ToBytes+FromBytes+CountBytes+Unpin+'static {}
 
 /// Stores where a record is stored to avoid additional queries during deletes.
 /// Locations are only valid until the next `batch()`. There is no runtime check
@@ -229,19 +235,19 @@ pub enum Row<P,V> where P: Point, V: Value {
 
 /// Top-level database API.
 pub struct DB<S,U,P,V> where
-S: RandomAccess<Error=Error>,
+S: RandomAccess<Error=Error>+Unpin,
 U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   open_store: U,
-  pub trees: Vec<Rc<RefCell<Tree<S,P,V>>>>,
+  pub trees: Vec<Arc<Mutex<Tree<S,P,V>>>>,
   pub staging: Staging<S,P,V>,
-  pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
+  pub data_store: Arc<Mutex<DataStore<S,P,V>>>,
   meta: Meta<S>,
   pub fields: SetupFields
 }
 
 impl<S,U,P,V> DB<S,U,P,V> where
-S: RandomAccess<Error=Error>,
+S: RandomAccess<Error=Error>+Send+Sync+Unpin,
 U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   /// Create a new database instance from `open_store`, a function that receives
@@ -271,8 +277,8 @@ P: Point, V: Value {
   ///   Ok(RandomAccessDisk::builder(p).auto_sync(false).build()?)
   /// }
   /// ```
-  pub fn open(open_store: U) -> Result<Self,Error> {
-    Setup::new(open_store).build()
+  pub async fn open(open_store: U) -> Result<Self,Error> {
+    Setup::new(open_store).build().await
   }
 
   /// Create a new database instance from `setup`, a configuration builder.
@@ -328,12 +334,12 @@ P: Point, V: Value {
   /// Always open a database with the same settings. Things will break if you
   /// change . There is no runtime check yet to ensure a database is opened with
   /// the same configuration that it was created with.
-  pub fn open_from_setup(setup: Setup<S,U>) -> Result<Self,Error> {
-    let meta = Meta::open((setup.open_store)("meta")?)?;
+  pub async fn open_from_setup(setup: Setup<S,U>) -> Result<Self,Error> {
+    let meta = Meta::open((setup.open_store)("meta")?).await?;
     let staging = Staging::open(
       (setup.open_store)("staging_inserts")?,
       (setup.open_store)("staging_deletes")?
-    )?;
+    ).await?;
     let data_store = DataStore::open(
       (setup.open_store)("data")?,
       (setup.open_store)("range")?,
@@ -344,20 +350,20 @@ P: Point, V: Value {
     let mut db = Self {
       open_store: setup.open_store,
       staging,
-      data_store: Rc::new(RefCell::new(data_store)),
+      data_store: Arc::new(Mutex::new(data_store)),
       meta: meta,
       trees: vec![],
       fields: setup.fields
     };
     for i in 0..db.meta.mask.len() {
-      db.create_tree(i)?;
+      db.create_tree(i).await?;
     }
     Ok(db)
   }
 
   /// Write a collection of updates to the database. Each update can be a
   /// `Row::Insert(point,value)` or a `Row::Delete(location)`.
-  pub fn batch (&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
+  pub async fn batch (&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     let inserts: Vec<(P,V)> = rows.iter()
       .filter(|r| match r { Row::Insert(_p,_v) => true, _ => false })
       .map(|r| match r {
@@ -372,36 +378,41 @@ P: Point, V: Value {
         _ => panic!["unexpected non-delete row type"]
       })
       .collect();
-    let n = (self.staging.inserts.try_borrow()?.len()+inserts.len()) as u64;
-    let ndel = (self.staging.deletes.try_borrow()?.len()+deletes.len()) as u64;
+    let (slen,n,ndel) = {
+      let s_inserts = self.staging.inserts.lock().unwrap();
+      let s_deletes = self.staging.deletes.lock().unwrap();
+      let slen = s_inserts.len();
+      let n = (slen + inserts.len()) as u64;
+      let ndel = (s_deletes.len() + deletes.len()) as u64;
+      (slen,n,ndel)
+    };
     let base = self.fields.base_size as u64;
     if ndel >= base && n <= base {
-      deletes.extend_from_slice(&self.staging.deletes.try_borrow()?);
-      let mut dstore = self.data_store.try_borrow_mut()?;
-      dstore.delete(&deletes)?;
-      dstore.commit()?;
-      self.staging.batch(&inserts, &vec![])?;
+      deletes.extend_from_slice(&self.staging.deletes.lock().unwrap());
+      let mut dstore = self.data_store.lock().unwrap();
+      dstore.delete(&deletes).await?;
+      dstore.commit().await?;
+      self.staging.batch(&inserts, &vec![]).await?;
       self.staging.delete(&deletes)?;
-      self.staging.clear_deletes()?;
-      self.staging.commit()?;
+      self.staging.clear_deletes().await?;
+      self.staging.commit().await?;
       return Ok(())
     } else if n <= base {
-      self.staging.batch(&inserts, &deletes)?;
-      self.staging.commit()?;
+      self.staging.batch(&inserts, &deletes).await?;
+      self.staging.commit().await?;
       return Ok(())
     }
     let count = (n/base)*base;
     let rem = n - count;
     let mut mask = vec![];
     for tree in self.trees.iter_mut() {
-      mask.push(!tree.try_borrow_mut()?.is_empty()?);
+      mask.push(!tree.lock().unwrap().is_empty().await?);
     }
     let p = plan(
       &bits::num_to_bits(n/base),
       &mask
     );
     let mut offset = 0;
-    let slen = self.staging.inserts.try_borrow()?.len();
     for (i,staging,trees) in p {
       let mut irows: Vec<(usize,usize)> = vec![];
       for j in staging {
@@ -410,68 +421,74 @@ P: Point, V: Value {
         offset += size;
       }
       for t in trees.iter() {
-        self.create_tree(*t)?;
+        self.create_tree(*t).await?;
       }
-      self.create_tree(i)?;
+      self.create_tree(i).await?;
       for _ in self.meta.mask.len()..i+1 {
         self.meta.mask.push(false);
       }
       let mut srows: Vec<(P,V)> = vec![];
-      for (i,j) in irows {
-        for k in i..j {
-          srows.push(
-            if k < slen { self.staging.inserts.try_borrow()?[k].clone() }
-            else { inserts[k-slen].clone() }
-          );
+      {
+        let s_inserts = self.staging.inserts.lock().unwrap();
+        for (i,j) in irows {
+          for k in i..j {
+            srows.push(
+              if k < slen { s_inserts[k].clone() }
+              else { inserts[k-slen].clone() }
+            );
+          }
         }
       }
       if trees.is_empty() {
         self.meta.mask[i] = true;
-        self.trees[i].try_borrow_mut()?.build(&srows)?;
+        self.trees[i].lock().unwrap().build(&srows).await?;
       } else {
         self.meta.mask[i] = true;
         for t in trees.iter() {
           self.meta.mask[*t] = false;
         }
-        Tree::merge(&mut self.trees, i, trees, &srows)?;
+        Tree::merge(&mut self.trees, i, trees, &srows).await?;
       }
     }
     ensure_eq!(n-(offset as u64), rem, "offset-n ({}-{}={}) != rem ({}) ",
       offset, n, (offset as u64)-n, rem);
     let mut rem_rows = vec![];
-    for k in offset..n as usize {
-      rem_rows.push(
-        if k < slen { self.staging.inserts.try_borrow()?[k].clone() }
-        else { inserts[k-slen].clone() }
-      );
+    {
+      let s_inserts = self.staging.inserts.lock().unwrap();
+      for k in offset..n as usize {
+        rem_rows.push(
+          if k < slen { s_inserts[k].clone() }
+          else { inserts[k-slen].clone() }
+        );
+      }
     }
     ensure_eq!(rem_rows.len(), rem as usize,
       "unexpected number of remaining rows (expected {}, actual {})",
       rem, rem_rows.len());
-    deletes.extend_from_slice(&self.staging.deletes.try_borrow()?);
-    self.staging.clear()?;
-    self.staging.batch(&rem_rows, &vec![])?;
+    deletes.extend_from_slice(&self.staging.deletes.lock().unwrap());
+    self.staging.clear().await?;
+    self.staging.batch(&rem_rows, &vec![]).await?;
     self.staging.delete(&deletes)?;
-    self.staging.commit()?;
+    self.staging.commit().await?;
     if !deletes.is_empty() {
-      let mut dstore = self.data_store.try_borrow_mut()?;
-      dstore.delete(&deletes)?;
-      dstore.commit()?;
+      let mut dstore = self.data_store.lock().unwrap();
+      dstore.delete(&deletes).await?;
+      dstore.commit().await?;
     }
-    self.meta.save()?;
+    self.meta.save().await?;
     Ok(())
   }
 
-  fn create_tree (&mut self, index: usize) -> Result<(),Error> {
+  async fn create_tree (&mut self, index: usize) -> Result<(),Error> {
     for i in self.trees.len()..index+1 {
       let store = (self.open_store)(&format!("tree{}",i))?;
-      self.trees.push(Rc::new(RefCell::new(Tree::open(TreeOpts {
+      self.trees.push(Arc::new(Mutex::new(Tree::open(TreeOpts {
         store,
         index,
-        data_store: Rc::clone(&self.data_store),
+        data_store: Arc::clone(&self.data_store),
         branch_factor: self.fields.branch_factor,
         max_data_size: self.fields.max_data_size,
-      })?)));
+      }).await?)));
     }
     Ok(())
   }
@@ -509,52 +526,60 @@ P: Point, V: Value {
   /// If you want to delete records, you will need to use the `Location` records
   /// you get from a query. However, these locations are only valid until the
   /// next `.batch()`.
-  pub fn query<'b> (&mut self, bbox: &'b P::Bounds)
-  -> Result<QueryIterator<'b,S,P,V>,Error> {
+  pub async fn query (&mut self, bbox: &P::Bounds)
+  -> Result<QueryStream<S,P,V>,Error> {
     let mut mask: Vec<bool> = vec![];
     for tree in self.trees.iter_mut() {
-      mask.push(!tree.try_borrow_mut()?.is_empty()?);
+      mask.push(!tree.lock().unwrap().is_empty().await?);
     }
+    let rbox = Arc::new(bbox.clone());
     let mut queries = Vec::with_capacity(1+self.trees.len());
-    queries.push(SubIterator::Staging(self.staging.query(bbox)));
+    queries.push(SubStream::Staging(self.staging.query(Arc::clone(&rbox))));
     for (i,tree) in self.trees.iter_mut().enumerate() {
       if !mask[i] { continue }
-      queries.push(SubIterator::Tree(Tree::query(Rc::clone(tree),bbox)?));
+      queries.push(SubStream::Tree(Tree::query(
+        Arc::clone(tree),
+        Arc::clone(&rbox)
+      ).await?));
     }
-    QueryIterator::new(queries, Rc::clone(&self.staging.delete_set))
+    QueryStream::new(queries, Arc::clone(&self.staging.delete_set))
   }
 }
 
-/// Iterator of `Result<(Point,Value,Location)>` data returned by `db.query()`.
-pub struct QueryIterator<'b,S,P,V> where
-S: RandomAccess<Error=Error>, P: Point, V: Value {
+type Out<P,V> = Option<Result<(P,V,Location),Error>>;
+
+/// Stream of `Result<(Point,Value,Location)>` data returned by `db.query()`.
+pub struct QueryStream<S,P,V> where
+S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   index: usize,
-  queries: Vec<SubIterator<'b,S,P,V>>,
-  deletes: Rc<RefCell<HashSet<Location>>>
+  queries: Vec<SubStream<S,P,V>>,
+  deletes: Arc<Mutex<HashSet<Location>>>,
+  pending: Option<Pin<Box<dyn Future<Output=Out<P,V>>>>>,
 }
 
-impl<'b,S,P,V> QueryIterator<'b,S,P,V> where
-S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new (queries: Vec<SubIterator<'b,S,P,V>>,
-  deletes: Rc<RefCell<HashSet<Location>>>) -> Result<Self,Error> {
-    Ok(Self { deletes, queries, index: 0 })
+impl<S,P,V> QueryStream<S,P,V> where
+S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+  pub fn new (queries: Vec<SubStream<S,P,V>>,
+  deletes: Arc<Mutex<HashSet<Location>>>) -> Result<Self,Error> {
+    Ok(Self {
+      deletes,
+      queries,
+      index: 0,
+      pending: None
+    })
   }
-}
-
-impl<'b,S,P,V> Iterator for QueryIterator<'b,S,P,V> where
-S: RandomAccess<Error=Error>, P: Point, V: Value {
-  type Item = Result<(P,V,Location),Error>;
-  fn next (&mut self) -> Option<Self::Item> {
+  async fn get_next (&mut self) -> Option<Result<(P,V,Location),Error>> {
     while !self.queries.is_empty() {
       let len = self.queries.len();
       {
         let q = &mut self.queries[self.index];
         let next = match q {
-          SubIterator::Tree(x) => {
-            let result = x.next();
+          SubStream::Tree(x) => {
+            let result = x.next().await;
             match &result {
+              Some(Err(err)) => return result,
               Some(Ok((_,_,loc))) => {
-                if iwrap![self.deletes.try_borrow()].contains(loc) {
+                if self.deletes.lock().unwrap().contains(loc) {
                   self.index = (self.index+1) % len;
                   continue;
                 }
@@ -563,7 +588,7 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
             };
             result
           },
-          SubIterator::Staging(x) => x.next()
+          SubStream::Staging(x) => x.next()
         };
         match next {
           Some(result) => {
@@ -579,5 +604,19 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
     }
     None
+  }
+}
+
+impl<S,P,V> Stream for QueryStream<S,P,V> where
+S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+  type Item = Result<(P,V,Location),Error>;
+  fn poll_next(mut self: Pin<&mut Self>, ctx: &mut Context<'_>)
+  -> Poll<Option<Self::Item>> {
+    if self.pending.is_none() {
+      let future = self.get_next();
+      let p = Box::pin(future);
+      self.pending = Some(p);
+    }
+    Future::poll(self.pending.as_mut().unwrap().as_mut(), ctx)
   }
 }

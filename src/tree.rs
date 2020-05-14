@@ -1,39 +1,15 @@
 use random_access_storage::RandomAccess;
 use failure::{Error,format_err,bail};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc,Mutex};
 use std::mem::size_of;
+//use std::{future::Future,pin::Pin,task::{Context,Poll}};
+use std::pin::Pin;
+use async_std::{future::Future,task::{Context,Poll},stream::Stream};
 
 use crate::{Point,Value,Location};
 use crate::branch::{Branch,Node};
 use crate::data::{DataStore,DataMerge,DataBatch};
 use crate::read_block::read_block;
-
-pub struct TreeIterator<'b,S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  tree: Rc<RefCell<Tree<S,P,V>>>,
-  bbox: &'b P::Bounds,
-  cursors: Vec<(u64,usize)>,
-  blocks: Vec<u64>,
-  queue: Vec<(P,V,Location)>,
-  tree_size: u64
-}
-
-impl<'b,S,P,V> TreeIterator<'b,S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn new (tree: Rc<RefCell<Tree<S,P,V>>>, bbox: &'b P::Bounds)
-  -> Result<Self,Error> {
-    let tree_size = tree.try_borrow()?.store.len()? as u64;
-    Ok(Self {
-      tree,
-      tree_size,
-      bbox,
-      cursors: vec![(0,0)],
-      blocks: vec![],
-      queue: vec![]
-    })
-  }
-}
 
 #[doc(hidden)]
 #[macro_export]
@@ -46,11 +22,49 @@ macro_rules! iwrap {
   };
 }
 
-impl<'b,S,P,V> Iterator for TreeIterator<'b,S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  type Item = Result<(P,V,Location),Error>;
-  fn next (&mut self) -> Option<Self::Item> {
-    let bf = iwrap![self.tree.try_borrow()].branch_factor;
+#[doc(hidden)]
+#[macro_export]
+macro_rules! swrap {
+  ($x:expr) => {
+    match $x {
+      Err(e) => { return Poll::Ready(Some(Err(Error::from(e)))) },
+      Ok(b) => { b }
+    }
+  };
+}
+
+type Out<P,V> = Option<Result<(P,V,Location),Error>>;
+
+pub struct TreeStream<S,P,V> where
+S: RandomAccess<Error=Error>, P: Point, V: Value {
+//F: Future<Output=Option<Result<(P,V,Location),Error>>> {
+  tree: Arc<Mutex<Tree<S,P,V>>>,
+  bbox: Arc<P::Bounds>,
+  cursors: Vec<(u64,usize)>,
+  blocks: Vec<u64>,
+  queue: Vec<(P,V,Location)>,
+  tree_size: u64,
+  pending: Option<Pin<Box<dyn Future<Output=Out<P,V>>>>>,
+}
+
+impl<S,P,V> TreeStream<S,P,V> where
+S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+//F: Future<Output=Option<Result<(P,V,Location),Error>>> {
+  pub async fn new (tree: Arc<Mutex<Tree<S,P,V>>>, bbox: Arc<P::Bounds>)
+  -> Result<Self,Error> {
+    let tree_size = tree.lock().unwrap().store.len().await? as u64;
+    Ok(Self {
+      tree,
+      tree_size,
+      bbox,
+      cursors: vec![(0,0)],
+      blocks: vec![],
+      queue: vec![],
+      pending: None
+    })
+  }
+  async fn get_next(&mut self) -> Option<Result<(P,V,Location),Error>> {
+    let bf = self.tree.lock().unwrap().branch_factor;
 
     // todo: used cached size or rolling max to implicitly read an appropriate
     // amount of data
@@ -61,9 +75,12 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       if !self.blocks.is_empty() { // data block:
         let offset = self.blocks.pop().unwrap();
-        let tree = iwrap![self.tree.try_borrow()];
-        let mut dstore = iwrap![tree.data_store.try_borrow_mut()];
-        self.queue.extend(iwrap![dstore.query(offset, self.bbox)]);
+        let rows = {
+          let tree = self.tree.lock().unwrap();
+          let mut dstore = tree.data_store.lock().unwrap();
+          iwrap![dstore.query(offset, &self.bbox).await]
+        };
+        self.queue.extend(rows);
         continue
       }
       // branch block:
@@ -71,8 +88,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       if cursor >= self.tree_size { continue }
 
       let buf = {
-        let mut tree = iwrap![self.tree.try_borrow_mut()];
-        iwrap![read_block(&mut tree.store, cursor, self.tree_size, 1024)]
+        let mut tree = self.tree.lock().unwrap();
+        iwrap![read_block(&mut tree.store, cursor, self.tree_size, 1024).await]
       };
       let (cursors,blocks) = iwrap![
         P::query_branch(&buf, &self.bbox, bf, depth)
@@ -84,10 +101,25 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
   }
 }
 
+#[async_trait::async_trait]
+impl<S,P,V> Stream for TreeStream<S,P,V> where
+S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+  type Item = Result<(P,V,Location),Error>;
+  fn poll_next(mut self: Pin<&mut Self>, ctx: &mut Context<'_>)
+  -> Poll<Option<Self::Item>> {
+    if self.pending.is_none() {
+      let future = self.get_next();
+      let p = Box::pin(future);
+      self.pending = Some(p);
+    }
+    Future::poll(self.pending.as_mut().unwrap().as_mut(), ctx)
+  }
+}
+
 pub struct TreeOpts<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub store: S,
-  pub data_store: Rc<RefCell<DataStore<S,P,V>>>,
+  pub data_store: Arc<Mutex<DataStore<S,P,V>>>,
   pub branch_factor: usize,
   pub max_data_size: usize,
   pub index: usize,
@@ -96,8 +128,8 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 pub struct Tree<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
   pub store: S,
-  data_store: Rc<RefCell<DataStore<S,P,V>>>,
-  data_merge: Rc<RefCell<DataMerge<S,P,V>>>,
+  data_store: Arc<Mutex<DataStore<S,P,V>>>,
+  data_merge: Arc<Mutex<DataMerge<S,P,V>>>,
   branch_factor: usize,
   pub bytes: u64,
   pub index: usize,
@@ -105,11 +137,11 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 }
 
 impl<S,P,V> Tree<S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  pub fn open (opts: TreeOpts<S,P,V>) -> Result<Self,Error> {
-    let bytes = opts.store.len()? as u64;
-    let data_merge = Rc::new(RefCell::new(
-      DataMerge::new(Rc::clone(&opts.data_store))));
+where S: RandomAccess<Error=Error>+Send+Sync+Unpin, P: Point, V: Value {
+  pub async fn open (opts: TreeOpts<S,P,V>) -> Result<Self,Error> {
+    let bytes = opts.store.len().await? as u64;
+    let data_merge = Arc::new(Mutex::new(
+      DataMerge::new(Arc::clone(&opts.data_store))));
     Ok(Self {
       store: opts.store,
       data_store: opts.data_store,
@@ -120,26 +152,26 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       max_data_size: opts.max_data_size,
     })
   }
-  pub fn clear (&mut self) -> Result<(),Error> {
+  pub async fn clear (&mut self) -> Result<(),Error> {
     if self.bytes > 0 {
       self.bytes = 0;
-      self.store.truncate(0)?;
+      self.store.truncate(0).await?;
     }
-    self.store.sync_all()?;
+    self.store.sync_all().await?;
     Ok(())
   }
-  pub fn is_empty (&mut self) -> Result<bool,Error> {
-    let r = self.store.is_empty()?;
+  pub async fn is_empty (&mut self) -> Result<bool,Error> {
+    let r = self.store.is_empty().await?;
     Ok(r)
   }
-  pub fn build (&mut self, rows: &Vec<(P,V)>) -> Result<(),Error> {
-    let dstore = Rc::clone(&self.data_store);
+  pub async fn build (&mut self, rows: &Vec<(P,V)>) -> Result<(),Error> {
+    let dstore = Arc::clone(&self.data_store);
     self.builder(
-      Rc::new(rows.iter().map(|row| { (row.clone(),1u64) }).collect()),
+      Arc::new(rows.iter().map(|row| { (row.clone(),1u64) }).collect()),
       dstore
-    )
+    ).await
   }
-  pub fn build_from_blocks (&mut self, blocks: Vec<(P::Bounds,u64,u64)>)
+  pub async fn build_from_blocks (&mut self, blocks: Vec<(P::Bounds,u64,u64)>)
   -> Result<(),Error> {
     let inserts: Vec<(P::Range,u64)> = blocks.iter()
       .map(|(bbox,offset,_)| { (P::bounds_to_range(*bbox),*offset) })
@@ -147,20 +179,20 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
     let rows = blocks.iter().enumerate().map(|(i,(_,_,len))| {
       (inserts[i],*len)
     }).collect();
-    let dmerge = Rc::clone(&self.data_merge);
-    self.builder(Rc::new(rows), dmerge)
+    let dmerge = Arc::clone(&self.data_merge);
+    self.builder(Arc::new(rows), dmerge).await
   }
-  pub fn builder<D,T,U> (&mut self, rows: Rc<Vec<((T,U),u64)>>,
-  data_store: Rc<RefCell<D>>) -> Result<(),Error>
+  pub async fn builder<D,T,U> (&mut self, rows: Arc<Vec<((T,U),u64)>>,
+  data_store: Arc<Mutex<D>>) -> Result<(),Error>
   where D: DataBatch<T,U>, T: Point, U: Value {
-    self.clear()?;
+    self.clear().await?;
     let bucket = (0..rows.len()).collect();
     let b = Branch::<D,T,U>::new(
       0,
       self.index,
       self.max_data_size,
       self.branch_factor,
-      Rc::clone(&data_store),
+      Arc::clone(&data_store),
       bucket, rows
     )?;
     let mut branches = vec![Node::Branch(b)];
@@ -180,9 +212,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
           Node::Branch(ref mut b) => {
             let (data,nb) = {
               let alloc = &mut {|bytes| self.alloc(bytes) };
-              b.build(alloc)?
+              b.build(alloc).await?
             };
-            self.store.write(b.offset, &data)?;
+            self.store.write(b.offset, &data).await?;
             self.bytes = self.bytes.max(b.offset + (data.len() as u64));
             nbranches.extend(nb);
           }
@@ -190,27 +222,27 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       branches = nbranches;
     }
-    self.store.sync_all()?;
+    self.store.sync_all().await?;
     Ok(())
   }
-  pub fn query<'a,'b> (tree: Rc<RefCell<Self>>, bbox: &'b P::Bounds)
-  -> Result<TreeIterator<'b,S,P,V>,Error> {
-    TreeIterator::new(tree, bbox)
+  pub async fn query (tree: Arc<Mutex<Self>>, bbox: Arc<P::Bounds>)
+  -> Result<TreeStream<S,P,V>,Error> {
+    TreeStream::new(tree, bbox).await
   }
   fn alloc (&mut self, bytes: usize) -> u64 {
     let addr = self.bytes;
     self.bytes += bytes as u64;
     addr
   }
-  pub fn merge (trees: &mut Vec<Rc<RefCell<Self>>>, dst: usize, src: Vec<usize>,
+  pub async fn merge (trees: &mut Vec<Arc<Mutex<Self>>>, dst: usize, src: Vec<usize>,
   rows: &Vec<(P,V)>) -> Result<(),Error> {
     let mut blocks = vec![];
     for i in src.iter() {
-      blocks.extend(trees[*i].try_borrow_mut()?.unbuild()?);
+      blocks.extend(trees[*i].lock().unwrap().unbuild().await?);
     }
     {
-      let tree = trees[dst].try_borrow()?;
-      let mut dstore = tree.data_store.try_borrow_mut()?;
+      let tree = trees[dst].lock().unwrap();
+      let mut dstore = tree.data_store.lock().unwrap();
       let m = tree.max_data_size;
       let mut srow_len = 0;
       for i in 0..(rows.len()+m-1)/m {
@@ -218,7 +250,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
         srow_len += srows.len();
         let inserts: Vec<(P,V)> = srows.iter()
           .map(|(p,v)| (*p,v.clone())).collect();
-        let offset = dstore.batch(&inserts.iter().map(|pv| pv).collect())?;
+        let offset = dstore.batch(&inserts.iter().map(|pv| pv).collect()).await?;
         match P::bounds(&inserts.iter().map(|(p,_)| *p).collect()) {
           None => bail!["invalid data at offset {}", offset],
           Some(bbox) => blocks.push((bbox,offset,inserts.len() as u64))
@@ -226,21 +258,21 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
       ensure_eq!(srow_len, rows.len(), "divided rows incorrectly");
     }
-    trees[dst].try_borrow_mut()?.build_from_blocks(blocks)?;
+    trees[dst].lock().unwrap().build_from_blocks(blocks).await?;
     for i in src.iter() {
-      trees[*i].try_borrow_mut()?.clear()?
+      trees[*i].lock().unwrap().clear().await?
     }
     Ok(())
   }
-  fn unbuild (&mut self) -> Result<Vec<(P::Bounds,u64,u64)>,Error> {
+  async fn unbuild (&mut self) -> Result<Vec<(P::Bounds,u64,u64)>,Error> {
     let mut offsets: Vec<u64> = vec![];
     let mut cursors: Vec<(u64,usize)> = vec![(0,0)];
     let bf = self.branch_factor;
     let n = bf*2-3;
-    let tree_size = self.store.len()? as u64;
+    let tree_size = self.store.len().await? as u64;
     while !cursors.is_empty() {
       let (c,depth) = cursors.pop().unwrap();
-      let buf = read_block(&mut self.store, c, tree_size, 1024)?;
+      let buf = read_block(&mut self.store, c, tree_size, 1024).await?;
       let mut offset = 0;
       for _i in 0..n {
         offset += P::count_bytes_at(&buf[offset..], depth)?;
@@ -281,9 +313,9 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
       }
     }
     let mut blocks = Vec::with_capacity(offsets.len());
-    let mut dstore = self.data_store.try_borrow_mut()?;
+    let mut dstore = self.data_store.lock().unwrap();
     for offset in offsets {
-      match dstore.bbox(offset)? {
+      match dstore.bbox(offset).await? {
         Some((bbox,len)) => blocks.push((bbox,offset,len)),
         None => {},
       }

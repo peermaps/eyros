@@ -40,14 +40,14 @@ pub struct SetupFields {
 /// }
 /// ```
 pub struct Setup<S,U> where
-S: RandomAccess<Error=Error>,
+S: RandomAccess<Error=Error>+Send+Sync+Unpin,
 U: (Fn(&str) -> Result<S,Error>) {
   pub open_store: U,
   pub fields: SetupFields
 }
 
 impl<S,U> Setup<S,U> where
-S: RandomAccess<Error=Error>,
+S: RandomAccess<Error=Error>+Send+Sync+Unpin,
 U: (Fn(&str) -> Result<S,Error>) {
   /// Create a new `Setup` builder from a storage function.
   pub fn new (open_store: U) -> Self {
@@ -82,8 +82,8 @@ U: (Fn(&str) -> Result<S,Error>) {
     self.fields.data_list_cache_size = size;
     self
   }
-  pub fn build<P,V> (self) -> Result<DB<S,U,P,V>,Error>
+  pub async fn build<P,V> (self) -> Result<DB<S,U,P,V>,Error>
   where P: Point, V: Value {
-    DB::open_from_setup(self)
+    DB::open_from_setup(self).await
   }
 }
