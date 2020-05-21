@@ -93,7 +93,7 @@ impl<T> Num<T> for T where T: PartialOrd+Copy+Send+Sync+Unpin
 /// minimum and maximum values).
 ///
 /// This trait has no required methods.
-pub trait Scalar: Copy+Sized+'static {}
+pub trait Scalar: Copy+Sized {}
 impl Scalar for f32 {}
 impl Scalar for f64 {}
 impl Scalar for u8 {}

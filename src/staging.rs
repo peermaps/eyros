@@ -1,4 +1,4 @@
-use crate::{Point,Value,Location,write_cache::WriteCache};
+use crate::{Point,Value,Location};
 use failure::{Error};
 use random_access_storage::RandomAccess;
 use std::collections::HashSet;
@@ -41,8 +41,8 @@ where P: Point, V: Value {
 
 pub struct Staging<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  insert_store: WriteCache<S>,
-  delete_store: WriteCache<S>,
+  insert_store: S,
+  delete_store: S,
   pub inserts: Arc<Mutex<Vec<(P,V)>>>,
   pub deletes: Arc<Mutex<Vec<Location>>>,
   pub delete_set: Arc<Mutex<HashSet<Location>>>
@@ -52,8 +52,8 @@ impl<S,P,V> Staging<S,P,V>
 where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   pub async fn open (istore: S, dstore: S) -> Result<Self,Error> {
     let mut staging = Self {
-      insert_store: WriteCache::open(istore).await?,
-      delete_store: WriteCache::open(dstore).await?,
+      insert_store: istore,
+      delete_store: dstore,
       inserts: Arc::new(Mutex::new(vec![])),
       deletes: Arc::new(Mutex::new(vec![])),
       delete_set: Arc::new(Mutex::new(HashSet::new()))

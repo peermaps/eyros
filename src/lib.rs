@@ -182,7 +182,6 @@ mod bits;
 mod data;
 mod read_block;
 mod pivots;
-mod write_cache;
 
 pub use crate::setup::{Setup,SetupFields};
 use crate::staging::{Staging,StagingIterator};
@@ -215,9 +214,9 @@ S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 /// Data to use for the payload portion stored at a coordinate.
 pub trait Value: Debug+Clone+Send+Sync
-  +ToBytes+FromBytes+CountBytes+Unpin+'static {}
+  +ToBytes+FromBytes+CountBytes+Unpin {}
 impl<T> Value for T where T: Debug+Clone+Send+Sync
-  +ToBytes+FromBytes+CountBytes+Unpin+'static {}
+  +ToBytes+FromBytes+CountBytes+Unpin {}
 
 /// Stores where a record is stored to avoid additional queries during deletes.
 /// Locations are only valid until the next `batch()`. There is no runtime check
@@ -542,7 +541,7 @@ P: Point, V: Value {
         Arc::clone(&rbox)
       ).await?));
     }
-    QueryStream::new(queries, Arc::clone(&self.staging.delete_set))
+    Ok(QueryStream::new(queries, Arc::clone(&self.staging.delete_set))?)
   }
 }
 
@@ -562,22 +561,23 @@ S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   pub fn new (queries: Vec<SubStream<S,P,V>>,
   deletes: Arc<Mutex<HashSet<Location>>>) -> Result<Self,Error> {
     Ok(Self {
+      pending: None,
       deletes,
       queries,
       index: 0,
-      pending: None
     })
   }
-  async fn get_next (&mut self) -> Option<Result<(P,V,Location),Error>> {
+  async fn get_next (&mut self) -> Out<P,V> {
     while !self.queries.is_empty() {
       let len = self.queries.len();
       {
-        let q = &mut self.queries[self.index];
+        let ix = self.index;
+        let q = &mut self.queries[ix];
         let next = match q {
           SubStream::Tree(x) => {
             let result = x.next().await;
             match &result {
-              Some(Err(err)) => return result,
+              Some(Err(_)) => return result,
               Some(Ok((_,_,loc))) => {
                 if self.deletes.lock().unwrap().contains(loc) {
                   self.index = (self.index+1) % len;
@@ -598,7 +598,8 @@ S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
           None => {}
         }
       }
-      self.queries.remove(self.index);
+      let ix = self.index;
+      self.queries.remove(ix);
       if self.queries.len() > 0 {
         self.index = self.index % self.queries.len();
       }
@@ -613,10 +614,13 @@ S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   fn poll_next(mut self: Pin<&mut Self>, ctx: &mut Context<'_>)
   -> Poll<Option<Self::Item>> {
     if self.pending.is_none() {
-      let future = self.get_next();
-      let p = Box::pin(future);
+      let p = Box::pin(self.get_next());
       self.pending = Some(p);
     }
-    Future::poll(self.pending.as_mut().unwrap().as_mut(), ctx)
+    let p = Future::poll(self.pending.as_mut().unwrap().as_mut(), ctx);
+    if let Poll::Ready(_) = p {
+      self.pending = None;
+    }
+    p
   }
 }
