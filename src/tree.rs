@@ -5,6 +5,7 @@ use std::mem::size_of;
 //use std::{future::Future,pin::Pin,task::{Context,Poll}};
 use std::pin::Pin;
 use async_std::{future::Future,task::{Context,Poll},stream::Stream};
+use futures::stream::unfold;
 
 use crate::{Point,Value,Location};
 use crate::branch::{Branch,Node};
@@ -98,21 +99,6 @@ S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
       self.cursors.extend(cursors);
     }
     None
-  }
-}
-
-#[async_trait::async_trait]
-impl<S,P,V> Stream for TreeStream<S,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
-  type Item = Result<(P,V,Location),Error>;
-  fn poll_next(mut self: Pin<&mut Self>, ctx: &mut Context<'_>)
-  -> Poll<Option<Self::Item>> {
-    if self.pending.is_none() {
-      let future = self.get_next();
-      let p = Box::pin(future);
-      self.pending = Some(p);
-    }
-    Future::poll(self.pending.as_mut().unwrap().as_mut(), ctx)
   }
 }
 
@@ -226,8 +212,15 @@ where S: RandomAccess<Error=Error>+Send+Sync+Unpin, P: Point, V: Value {
     Ok(())
   }
   pub async fn query (tree: Arc<Mutex<Self>>, bbox: Arc<P::Bounds>)
-  -> Result<TreeStream<S,P,V>,Error> {
-    TreeStream::new(tree, bbox).await
+  -> Result<impl Stream<Item=Result<(P,V,Location),Error>>,Error> {
+    let ts = TreeStream::new(tree, bbox).await?;
+    Ok(unfold(ts, async move |mut ts| {
+      let res = ts.get_next().await;
+      match res {
+        Some(p) => Some((p,ts)),
+        None => None
+      }
+    }))
   }
   fn alloc (&mut self, bytes: usize) -> u64 {
     let addr = self.bytes;

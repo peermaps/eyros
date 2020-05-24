@@ -20,6 +20,7 @@ random-access-storage = "4.0.0"
 desert = "1.0.3"
 async-std = "1.5.0"
 async-trait = "0.1.30"
+futures = "0.3.5"
 
 [dev-dependencies]
 rand = "0.6.1"

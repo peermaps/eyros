@@ -167,6 +167,7 @@
 
 #![recursion_limit="1024"]
 #![feature(nll)]
+#![feature(async_closure)]
 
 #[macro_use] mod ensure;
 mod setup;
@@ -204,11 +205,11 @@ use std::collections::HashSet;
 //use std::{future::Future,pin::Pin,task::{Poll,Context}};
 use std::pin::Pin;
 use async_std::{prelude::*,stream::Stream,future::Future,task::{Poll,Context}};
+use futures::stream::unfold;
 
 #[doc(hidden)]
-pub enum SubStream<S,P,V> where
-S: RandomAccess<Error=Error>, P: Point, V: Value {
-  Tree(TreeStream<S,P,V>),
+pub enum SubStream<P,V> where P: Point, V: Value {
+  Tree(Pin<Box<dyn Stream<Item=Result<(P,V,Location),Error>>>>),
   Staging(StagingIterator<P,V>)
 }
 
@@ -246,9 +247,9 @@ P: Point, V: Value {
 }
 
 impl<S,U,P,V> DB<S,U,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync+Unpin,
+S: RandomAccess<Error=Error>+Send+Sync+Unpin+'static,
 U: (Fn(&str) -> Result<S,Error>),
-P: Point, V: Value {
+P: Point+'static, V: Value+'static {
   /// Create a new database instance from `open_store`, a function that receives
   /// a string path as an argument and returns a Result with a RandomAccess
   /// store. The database will be created with the default configuration.
@@ -526,7 +527,7 @@ P: Point, V: Value {
   /// you get from a query. However, these locations are only valid until the
   /// next `.batch()`.
   pub async fn query (&mut self, bbox: &P::Bounds)
-  -> Result<QueryStream<S,P,V>,Error> {
+  -> Result<impl Stream<Item=Result<(P,V,Location),Error>>,Error> {
     let mut mask: Vec<bool> = vec![];
     for tree in self.trees.iter_mut() {
       mask.push(!tree.lock().unwrap().is_empty().await?);
@@ -536,29 +537,38 @@ P: Point, V: Value {
     queries.push(SubStream::Staging(self.staging.query(Arc::clone(&rbox))));
     for (i,tree) in self.trees.iter_mut().enumerate() {
       if !mask[i] { continue }
-      queries.push(SubStream::Tree(Tree::query(
+      queries.push(SubStream::Tree(Box::pin(Tree::query(
         Arc::clone(tree),
         Arc::clone(&rbox)
-      ).await?));
+      ).await?)));
     }
-    Ok(QueryStream::new(queries, Arc::clone(&self.staging.delete_set))?)
+    //Ok(QueryStream::new(queries, Arc::clone(&self.staging.delete_set))?)
+    //let mut qs = Box::pin(QueryStream::new(
+    //  queries, Arc::clone(&self.staging.delete_set))?);
+    let qs = QueryStream::new(queries, Arc::clone(&self.staging.delete_set))?;
+    Ok(unfold(qs, async move |mut qs| {
+      //let res = qs.get_next().await;
+      let res = qs.get_next().await;
+      match res {
+        Some(p) => Some((p,qs)),
+        None => None
+      }
+    }))
   }
 }
 
 type Out<P,V> = Option<Result<(P,V,Location),Error>>;
 
 /// Stream of `Result<(Point,Value,Location)>` data returned by `db.query()`.
-pub struct QueryStream<S,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+pub struct QueryStream<P,V> where P: Point, V: Value {
   index: usize,
-  queries: Vec<SubStream<S,P,V>>,
+  queries: Vec<SubStream<P,V>>,
   deletes: Arc<Mutex<HashSet<Location>>>,
   pending: Option<Pin<Box<dyn Future<Output=Out<P,V>>>>>,
 }
 
-impl<S,P,V> QueryStream<S,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
-  pub fn new (queries: Vec<SubStream<S,P,V>>,
+impl<P,V> QueryStream<P,V> where P: Point, V: Value {
+  pub fn new (queries: Vec<SubStream<P,V>>,
   deletes: Arc<Mutex<HashSet<Location>>>) -> Result<Self,Error> {
     Ok(Self {
       pending: None,
@@ -567,6 +577,7 @@ S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
       index: 0,
     })
   }
+  //async fn get_next (&mut self) -> Out<P,V> {
   async fn get_next (&mut self) -> Out<P,V> {
     while !self.queries.is_empty() {
       let len = self.queries.len();
@@ -608,12 +619,16 @@ S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   }
 }
 
-impl<S,P,V> Stream for QueryStream<S,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+/*
+impl<S,P,V> Stream for Box<QueryStream<S,P,V>> where
+S: RandomAccess<Error=Error>+Send+Sync+Unpin,
+P: Point+Unpin, V: Value+Unpin {
   type Item = Result<(P,V,Location),Error>;
   fn poll_next(mut self: Pin<&mut Self>, ctx: &mut Context<'_>)
   -> Poll<Option<Self::Item>> {
     if self.pending.is_none() {
+      //let p = Box::pin(self.get_next());
+      //self.pending = Some(p);
       let p = Box::pin(self.get_next());
       self.pending = Some(p);
     }
@@ -624,3 +639,4 @@ S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
     p
   }
 }
+*/

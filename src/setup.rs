@@ -47,7 +47,7 @@ U: (Fn(&str) -> Result<S,Error>) {
 }
 
 impl<S,U> Setup<S,U> where
-S: RandomAccess<Error=Error>+Send+Sync+Unpin,
+S: RandomAccess<Error=Error>+Send+Sync+Unpin+'static,
 U: (Fn(&str) -> Result<S,Error>) {
   /// Create a new `Setup` builder from a storage function.
   pub fn new (open_store: U) -> Self {
@@ -83,7 +83,7 @@ U: (Fn(&str) -> Result<S,Error>) {
     self
   }
   pub async fn build<P,V> (self) -> Result<DB<S,U,P,V>,Error>
-  where P: Point, V: Value {
+  where P: Point+'static, V: Value+'static {
     DB::open_from_setup(self).await
   }
 }

@@ -3,6 +3,7 @@ use random_access_storage::RandomAccess;
 use failure::{Error,ensure,bail};
 use std::{sync::{Arc,Mutex},pin::Pin};
 use std::ops::Deref;
+use std::borrow::Borrow;
 
 use lru::LruCache;
 use std::collections::HashMap;
@@ -15,14 +16,16 @@ pub trait DataBatch<P,V>: Send+Sync where P: Point, V: Value {
 
 pub struct DataMerge<S,P,V>
 where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  data_store: Pin<Box<DataStore<S,P,V>>>
+  //data_store: Pin<Box<DataStore<S,P,V>>>
+  data_store: Arc<Mutex<DataStore<S,P,V>>>
 }
 
 impl<S,P,V> DataMerge<S,P,V>
 where S: RandomAccess<Error=Error>+Unpin, P: Point, V: Value {
   pub fn new (data_store: Arc<Mutex<DataStore<S,P,V>>>) -> Self {
     Self {
-      data_store: Box::pin(*data_store.lock().unwrap().deref().clone())
+      //data_store: Box::pin(*data_store.lock().unwrap().deref().clone())
+      data_store
     }
   }
 }
@@ -34,7 +37,7 @@ where S: RandomAccess<Error=Error>+Send+Sync+Unpin, P: Point, V: Value {
     if rows.len() == 1 { // use existing address
       Ok(rows[0].1)
     } else { // combine addresses into a new block
-      let mut dstore = self.data_store.as_mut();
+      let dstore = &mut self.data_store.lock().unwrap();
       let mut combined: Vec<(P,V)> = vec![];
       let max = dstore.max_data_size;
       for row in rows {
