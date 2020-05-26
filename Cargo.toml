@@ -14,11 +14,11 @@ edition = "2018"
 
 [dependencies]
 failure = "0.1.5"
-lru = "0.1.13"
+lru = "0.4.4"
 random-access-disk = "2.0.0"
 random-access-storage = "4.0.0"
 desert = "1.0.3"
-async-std = "1.5.0"
+async-std = "1.6.0"
 async-trait = "0.1.30"
 futures = "0.3.5"
 

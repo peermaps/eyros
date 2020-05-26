@@ -2,7 +2,7 @@ use crate::{Point,Value,Location};
 use failure::{Error};
 use random_access_storage::RandomAccess;
 use std::collections::HashSet;
-use std::sync::{Arc,Mutex};
+use async_std::sync::{Arc,Mutex};
 use desert::{FromBytes,ToBytes,CountBytes};
 
 pub struct StagingIterator<P,V> where P: Point, V: Value {
@@ -12,25 +12,21 @@ pub struct StagingIterator<P,V> where P: Point, V: Value {
   index: u32
 }
 
+type Item<P,V> = Result<(P,V,Location),Error>;
 impl<P,V> StagingIterator<P,V> where P: Point, V: Value {
   pub fn new (inserts: Arc<Mutex<Vec<(P,V)>>>,
   deletes: Arc<Mutex<HashSet<Location>>>, bbox: Arc<P::Bounds>) -> Self {
     Self { index: 0, bbox, inserts, deletes }
   }
-}
-
-impl<P,V> Iterator for StagingIterator<P,V>
-where P: Point, V: Value {
-  type Item = Result<(P,V,Location),Error>;
-  fn next (&mut self) -> Option<Self::Item> {
-    let len = self.inserts.lock().unwrap().len();
+  pub async fn next (&mut self) -> Option<Item<P,V>> {
+    let len = self.inserts.lock().await.len();
     while (self.index as usize) < len {
       let i = self.index;
       self.index += 1;
-      if self.deletes.lock().unwrap().contains(&(0,i)) {
+      if self.deletes.lock().await.contains(&(0,i)) {
         continue;
       }
-      let (point,value) = &self.inserts.lock().unwrap()[i as usize];
+      let (point,value) = &self.inserts.lock().await[i as usize];
       if point.overlaps(&self.bbox) {
         return Some(Ok((*point,value.clone(),(0, i))));
       }
@@ -63,7 +59,7 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   }
   async fn load (&mut self) -> Result<(),Error> {
     if !self.insert_store.is_empty().await? {
-      let mut inserts = self.inserts.lock().unwrap();
+      let mut inserts = self.inserts.lock().await;
       inserts.clear();
       let len = self.insert_store.len().await?;
       let buf = self.insert_store.read(0, len).await?;
@@ -75,8 +71,8 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
       }
     }
     if !self.delete_store.is_empty().await? {
-      let mut deletes = self.deletes.lock().unwrap();
-      let mut delete_set = self.delete_set.lock().unwrap();
+      let mut deletes = self.deletes.lock().await;
+      let mut delete_set = self.delete_set.lock().await;
       deletes.clear();
       delete_set.clear();
       let len = self.delete_store.len().await?;
@@ -98,22 +94,22 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   }
   pub async fn clear_inserts (&mut self) -> Result<(),Error> {
     self.insert_store.truncate(0).await?;
-    self.inserts.lock().unwrap().clear();
+    self.inserts.lock().await.clear();
     Ok(())
   }
   pub async fn clear_deletes (&mut self) -> Result<(),Error> {
     self.delete_store.truncate(0).await?;
-    self.deletes.lock().unwrap().clear();
-    self.delete_set.lock().unwrap().clear();
+    self.deletes.lock().await.clear();
+    self.delete_set.lock().await.clear();
     Ok(())
   }
-  pub fn delete (&mut self, deletes: &Vec<Location>) -> Result<(),Error> {
+  pub async fn delete (&mut self, deletes: &Vec<Location>) -> Result<(),Error> {
     let mut del_set: HashSet<u32> = HashSet::new();
     for delete in deletes {
       if delete.0 == 0 { del_set.insert(delete.1); }
     }
     let mut i = 0;
-    self.inserts.lock().unwrap().retain(|_row| {
+    self.inserts.lock().await.retain(|_row| {
       let j = i;
       i += 1;
       !del_set.contains(&j)
@@ -123,10 +119,10 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   pub async fn bytes (&mut self) -> Result<u64,Error> {
     Ok(self.insert_store.len().await? + self.delete_store.len().await?)
   }
-  pub fn len (&mut self) -> Result<usize,Error> {
+  pub async fn len (&mut self) -> Result<usize,Error> {
     Ok(
-      self.inserts.lock().unwrap().len()
-      + self.deletes.lock().unwrap().len()
+      self.inserts.lock().await.len()
+      + self.deletes.lock().await.len()
     )
   }
   pub async fn batch (&mut self, inserts: &Vec<(P,V)>, deletes: &Vec<Location>)
@@ -160,10 +156,10 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
     self.insert_store.write(i_offset,&ibuf).await?;
     let d_offset = self.delete_store.len().await?;
     self.delete_store.write(d_offset,&dbuf).await?;
-    self.inserts.lock().unwrap().extend_from_slice(inserts);
-    self.deletes.lock().unwrap().extend_from_slice(deletes);
+    self.inserts.lock().await.extend_from_slice(inserts);
+    self.deletes.lock().await.extend_from_slice(deletes);
     {
-      let mut delete_set = self.delete_set.lock().unwrap();
+      let mut delete_set = self.delete_set.lock().await;
       for delete in deletes {
         delete_set.insert(*delete);
       }

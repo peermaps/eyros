@@ -1,9 +1,7 @@
 use crate::{Point,Value,Location,read_block::read_block};
 use random_access_storage::RandomAccess;
 use failure::{Error,ensure,bail};
-use std::{sync::{Arc,Mutex},pin::Pin};
-use std::ops::Deref;
-use std::borrow::Borrow;
+use async_std::{sync::{Arc,Mutex}};
 
 use lru::LruCache;
 use std::collections::HashMap;
@@ -15,28 +13,36 @@ pub trait DataBatch<P,V>: Send+Sync where P: Point, V: Value {
 }
 
 pub struct DataMerge<S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
-  //data_store: Pin<Box<DataStore<S,P,V>>>
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   data_store: Arc<Mutex<DataStore<S,P,V>>>
 }
 
 impl<S,P,V> DataMerge<S,P,V>
-where S: RandomAccess<Error=Error>+Unpin, P: Point, V: Value {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   pub fn new (data_store: Arc<Mutex<DataStore<S,P,V>>>) -> Self {
-    Self {
-      //data_store: Box::pin(*data_store.lock().unwrap().deref().clone())
-      data_store
-    }
+    Self { data_store }
   }
 }
 
 #[async_trait::async_trait]
 impl<S,P,V> DataBatch<P::Range,u64> for DataMerge<S,P,V>
-where S: RandomAccess<Error=Error>+Send+Sync+Unpin, P: Point, V: Value {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   async fn batch (&mut self, rows: &Vec<&(P::Range,u64)>) -> Result<u64,Error> {
     if rows.len() == 1 { // use existing address
       Ok(rows[0].1)
     } else { // combine addresses into a new block
+      let mut combined: Vec<(P,V)> = vec![];
+      let mut dstore = self.data_store.lock().await;
+      let max = dstore.max_data_size;
+      for row in rows {
+        let pvs: Vec<(P,V)> = dstore.list(row.1).await?.iter().map(|c| {
+          (c.0, c.1.clone())
+        }).collect();
+        combined.extend(pvs);
+      }
+      ensure![combined.len() <= max, "data size limit exceeded in data merge"];
+      Ok(dstore.batch(&combined.iter().collect()).await?)
+      /*
       let dstore = &mut self.data_store.lock().unwrap();
       let mut combined: Vec<(P,V)> = vec![];
       let max = dstore.max_data_size;
@@ -48,13 +54,14 @@ where S: RandomAccess<Error=Error>+Send+Sync+Unpin, P: Point, V: Value {
       }
       ensure![combined.len() <= max, "data size limit exceeded in data merge"];
       Ok(dstore.batch(&combined.iter().collect()).await?)
+      */
     }
   }
 }
 
 //#[derive(Debug,Clone)]
 pub struct DataStore<S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   store: S,
   range: DataRange<S,P>,
   list_cache: LruCache<u64,Vec<(P,V,Location)>>,
@@ -63,7 +70,7 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 
 #[async_trait::async_trait]
 impl<S,P,V> DataBatch<P,V> for DataStore<S,P,V>
-where S: RandomAccess<Error=Error>+Send+Sync+Unpin, P: Point, V: Value {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   async fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error> {
     ensure![rows.len() <= self.max_data_size,
       "data size limit exceeded in data merge"];
@@ -97,7 +104,7 @@ where S: RandomAccess<Error=Error>+Send+Sync+Unpin, P: Point, V: Value {
 }
 
 impl<S,P,V> DataStore<S,P,V>
-where S: RandomAccess<Error=Error>, P: Point, V: Value {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   pub fn open (store: S, range_store: S, max_data_size: usize,
   bbox_cache_size: usize, list_cache_size: usize) -> Result<Self,Error> {
     Ok(Self {
@@ -224,13 +231,13 @@ where S: RandomAccess<Error=Error>, P: Point, V: Value {
 }
 
 pub struct DataRange<S,P>
-where S: RandomAccess<Error=Error>, P: Point {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point {
   pub store: S,
   pub cache: LruCache<u64,(P::Bounds,u64)>
 }
 
 impl<S,P> DataRange<S,P>
-where S: RandomAccess<Error=Error>, P: Point {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point {
   pub fn new (store: S, cache_size: usize) -> Self {
     Self {
       store,

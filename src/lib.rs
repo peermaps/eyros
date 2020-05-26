@@ -199,7 +199,7 @@ use random_access_storage::RandomAccess;
 use failure::{Error,format_err};
 use desert::{ToBytes,FromBytes,CountBytes};
 use std::fmt::Debug;
-use std::sync::{Arc,Mutex};
+use async_std::sync::{Arc,Mutex};
 use std::collections::HashSet;
 
 //use std::{future::Future,pin::Pin,task::{Poll,Context}};
@@ -235,7 +235,7 @@ pub enum Row<P,V> where P: Point, V: Value {
 
 /// Top-level database API.
 pub struct DB<S,U,P,V> where
-S: RandomAccess<Error=Error>+Unpin,
+S: RandomAccess<Error=Error>+Send+Sync+Unpin,
 U: (Fn(&str) -> Result<S,Error>),
 P: Point, V: Value {
   open_store: U,
@@ -379,8 +379,8 @@ P: Point+'static, V: Value+'static {
       })
       .collect();
     let (slen,n,ndel) = {
-      let s_inserts = self.staging.inserts.lock().unwrap();
-      let s_deletes = self.staging.deletes.lock().unwrap();
+      let s_inserts = self.staging.inserts.lock().await;
+      let s_deletes = self.staging.deletes.lock().await;
       let slen = s_inserts.len();
       let n = (slen + inserts.len()) as u64;
       let ndel = (s_deletes.len() + deletes.len()) as u64;
@@ -388,12 +388,12 @@ P: Point+'static, V: Value+'static {
     };
     let base = self.fields.base_size as u64;
     if ndel >= base && n <= base {
-      deletes.extend_from_slice(&self.staging.deletes.lock().unwrap());
-      let mut dstore = self.data_store.lock().unwrap();
+      deletes.extend_from_slice(&self.staging.deletes.lock().await);
+      let mut dstore = self.data_store.lock().await;
       dstore.delete(&deletes).await?;
       dstore.commit().await?;
       self.staging.batch(&inserts, &vec![]).await?;
-      self.staging.delete(&deletes)?;
+      self.staging.delete(&deletes).await?;
       self.staging.clear_deletes().await?;
       self.staging.commit().await?;
       return Ok(())
@@ -406,7 +406,7 @@ P: Point+'static, V: Value+'static {
     let rem = n - count;
     let mut mask = vec![];
     for tree in self.trees.iter_mut() {
-      mask.push(!tree.lock().unwrap().is_empty().await?);
+      mask.push(!tree.lock().await.is_empty().await?);
     }
     let p = plan(
       &bits::num_to_bits(n/base),
@@ -429,7 +429,7 @@ P: Point+'static, V: Value+'static {
       }
       let mut srows: Vec<(P,V)> = vec![];
       {
-        let s_inserts = self.staging.inserts.lock().unwrap();
+        let s_inserts = self.staging.inserts.lock().await;
         for (i,j) in irows {
           for k in i..j {
             srows.push(
@@ -441,7 +441,7 @@ P: Point+'static, V: Value+'static {
       }
       if trees.is_empty() {
         self.meta.mask[i] = true;
-        self.trees[i].lock().unwrap().build(&srows).await?;
+        self.trees[i].lock().await.build(&srows).await?;
       } else {
         self.meta.mask[i] = true;
         for t in trees.iter() {
@@ -454,7 +454,7 @@ P: Point+'static, V: Value+'static {
       offset, n, (offset as u64)-n, rem);
     let mut rem_rows = vec![];
     {
-      let s_inserts = self.staging.inserts.lock().unwrap();
+      let s_inserts = self.staging.inserts.lock().await;
       for k in offset..n as usize {
         rem_rows.push(
           if k < slen { s_inserts[k].clone() }
@@ -465,13 +465,13 @@ P: Point+'static, V: Value+'static {
     ensure_eq!(rem_rows.len(), rem as usize,
       "unexpected number of remaining rows (expected {}, actual {})",
       rem, rem_rows.len());
-    deletes.extend_from_slice(&self.staging.deletes.lock().unwrap());
+    deletes.extend_from_slice(&self.staging.deletes.lock().await);
     self.staging.clear().await?;
     self.staging.batch(&rem_rows, &vec![]).await?;
-    self.staging.delete(&deletes)?;
+    self.staging.delete(&deletes).await?;
     self.staging.commit().await?;
     if !deletes.is_empty() {
-      let mut dstore = self.data_store.lock().unwrap();
+      let mut dstore = self.data_store.lock().await;
       dstore.delete(&deletes).await?;
       dstore.commit().await?;
     }
@@ -530,7 +530,7 @@ P: Point+'static, V: Value+'static {
   -> Result<impl Stream<Item=Result<(P,V,Location),Error>>,Error> {
     let mut mask: Vec<bool> = vec![];
     for tree in self.trees.iter_mut() {
-      mask.push(!tree.lock().unwrap().is_empty().await?);
+      mask.push(!tree.lock().await.is_empty().await?);
     }
     let rbox = Arc::new(bbox.clone());
     let mut queries = Vec::with_capacity(1+self.trees.len());
@@ -542,12 +542,8 @@ P: Point+'static, V: Value+'static {
         Arc::clone(&rbox)
       ).await?)));
     }
-    //Ok(QueryStream::new(queries, Arc::clone(&self.staging.delete_set))?)
-    //let mut qs = Box::pin(QueryStream::new(
-    //  queries, Arc::clone(&self.staging.delete_set))?);
     let qs = QueryStream::new(queries, Arc::clone(&self.staging.delete_set))?;
     Ok(unfold(qs, async move |mut qs| {
-      //let res = qs.get_next().await;
       let res = qs.get_next().await;
       match res {
         Some(p) => Some((p,qs)),
@@ -577,7 +573,6 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
       index: 0,
     })
   }
-  //async fn get_next (&mut self) -> Out<P,V> {
   async fn get_next (&mut self) -> Out<P,V> {
     while !self.queries.is_empty() {
       let len = self.queries.len();
@@ -590,7 +585,7 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
             match &result {
               Some(Err(_)) => return result,
               Some(Ok((_,_,loc))) => {
-                if self.deletes.lock().unwrap().contains(loc) {
+                if self.deletes.lock().await.contains(loc) {
                   self.index = (self.index+1) % len;
                   continue;
                 }
@@ -599,7 +594,7 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
             };
             result
           },
-          SubStream::Staging(x) => x.next()
+          SubStream::Staging(x) => x.next().await
         };
         match next {
           Some(result) => {
@@ -618,25 +613,3 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
     None
   }
 }
-
-/*
-impl<S,P,V> Stream for Box<QueryStream<S,P,V>> where
-S: RandomAccess<Error=Error>+Send+Sync+Unpin,
-P: Point+Unpin, V: Value+Unpin {
-  type Item = Result<(P,V,Location),Error>;
-  fn poll_next(mut self: Pin<&mut Self>, ctx: &mut Context<'_>)
-  -> Poll<Option<Self::Item>> {
-    if self.pending.is_none() {
-      //let p = Box::pin(self.get_next());
-      //self.pending = Some(p);
-      let p = Box::pin(self.get_next());
-      self.pending = Some(p);
-    }
-    let p = Future::poll(self.pending.as_mut().unwrap().as_mut(), ctx);
-    if let Poll::Ready(_) = p {
-      self.pending = None;
-    }
-    p
-  }
-}
-*/
