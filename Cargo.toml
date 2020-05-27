@@ -14,11 +14,11 @@ edition = "2018"
 
 [dependencies]
 failure = "0.1.5"
-lru = "0.1.13"
-random-access-disk = "2.0.0"
-random-access-storage = "4.0.0"
+lru = "0.4.4"
+#random-access-disk = "2.0.0"
+#random-access-storage = "4.0.0"
 desert = "1.0.3"
-async-std = "1.5.0"
+#async-std = "1.6.0"
 async-trait = "0.1.30"
 futures = "0.3.5"
 
@@ -26,3 +26,15 @@ futures = "0.3.5"
 rand = "0.6.1"
 random = "0.12.2"
 tempfile = "3.0.7"
+
+[dependencies.async-std]
+version = "1.6.0"
+features = ["attributes"]
+
+[dependencies.random-access-disk]
+version = "2.0.0"
+path = "../../datrs/random-access-disk"
+
+[dependencies.random-access-storage]
+version = "4.0.0"
+path = "../../datrs/random-access-storage"

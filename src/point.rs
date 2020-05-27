@@ -20,7 +20,7 @@ use desert::{ToBytes,FromBytes,CountBytes};
 pub type Cursor = (u64,usize);
 pub type Block = u64;
 
-pub trait Point: Copy+Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes+Unpin {
+pub trait Point: Copy+Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes {
   /// Bounding-box corresponding to `(min,max)` as used by `db.query(bbox)`.
   type Bounds: Copy+Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes;
 
@@ -83,9 +83,9 @@ pub trait Point: Copy+Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes+Unpin {
     -> Result<String,Error>;
 }
 
-pub trait Num<T>: PartialOrd+Copy+Send+Sync+ToBytes+FromBytes+CountBytes+Unpin
+pub trait Num<T>: PartialOrd+Copy+Send+Sync+ToBytes+FromBytes+CountBytes
   +Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
-impl<T> Num<T> for T where T: PartialOrd+Copy+Send+Sync+Unpin
+impl<T> Num<T> for T where T: PartialOrd+Copy+Send+Sync
   +ToBytes+FromBytes+CountBytes
   +Debug+Scalar+From<u8>+Div<T,Output=T>+Add<T,Output=T> {}
 

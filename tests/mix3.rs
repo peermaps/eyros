@@ -1,27 +1,29 @@
+#![feature(async_closure)]
 use eyros::{DB,Row,Point,Mix,Mix3};
 use random::{Source,default as rand};
 use failure::Error;
 use random_access_disk::RandomAccessDisk;
 use tempfile::Builder as Tmpfile;
 use std::cmp::Ordering;
+use async_std::prelude::*;
 
 type P = Mix3<f32,f32,u64>;
 type V = u32;
 
-#[test]
-fn mix3() -> Result<(),Error> {
+#[async_std::test]
+async fn mix3() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
   let mut db: DB<_,_,P,V> = DB::open(
-    |name: &str| -> Result<RandomAccessDisk,Error> {
+    async move |name: &str| -> Result<RandomAccessDisk,Error> {
       let p = dir.path().join(name);
       Ok(RandomAccessDisk::builder(p)
         .auto_sync(false)
-        .build()?)
+        .build().await?)
     }
-  )?;
+  ).await?;
   let mut inserted: Vec<(P,V)> = vec![];
   let mut r = rand().seed([13,12]);
-  for _n in 0..50 {
+  for _n in 0..50_usize {
     let batch: Vec<Row<P,V>> = (0..1_000).map(|_| {
       let (point,value) = {
         let z = if r.read::<f32>() < 0.5 {
@@ -56,7 +58,7 @@ fn mix3() -> Result<(),Error> {
       inserted.push((point,value));
       Row::Insert(point,value)
     }).collect();
-    db.batch(&batch)?;
+    db.batch(&batch).await?;
   }
   let bbox = (
     (-0.5,-0.8,6148914691236517205u64),
@@ -67,7 +69,8 @@ fn mix3() -> Result<(),Error> {
     .map(|(p,v)| (*p,*v))
     .collect();
   let mut results = vec![];
-  for result in db.query(&bbox)? {
+  let stream = db.query(&bbox).await?;
+  while let Some(result) = stream.next().await {
     let r = result?;
     results.push((r.0,r.1));
   }

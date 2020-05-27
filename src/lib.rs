@@ -199,12 +199,12 @@ use random_access_storage::RandomAccess;
 use failure::{Error,format_err};
 use desert::{ToBytes,FromBytes,CountBytes};
 use std::fmt::Debug;
-use std::sync::{Arc,Mutex};
+use async_std::{sync::{Arc,Mutex},future::Future};
 use std::collections::HashSet;
 
 //use std::{future::Future,pin::Pin,task::{Poll,Context}};
 use std::pin::Pin;
-use async_std::{prelude::*,stream::Stream,future::Future,task::{Poll,Context}};
+use async_std::{prelude::*,stream::Stream};
 use futures::stream::unfold;
 
 #[doc(hidden)]
@@ -215,9 +215,9 @@ pub enum SubStream<P,V> where P: Point, V: Value {
 
 /// Data to use for the payload portion stored at a coordinate.
 pub trait Value: Debug+Clone+Send+Sync
-  +ToBytes+FromBytes+CountBytes+Unpin {}
+  +ToBytes+FromBytes+CountBytes {}
 impl<T> Value for T where T: Debug+Clone+Send+Sync
-  +ToBytes+FromBytes+CountBytes+Unpin {}
+  +ToBytes+FromBytes+CountBytes {}
 
 /// Stores where a record is stored to avoid additional queries during deletes.
 /// Locations are only valid until the next `batch()`. There is no runtime check
@@ -235,8 +235,8 @@ pub enum Row<P,V> where P: Point, V: Value {
 
 /// Top-level database API.
 pub struct DB<S,U,P,V> where
-S: RandomAccess<Error=Error>+Unpin,
-U: (Fn(&str) -> Result<S,Error>),
+S: RandomAccess<Error=Error>+Send+Sync,
+U: Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin>,
 P: Point, V: Value {
   open_store: U,
   pub trees: Vec<Arc<Mutex<Tree<S,P,V>>>>,
@@ -247,8 +247,8 @@ P: Point, V: Value {
 }
 
 impl<S,U,P,V> DB<S,U,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync+Unpin+'static,
-U: (Fn(&str) -> Result<S,Error>),
+S: RandomAccess<Error=Error>+Send+Sync+'static,
+U: Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin>,
 P: Point+'static, V: Value+'static {
   /// Create a new database instance from `open_store`, a function that receives
   /// a string path as an argument and returns a Result with a RandomAccess
@@ -335,14 +335,14 @@ P: Point+'static, V: Value+'static {
   /// change . There is no runtime check yet to ensure a database is opened with
   /// the same configuration that it was created with.
   pub async fn open_from_setup(setup: Setup<S,U>) -> Result<Self,Error> {
-    let meta = Meta::open((setup.open_store)("meta")?).await?;
+    let meta = Meta::open((setup.open_store)("meta").await?).await?;
     let staging = Staging::open(
-      (setup.open_store)("staging_inserts")?,
-      (setup.open_store)("staging_deletes")?
+      (setup.open_store)("staging_inserts").await?,
+      (setup.open_store)("staging_deletes").await?
     ).await?;
     let data_store = DataStore::open(
-      (setup.open_store)("data")?,
-      (setup.open_store)("range")?,
+      (setup.open_store)("data").await?,
+      (setup.open_store)("range").await?,
       setup.fields.max_data_size,
       setup.fields.bbox_cache_size,
       setup.fields.data_list_cache_size
@@ -379,8 +379,8 @@ P: Point+'static, V: Value+'static {
       })
       .collect();
     let (slen,n,ndel) = {
-      let s_inserts = self.staging.inserts.lock().unwrap();
-      let s_deletes = self.staging.deletes.lock().unwrap();
+      let s_inserts = self.staging.inserts.lock().await;
+      let s_deletes = self.staging.deletes.lock().await;
       let slen = s_inserts.len();
       let n = (slen + inserts.len()) as u64;
       let ndel = (s_deletes.len() + deletes.len()) as u64;
@@ -388,12 +388,12 @@ P: Point+'static, V: Value+'static {
     };
     let base = self.fields.base_size as u64;
     if ndel >= base && n <= base {
-      deletes.extend_from_slice(&self.staging.deletes.lock().unwrap());
-      let mut dstore = self.data_store.lock().unwrap();
+      deletes.extend_from_slice(&self.staging.deletes.lock().await);
+      let mut dstore = self.data_store.lock().await;
       dstore.delete(&deletes).await?;
       dstore.commit().await?;
       self.staging.batch(&inserts, &vec![]).await?;
-      self.staging.delete(&deletes)?;
+      self.staging.delete(&deletes).await?;
       self.staging.clear_deletes().await?;
       self.staging.commit().await?;
       return Ok(())
@@ -406,7 +406,7 @@ P: Point+'static, V: Value+'static {
     let rem = n - count;
     let mut mask = vec![];
     for tree in self.trees.iter_mut() {
-      mask.push(!tree.lock().unwrap().is_empty().await?);
+      mask.push(!tree.lock().await.is_empty().await?);
     }
     let p = plan(
       &bits::num_to_bits(n/base),
@@ -429,7 +429,7 @@ P: Point+'static, V: Value+'static {
       }
       let mut srows: Vec<(P,V)> = vec![];
       {
-        let s_inserts = self.staging.inserts.lock().unwrap();
+        let s_inserts = self.staging.inserts.lock().await;
         for (i,j) in irows {
           for k in i..j {
             srows.push(
@@ -441,7 +441,7 @@ P: Point+'static, V: Value+'static {
       }
       if trees.is_empty() {
         self.meta.mask[i] = true;
-        self.trees[i].lock().unwrap().build(&srows).await?;
+        self.trees[i].lock().await.build(&srows).await?;
       } else {
         self.meta.mask[i] = true;
         for t in trees.iter() {
@@ -454,7 +454,7 @@ P: Point+'static, V: Value+'static {
       offset, n, (offset as u64)-n, rem);
     let mut rem_rows = vec![];
     {
-      let s_inserts = self.staging.inserts.lock().unwrap();
+      let s_inserts = self.staging.inserts.lock().await;
       for k in offset..n as usize {
         rem_rows.push(
           if k < slen { s_inserts[k].clone() }
@@ -465,13 +465,13 @@ P: Point+'static, V: Value+'static {
     ensure_eq!(rem_rows.len(), rem as usize,
       "unexpected number of remaining rows (expected {}, actual {})",
       rem, rem_rows.len());
-    deletes.extend_from_slice(&self.staging.deletes.lock().unwrap());
+    deletes.extend_from_slice(&self.staging.deletes.lock().await);
     self.staging.clear().await?;
     self.staging.batch(&rem_rows, &vec![]).await?;
-    self.staging.delete(&deletes)?;
+    self.staging.delete(&deletes).await?;
     self.staging.commit().await?;
     if !deletes.is_empty() {
-      let mut dstore = self.data_store.lock().unwrap();
+      let mut dstore = self.data_store.lock().await;
       dstore.delete(&deletes).await?;
       dstore.commit().await?;
     }
@@ -481,7 +481,7 @@ P: Point+'static, V: Value+'static {
 
   async fn create_tree (&mut self, index: usize) -> Result<(),Error> {
     for i in self.trees.len()..index+1 {
-      let store = (self.open_store)(&format!("tree{}",i))?;
+      let store = (self.open_store)(&format!("tree{}",i)).await?;
       self.trees.push(Arc::new(Mutex::new(Tree::open(TreeOpts {
         store,
         index,
@@ -530,7 +530,7 @@ P: Point+'static, V: Value+'static {
   -> Result<impl Stream<Item=Result<(P,V,Location),Error>>,Error> {
     let mut mask: Vec<bool> = vec![];
     for tree in self.trees.iter_mut() {
-      mask.push(!tree.lock().unwrap().is_empty().await?);
+      mask.push(!tree.lock().await.is_empty().await?);
     }
     let rbox = Arc::new(bbox.clone());
     let mut queries = Vec::with_capacity(1+self.trees.len());
@@ -542,12 +542,8 @@ P: Point+'static, V: Value+'static {
         Arc::clone(&rbox)
       ).await?)));
     }
-    //Ok(QueryStream::new(queries, Arc::clone(&self.staging.delete_set))?)
-    //let mut qs = Box::pin(QueryStream::new(
-    //  queries, Arc::clone(&self.staging.delete_set))?);
     let qs = QueryStream::new(queries, Arc::clone(&self.staging.delete_set))?;
     Ok(unfold(qs, async move |mut qs| {
-      //let res = qs.get_next().await;
       let res = qs.get_next().await;
       match res {
         Some(p) => Some((p,qs)),
@@ -563,21 +559,18 @@ type Out<P,V> = Option<Result<(P,V,Location),Error>>;
 pub struct QueryStream<P,V> where P: Point, V: Value {
   index: usize,
   queries: Vec<SubStream<P,V>>,
-  deletes: Arc<Mutex<HashSet<Location>>>,
-  pending: Option<Pin<Box<dyn Future<Output=Out<P,V>>>>>,
+  deletes: Arc<Mutex<HashSet<Location>>>
 }
 
 impl<P,V> QueryStream<P,V> where P: Point, V: Value {
   pub fn new (queries: Vec<SubStream<P,V>>,
   deletes: Arc<Mutex<HashSet<Location>>>) -> Result<Self,Error> {
     Ok(Self {
-      pending: None,
       deletes,
       queries,
       index: 0,
     })
   }
-  //async fn get_next (&mut self) -> Out<P,V> {
   async fn get_next (&mut self) -> Out<P,V> {
     while !self.queries.is_empty() {
       let len = self.queries.len();
@@ -590,7 +583,7 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
             match &result {
               Some(Err(_)) => return result,
               Some(Ok((_,_,loc))) => {
-                if self.deletes.lock().unwrap().contains(loc) {
+                if self.deletes.lock().await.contains(loc) {
                   self.index = (self.index+1) % len;
                   continue;
                 }
@@ -599,7 +592,7 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
             };
             result
           },
-          SubStream::Staging(x) => x.next()
+          SubStream::Staging(x) => x.next().await
         };
         match next {
           Some(result) => {
@@ -618,25 +611,3 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
     None
   }
 }
-
-/*
-impl<S,P,V> Stream for Box<QueryStream<S,P,V>> where
-S: RandomAccess<Error=Error>+Send+Sync+Unpin,
-P: Point+Unpin, V: Value+Unpin {
-  type Item = Result<(P,V,Location),Error>;
-  fn poll_next(mut self: Pin<&mut Self>, ctx: &mut Context<'_>)
-  -> Poll<Option<Self::Item>> {
-    if self.pending.is_none() {
-      //let p = Box::pin(self.get_next());
-      //self.pending = Some(p);
-      let p = Box::pin(self.get_next());
-      self.pending = Some(p);
-    }
-    let p = Future::poll(self.pending.as_mut().unwrap().as_mut(), ctx);
-    if let Poll::Ready(_) = p {
-      self.pending = None;
-    }
-    p
-  }
-}
-*/

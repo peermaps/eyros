@@ -2,7 +2,7 @@ use crate::{data::DataBatch,point::Point,Value,pivots};
 use crate::order::{order,order_len};
 use std::cmp::Ordering;
 use std::mem::size_of;
-use std::sync::{Arc,Mutex};
+use async_std::sync::{Arc,Mutex};
 use failure::{Error,bail,format_err};
 use desert::ToBytes;
 
@@ -163,7 +163,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
           nodes.push(Node::Empty);
           bitfield.push(false);
         } else if size as usize <= self.max_data_size {
-          let mut dstore = self.data_batch.lock().unwrap();
+          let mut dstore = self.data_batch.lock().await;
           let offset = dstore.batch(&bucket.iter().map(|b| {
             &self.rows[*b].0
           }).collect()).await?;
