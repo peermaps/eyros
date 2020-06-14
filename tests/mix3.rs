@@ -13,14 +13,12 @@ type V = u32;
 #[async_std::test]
 async fn mix3() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<_,_,P,V> = DB::open(
-    async move |name: &str| -> Result<RandomAccessDisk,Error> {
-      let p = dir.path().join(name);
-      Ok(RandomAccessDisk::builder(p)
-        .auto_sync(false)
-        .build().await?)
-    }
-  ).await?;
+  let mut db = DB::open((async move |name: &str| {
+    let p = dir.path().join(name);
+    Box::new(RandomAccessDisk::builder(p)
+      .auto_sync(false)
+      .build())
+  }).into()).await?;
   let mut inserted: Vec<(P,V)> = vec![];
   let mut r = rand().seed([13,12]);
   for _n in 0..50_usize {

@@ -41,15 +41,15 @@ pub struct SetupFields {
 /// }
 /// ```
 pub struct Setup<S,U> where
-S: RandomAccess<Error=Error>+Send+Sync,
-U: (Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin>) {
+S: RandomAccess<Error=Error>+Send+Sync+Unpin,
+U: (Fn(&str) -> Box<dyn Future<Output=Result<S,S::Error>>+Unpin>) {
   pub open_store: U,
   pub fields: SetupFields
 }
 
 impl<S,U> Setup<S,U> where
-S: RandomAccess<Error=Error>+Send+Sync+'static,
-U: (Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin>) {
+S: RandomAccess<Error=Error>+Send+Sync+'static+Unpin,
+U: (Fn(&str) -> Box<dyn Future<Output=Result<S,S::Error>>+Unpin>) {
   /// Create a new `Setup` builder from a storage function.
   pub fn new (open_store: U) -> Self {
     Self {

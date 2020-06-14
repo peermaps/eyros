@@ -202,10 +202,11 @@ use std::fmt::Debug;
 use async_std::{sync::{Arc,Mutex},future::Future};
 use std::collections::HashSet;
 
-//use std::{future::Future,pin::Pin,task::{Poll,Context}};
 use std::pin::Pin;
 use async_std::{prelude::*,stream::Stream};
-use futures::stream::unfold;
+//use futures::stream::unfold;
+mod unfold;
+use unfold::unfold;
 
 #[doc(hidden)]
 pub enum SubStream<P,V> where P: Point, V: Value {
@@ -235,8 +236,8 @@ pub enum Row<P,V> where P: Point, V: Value {
 
 /// Top-level database API.
 pub struct DB<S,U,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync,
-U: Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin>,
+S: RandomAccess<Error=Error>+Send+Sync+Unpin,
+U: Fn(&str) -> Box<dyn Future<Output=Result<S,S::Error>>+Unpin>,
 P: Point, V: Value {
   open_store: U,
   pub trees: Vec<Arc<Mutex<Tree<S,P,V>>>>,
@@ -247,8 +248,8 @@ P: Point, V: Value {
 }
 
 impl<S,U,P,V> DB<S,U,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync+'static,
-U: Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin>,
+S: RandomAccess<Error=Error>+Send+Sync+'static+Unpin,
+U: Fn(&str) -> Box<dyn Future<Output=Result<S,S::Error>>+Unpin>,
 P: Point+'static, V: Value+'static {
   /// Create a new database instance from `open_store`, a function that receives
   /// a string path as an argument and returns a Result with a RandomAccess
@@ -526,8 +527,8 @@ P: Point+'static, V: Value+'static {
   /// If you want to delete records, you will need to use the `Location` records
   /// you get from a query. However, these locations are only valid until the
   /// next `.batch()`.
-  pub async fn query (&mut self, bbox: &P::Bounds)
-  -> Result<impl Stream<Item=Result<(P,V,Location),Error>>,Error> {
+  pub async fn query<X> (&mut self, bbox: &P::Bounds)
+  -> Result<Box<impl Stream<Item=Result<(P,V,Location),Error>> >,Error> {
     let mut mask: Vec<bool> = vec![];
     for tree in self.trees.iter_mut() {
       mask.push(!tree.lock().await.is_empty().await?);
@@ -543,13 +544,13 @@ P: Point+'static, V: Value+'static {
       ).await?)));
     }
     let qs = QueryStream::new(queries, Arc::clone(&self.staging.delete_set))?;
-    Ok(unfold(qs, async move |mut qs| {
+    Ok(Box::new(unfold(qs, async move |mut qs| {
       let res = qs.get_next().await;
       match res {
         Some(p) => Some((p,qs)),
         None => None
       }
-    }))
+    })))
   }
 }
 
