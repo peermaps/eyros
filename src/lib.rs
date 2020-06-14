@@ -556,11 +556,14 @@ P: Point+'static, V: Value+'static {
 
 type Out<P,V> = Option<Result<(P,V,Location),Error>>;
 
-/// Stream of `Result<(Point,Value,Location)>` data returned by `db.query()`.
-pub struct QueryStream<P,V> where P: Point, V: Value {
-  index: usize,
-  queries: Vec<SubStream<P,V>>,
-  deletes: Arc<Mutex<HashSet<Location>>>
+pin_project_lite::pin_project! {
+  /// Stream of `Result<(Point,Value,Location)>` data returned by `db.query()`.
+  pub struct QueryStream<P,V> where P: Point, V: Value {
+    index: usize,
+    #[pin]
+    queries: Vec<SubStream<P,V>>,
+    deletes: Arc<Mutex<HashSet<Location>>>
+  }
 }
 
 impl<P,V> QueryStream<P,V> where P: Point, V: Value {

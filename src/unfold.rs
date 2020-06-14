@@ -5,7 +5,6 @@ use futures_core::future::Future;
 use futures_core::stream::{FusedStream, Stream};
 use futures_core::task::{Context, Poll};
 */
-use pin_utils::{unsafe_pinned, unsafe_unpinned};
 use futures_core::ready;
 
 use async_std::future::Future;
@@ -69,15 +68,15 @@ pub fn unfold<T, F, Fut, It>(init: T, f: F) -> Unfold<T, F, Fut>
     }
 }
 
-/// Stream for the [`unfold`] function.
-#[must_use = "streams do nothing unless polled"]
-pub struct Unfold<T, F, Fut> {
-    f: F,
-    state: Option<T>,
-    fut: Option<Fut>,
+pin_project_lite::pin_project!{
+    /// Stream for the [`unfold`] function.
+    #[must_use = "streams do nothing unless polled"]
+    pub struct Unfold<T, F, Fut> {
+        f: F,
+        state: Option<T>,
+        fut: Option<Pin<Box<Fut>>>,
+    }
 }
-
-impl<T, F, Fut: Unpin> Unpin for Unfold<T, F, Fut> {}
 
 impl<T, F, Fut> fmt::Debug for Unfold<T, F, Fut>
 where
@@ -90,12 +89,6 @@ where
             .field("fut", &self.fut)
             .finish()
     }
-}
-
-impl<T, F, Fut> Unfold<T, F, Fut> {
-    unsafe_unpinned!(f: F);
-    unsafe_unpinned!(state: Option<T>);
-    unsafe_pinned!(fut: Option<Fut>);
 }
 
 /*
@@ -113,19 +106,20 @@ impl<T, F, Fut, It> Stream for Unfold<T, F, Fut>
     type Item = It;
 
     fn poll_next(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<It>> {
-        if let Some(state) = self.as_mut().state().take() {
-            let fut = (self.as_mut().f())(state);
-            self.as_mut().fut().set(Some(fut));
+        let this = self.project();
+        if let Some(state) = this.state.take() {
+            let fut = (this.f)(state);
+            *this.fut = Some(Box::pin(fut));
         }
 
-        let step = ready!(self.as_mut().fut().as_pin_mut().unwrap().poll(cx));
-        self.as_mut().fut().set(None);
+        let step = ready!(Pin::new(this.fut.as_mut().unwrap()).poll(cx));
+        *this.fut = None;
 
         if let Some((item, next_state)) = step {
-            *self.as_mut().state() = Some(next_state);
+            *this.state = Some(next_state);
             Poll::Ready(Some(item))
         } else {
             Poll::Ready(None)

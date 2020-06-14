@@ -14,7 +14,7 @@ edition = "2018"
 
 [dependencies]
 failure = "0.1.5"
-lru = "0.4.4"
+lru = "0.4.3"
 random-access-disk = "2.0.0"
 random-access-storage = "4.0.0"
 desert = "1.0.3"
@@ -23,6 +23,7 @@ async-trait = "0.1.30"
 futures = "0.3.5"
 pin-utils = "0.1.0"
 futures-core = "0.3.5"
+pin-project-lite = "0.1.7"
 
 [dev-dependencies]
 rand = "0.6.1"
