@@ -13,12 +13,14 @@ type V = u32;
 #[async_std::test]
 async fn mix3() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db = DB::open((async move |name: &str| {
+  //let mut db: DB<S,_,P,V> = DB::open(Box::new(async move |name: &str| {
+  //let mut db: DB<S,_,P,V> = DB::open((|name: &str| {
+  let mut db: DB<_,_,P,V> = DB::open(|name: &str| {
     let p = dir.path().join(name);
-    Box::new(RandomAccessDisk::builder(p)
+    RandomAccessDisk::builder(p)
       .auto_sync(false)
-      .build())
-  }).into()).await?;
+      .build()
+  }).await.unwrap();
   let mut inserted: Vec<(P,V)> = vec![];
   let mut r = rand().seed([13,12]);
   for _n in 0..50_usize {
@@ -56,7 +58,7 @@ async fn mix3() -> Result<(),Error> {
       inserted.push((point,value));
       Row::Insert(point,value)
     }).collect();
-    db.batch(&batch).await?;
+    db.batch(&batch).await.unwrap();
   }
   let bbox = (
     (-0.5,-0.8,6148914691236517205u64),
@@ -67,9 +69,9 @@ async fn mix3() -> Result<(),Error> {
     .map(|(p,v)| (*p,*v))
     .collect();
   let mut results = vec![];
-  let stream = db.query(&bbox).await?;
+  let stream = db.query(&bbox).await.unwrap();
   while let Some(result) = stream.next().await {
-    let r = result?;
+    let r = result.unwrap();
     results.push((r.0,r.1));
   }
   results.sort_unstable_by(cmp);

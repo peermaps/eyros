@@ -1,21 +1,21 @@
-use failure::{Error,bail,format_err};
+use failure::{Error,format_err};
 use random_access_storage::RandomAccess;
 use std::cmp::Ordering;
 
 pub async fn read_block<S> (store: &mut S, offset: u64, max_size: u64, guess: u64)
--> Result<Vec<u8>,Error>
-where S: RandomAccess<Error=Error> {
+-> Result<Vec<u8>,Box<Error>>
+where S: RandomAccess<Error=Box<Error>> {
   let size_guess = guess.min(max_size - offset.min(max_size));
-  if size_guess < 4 { bail!["block too small for length field"] }
+  if size_guess < 4 { fail!["block too small for length field"] }
   let fbuf: Vec<u8> = store.read(offset, size_guess).await?;
-  ensure_eq![fbuf.len() as u64, size_guess, "requested {} bytes, received {}",
+  ensure_eq_box![fbuf.len() as u64, size_guess, "requested {} bytes, received {}",
     size_guess, fbuf.len()];
   let len = u32::from_be_bytes([fbuf[0],fbuf[1],fbuf[2],fbuf[3]]) as u64;
   if len < 4 {
-    bail!["length field must be at least 4 (at offset {})",offset]
+    fail!["length field must be at least 4 (at offset {})",offset]
   }
   if offset + len > max_size {
-    bail!["offset+length ({}+{}={}) exceeds end of file ({})",
+    fail!["offset+length ({}+{}={}) exceeds end of file ({})",
       offset, len, offset+len, max_size ];
   }
   let mut buf = Vec::with_capacity((len-4) as usize);
@@ -34,6 +34,6 @@ where S: RandomAccess<Error=Error> {
       ).await?);
     }
   };
-  ensure_eq![buf.len() as u64, len-4, "incorrect length in block read"];
+  ensure_eq_box![buf.len() as u64, len-4, "incorrect length in block read"];
   Ok(buf)
 }

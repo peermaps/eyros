@@ -3,14 +3,14 @@ use failure::{Error,bail};
 use random_access_storage::RandomAccess;
 
 #[derive(Debug)]
-pub struct Meta<S> where S: RandomAccess<Error=Error> {
+pub struct Meta<S> where S: RandomAccess<Error=Box<Error>> {
   store: S,
   pub mask: Vec<bool>,
   pub branch_factor: u16
 }
 
-impl<S> Meta<S> where S: RandomAccess<Error=Error> {
-  pub async fn open(store: S) -> Result<Self,Error> {
+impl<S> Meta<S> where S: RandomAccess<Error=Box<Error>> {
+  pub async fn open(store: S) -> Result<Self,Box<Error>> {
     let mut meta = Self {
       store,
       mask: vec![],
@@ -23,7 +23,7 @@ impl<S> Meta<S> where S: RandomAccess<Error=Error> {
     }
     Ok(meta)
   }
-  pub async fn save (&mut self) -> Result<(),Error> {
+  pub async fn save (&mut self) -> Result<(),Box<Error>> {
     let mut bytes = vec![];
     bytes.extend(&self.branch_factor.to_be_bytes());
     bytes.extend(&(self.mask.len() as u32).to_be_bytes());

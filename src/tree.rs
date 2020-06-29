@@ -1,5 +1,5 @@
 use random_access_storage::RandomAccess;
-use failure::{Error,format_err,bail};
+use failure::{Error,format_err};
 use async_std::sync::{Arc,Mutex};
 use std::mem::size_of;
 use async_std::stream::Stream;
@@ -15,7 +15,7 @@ use crate::read_block::read_block;
 macro_rules! iwrap {
   ($x:expr) => {
     match $x {
-      Err(e) => { return Some(Err(Error::from(e))) },
+      Err(e) => { return Some(Err(e.into())) },
       Ok(b) => { b }
     }
   };
@@ -33,7 +33,7 @@ macro_rules! swrap {
 }
 
 pub struct TreeStream<S,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
   tree: Arc<Mutex<Tree<S,P,V>>>,
   bbox: Arc<P::Bounds>,
   cursors: Vec<(u64,usize)>,
@@ -43,9 +43,9 @@ S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
 }
 
 impl<S,P,V> TreeStream<S,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
   pub async fn new (tree: Arc<Mutex<Tree<S,P,V>>>, bbox: Arc<P::Bounds>)
-  -> Result<Self,Error> {
+  -> Result<Self,Box<Error>> {
     let tree_size = tree.lock().await.store.len().await? as u64;
     Ok(Self {
       tree,
@@ -56,7 +56,7 @@ S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
       queue: vec![]
     })
   }
-  async fn get_next(&mut self) -> Option<Result<(P,V,Location),Error>> {
+  async fn get_next(&mut self) -> Option<Result<(P,V,Location),Box<Error>>> {
     let bf = self.tree.lock().await.branch_factor;
 
     // todo: used cached size or rolling max to implicitly read an appropriate
@@ -95,7 +95,7 @@ S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
 }
 
 pub struct TreeOpts<S,P,V>
-where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
   pub store: S,
   pub data_store: Arc<Mutex<DataStore<S,P,V>>>,
   pub branch_factor: usize,
@@ -104,7 +104,7 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
 }
 
 pub struct Tree<S,P,V>
-where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
   pub store: S,
   data_store: Arc<Mutex<DataStore<S,P,V>>>,
   data_merge: Arc<Mutex<DataMerge<S,P,V>>>,
@@ -115,8 +115,8 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
 }
 
 impl<S,P,V> Tree<S,P,V>
-where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
-  pub async fn open (opts: TreeOpts<S,P,V>) -> Result<Self,Error> {
+where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
+  pub async fn open (opts: TreeOpts<S,P,V>) -> Result<Self,Box<Error>> {
     let bytes = opts.store.len().await? as u64;
     let data_merge = Arc::new(Mutex::new(
       DataMerge::new(Arc::clone(&opts.data_store))));
@@ -130,7 +130,7 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
       max_data_size: opts.max_data_size,
     })
   }
-  pub async fn clear (&mut self) -> Result<(),Error> {
+  pub async fn clear (&mut self) -> Result<(),Box<Error>> {
     if self.bytes > 0 {
       self.bytes = 0;
       self.store.truncate(0).await?;
@@ -138,11 +138,11 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
     self.store.sync_all().await?;
     Ok(())
   }
-  pub async fn is_empty (&mut self) -> Result<bool,Error> {
+  pub async fn is_empty (&mut self) -> Result<bool,Box<Error>> {
     let r = self.store.is_empty().await?;
     Ok(r)
   }
-  pub async fn build (&mut self, rows: &Vec<(P,V)>) -> Result<(),Error> {
+  pub async fn build (&mut self, rows: &Vec<(P,V)>) -> Result<(),Box<Error>> {
     let dstore = Arc::clone(&self.data_store);
     self.builder(
       Arc::new(rows.iter().map(|row| { (row.clone(),1u64) }).collect()),
@@ -150,7 +150,7 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
     ).await
   }
   pub async fn build_from_blocks (&mut self, blocks: Vec<(P::Bounds,u64,u64)>)
-  -> Result<(),Error> {
+  -> Result<(),Box<Error>> {
     let inserts: Vec<(P::Range,u64)> = blocks.iter()
       .map(|(bbox,offset,_)| { (P::bounds_to_range(*bbox),*offset) })
       .collect();
@@ -161,7 +161,7 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
     self.builder(Arc::new(rows), dmerge).await
   }
   pub async fn builder<D,T,U> (&mut self, rows: Arc<Vec<((T,U),u64)>>,
-  data_store: Arc<Mutex<D>>) -> Result<(),Error>
+  data_store: Arc<Mutex<D>>) -> Result<(),Box<Error>>
   where D: DataBatch<T,U>, T: Point, U: Value {
     self.clear().await?;
     let bucket = (0..rows.len()).collect();
@@ -204,7 +204,7 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
     Ok(())
   }
   pub async fn query (tree: Arc<Mutex<Self>>, bbox: Arc<P::Bounds>)
-  -> Result<impl Stream<Item=Result<(P,V,Location),Error>>,Error> {
+  -> Result<impl Stream<Item=Result<(P,V,Location),Box<Error>>>,Box<Error>> {
     let ts = TreeStream::new(tree, bbox).await?;
     Ok(unfold(ts, async move |mut ts| {
       let res = ts.get_next().await;
@@ -220,7 +220,7 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
     addr
   }
   pub async fn merge (trees: &mut Vec<Arc<Mutex<Self>>>, dst: usize, src: Vec<usize>,
-  rows: &Vec<(P,V)>) -> Result<(),Error> {
+  rows: &Vec<(P,V)>) -> Result<(),Box<Error>> {
     let mut blocks = vec![];
     for i in src.iter() {
       blocks.extend(trees[*i].lock().await.unbuild().await?);
@@ -237,11 +237,11 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
           .map(|(p,v)| (*p,v.clone())).collect();
         let offset = dstore.batch(&inserts.iter().map(|pv| pv).collect()).await?;
         match P::bounds(&inserts.iter().map(|(p,_)| *p).collect()) {
-          None => bail!["invalid data at offset {}", offset],
+          None => fail!["invalid data at offset {}", offset],
           Some(bbox) => blocks.push((bbox,offset,inserts.len() as u64))
         }
       }
-      ensure_eq!(srow_len, rows.len(), "divided rows incorrectly");
+      ensure_eq_box!(srow_len, rows.len(), "divided rows incorrectly");
     }
     trees[dst].lock().await.build_from_blocks(blocks).await?;
     for i in src.iter() {
@@ -249,7 +249,7 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
     }
     Ok(())
   }
-  async fn unbuild (&mut self) -> Result<Vec<(P::Bounds,u64,u64)>,Error> {
+  async fn unbuild (&mut self) -> Result<Vec<(P::Bounds,u64,u64)>,Box<Error>> {
     let mut offsets: Vec<u64> = vec![];
     let mut cursors: Vec<(u64,usize)> = vec![(0,0)];
     let bf = self.branch_factor;
@@ -266,7 +266,7 @@ where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
       let i_start = d_start + (n+bf+7)/8;
       let b_start = i_start + n*size_of::<u64>();
       let b_end = b_start+bf*size_of::<u64>();
-      ensure_eq!(b_end, buf.len(), "unexpected block length");
+      ensure_eq_box!(b_end, buf.len(), "unexpected block length");
       for i in 0..n {
         let offset = u64::from_be_bytes([
           buf[i_start+i*8+0], buf[i_start+i*8+1],

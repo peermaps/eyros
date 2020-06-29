@@ -210,7 +210,7 @@ use unfold::unfold;
 
 #[doc(hidden)]
 pub enum SubStream<P,V> where P: Point, V: Value {
-  Tree(Pin<Box<dyn Stream<Item=Result<(P,V,Location),Error>>>>),
+  Tree(Pin<Box<dyn Stream<Item=Result<(P,V,Location),Box<Error>>>>>),
   Staging(StagingIterator<P,V>)
 }
 
@@ -236,8 +236,8 @@ pub enum Row<P,V> where P: Point, V: Value {
 
 /// Top-level database API.
 pub struct DB<S,U,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync+Unpin,
-U: Fn(&str) -> Box<dyn Future<Output=Result<S,S::Error>>+Unpin>,
+S: RandomAccess<Error=Box<Error>>+Send+Sync+Unpin,
+U: Fn(&str) -> Box<dyn Future<Output=Box<Result<S,Error>>>+Unpin>,
 P: Point, V: Value {
   open_store: U,
   pub trees: Vec<Arc<Mutex<Tree<S,P,V>>>>,
@@ -248,8 +248,8 @@ P: Point, V: Value {
 }
 
 impl<S,U,P,V> DB<S,U,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync+'static+Unpin,
-U: Fn(&str) -> Box<dyn Future<Output=Result<S,S::Error>>+Unpin>,
+S: RandomAccess<Error=Box<Error>>+Send+Sync+'static+Unpin,
+U: Fn(&str) -> Box<dyn Future<Output=Box<Result<S,Error>>>+Unpin>,
 P: Point+'static, V: Value+'static {
   /// Create a new database instance from `open_store`, a function that receives
   /// a string path as an argument and returns a Result with a RandomAccess
@@ -278,7 +278,7 @@ P: Point+'static, V: Value+'static {
   ///   Ok(RandomAccessDisk::builder(p).auto_sync(false).build()?)
   /// }
   /// ```
-  pub async fn open(open_store: U) -> Result<Self,Error> {
+  pub async fn open(open_store: U) -> Result<Self,Box<Error>> {
     Setup::new(open_store).build().await
   }
 
@@ -335,15 +335,15 @@ P: Point+'static, V: Value+'static {
   /// Always open a database with the same settings. Things will break if you
   /// change . There is no runtime check yet to ensure a database is opened with
   /// the same configuration that it was created with.
-  pub async fn open_from_setup(setup: Setup<S,U>) -> Result<Self,Error> {
-    let meta = Meta::open((setup.open_store)("meta").await?).await?;
+  pub async fn open_from_setup(setup: Setup<S,U>) -> Result<Self,Box<Error>> {
+    let meta = Meta::open((*(setup.open_store)("meta").await)?).await?;
     let staging = Staging::open(
-      (setup.open_store)("staging_inserts").await?,
-      (setup.open_store)("staging_deletes").await?
+      (*(setup.open_store)("staging_inserts").await)?,
+      (*(setup.open_store)("staging_deletes").await)?
     ).await?;
     let data_store = DataStore::open(
-      (setup.open_store)("data").await?,
-      (setup.open_store)("range").await?,
+      (*(setup.open_store)("data").await)?,
+      (*(setup.open_store)("range").await)?,
       setup.fields.max_data_size,
       setup.fields.bbox_cache_size,
       setup.fields.data_list_cache_size
@@ -364,7 +364,7 @@ P: Point+'static, V: Value+'static {
 
   /// Write a collection of updates to the database. Each update can be a
   /// `Row::Insert(point,value)` or a `Row::Delete(location)`.
-  pub async fn batch (&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
+  pub async fn batch (&mut self, rows: &[Row<P,V>]) -> Result<(),Box<Error>> {
     let inserts: Vec<(P,V)> = rows.iter()
       .filter(|r| match r { Row::Insert(_p,_v) => true, _ => false })
       .map(|r| match r {
@@ -451,7 +451,7 @@ P: Point+'static, V: Value+'static {
         Tree::merge(&mut self.trees, i, trees, &srows).await?;
       }
     }
-    ensure_eq!(n-(offset as u64), rem, "offset-n ({}-{}={}) != rem ({}) ",
+    ensure_eq_box!(n-(offset as u64), rem, "offset-n ({}-{}={}) != rem ({}) ",
       offset, n, (offset as u64)-n, rem);
     let mut rem_rows = vec![];
     {
@@ -463,7 +463,7 @@ P: Point+'static, V: Value+'static {
         );
       }
     }
-    ensure_eq!(rem_rows.len(), rem as usize,
+    ensure_eq_box!(rem_rows.len(), rem as usize,
       "unexpected number of remaining rows (expected {}, actual {})",
       rem, rem_rows.len());
     deletes.extend_from_slice(&self.staging.deletes.lock().await);
@@ -480,9 +480,9 @@ P: Point+'static, V: Value+'static {
     Ok(())
   }
 
-  async fn create_tree (&mut self, index: usize) -> Result<(),Error> {
+  async fn create_tree (&mut self, index: usize) -> Result<(),Box<Error>> {
     for i in self.trees.len()..index+1 {
-      let store = (self.open_store)(&format!("tree{}",i)).await?;
+      let store = (*(self.open_store)(&format!("tree{}",i)).await)?;
       self.trees.push(Arc::new(Mutex::new(Tree::open(TreeOpts {
         store,
         index,
@@ -528,7 +528,7 @@ P: Point+'static, V: Value+'static {
   /// you get from a query. However, these locations are only valid until the
   /// next `.batch()`.
   pub async fn query<X> (&mut self, bbox: &P::Bounds)
-  -> Result<Box<impl Stream<Item=Result<(P,V,Location),Error>> >,Error> {
+  -> Result<Box<impl Stream<Item=Result<(P,V,Location),Box<Error>>>>,Box<Error>> {
     let mut mask: Vec<bool> = vec![];
     for tree in self.trees.iter_mut() {
       mask.push(!tree.lock().await.is_empty().await?);
@@ -554,7 +554,7 @@ P: Point+'static, V: Value+'static {
   }
 }
 
-type Out<P,V> = Option<Result<(P,V,Location),Error>>;
+type Out<P,V> = Option<Result<(P,V,Location),Box<Error>>>;
 
 pin_project_lite::pin_project! {
   /// Stream of `Result<(Point,Value,Location)>` data returned by `db.query()`.
@@ -584,10 +584,10 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
         let next = match q {
           SubStream::Tree(x) => {
             let result = x.next().await;
-            match &result {
-              Some(Err(_)) => return result,
+            match result {
+              Some(Err(e)) => return Some(Err(e.into())),
               Some(Ok((_,_,loc))) => {
-                if self.deletes.lock().await.contains(loc) {
+                if self.deletes.lock().await.contains(&loc) {
                   self.index = (self.index+1) % len;
                   continue;
                 }

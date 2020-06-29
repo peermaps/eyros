@@ -121,7 +121,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     4 + pivot_size + bitfield_size + intersect_size + bucket_size
   }
   pub async fn build (&mut self, alloc: &mut dyn FnMut (usize) -> u64)
-  -> Result<(Vec<u8>,Vec<Node<D,P,V>>),Error> {
+  -> Result<(Vec<u8>,Vec<Node<D,P,V>>),Box<Error>> {
     let n = order_len(self.branch_factor);
     let bf = self.branch_factor;
     for k in 0..n {
@@ -145,7 +145,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         match (row.0).0.cmp_at(&pivot, self.level) {
           Ordering::Less => { break },
           Ordering::Greater => j += 1,
-          Ordering::Equal => bail!["bucket interval intersects pivot"]
+          Ordering::Equal => fail!["bucket interval intersects pivot"]
         }
       }
       self.buckets[j].push(self.bucket[*i]);
@@ -153,8 +153,8 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     let mut nodes = Vec::with_capacity(bf + n);
     let mut bitfield: Vec<bool> = vec![];
 
-    ensure_eq!(self.intersecting.len(), n, "unexpected intersecting length");
-    ensure_eq!(self.buckets.len(), bf, "unexpected bucket length");
+    ensure_eq_box!(self.intersecting.len(), n, "unexpected intersecting length");
+    ensure_eq_box!(self.buckets.len(), bf, "unexpected bucket length");
     for ref buckets in [&self.intersecting,&self.buckets].iter() {
       for bucket in buckets.iter() {
         let mut size = 0u64;
@@ -184,8 +184,8 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
         }
       }
     }
-    ensure_eq!(nodes.len(), n+bf, "incorrect number of nodes");
-    ensure_eq!(self.pivots.len(), n, "incorrect number of pivots");
+    ensure_eq_box!(nodes.len(), n+bf, "incorrect number of nodes");
+    ensure_eq_box!(self.pivots.len(), n, "incorrect number of pivots");
 
     let bitfield_len = (n+bf+7)/8; // in bytes
     let node_len = (n+bf) * 8; // in bytes
