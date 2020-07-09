@@ -1,5 +1,4 @@
-use crate::{DB,Point,Value};
-use failure::Error;
+use crate::{DB,Point,Value,Error};
 use random_access_storage::RandomAccess;
 use async_std::future::Future;
 
@@ -41,15 +40,15 @@ pub struct SetupFields {
 /// }
 /// ```
 pub struct Setup<S,U> where
-S: RandomAccess<Error=Box<Error>>+Send+Sync+Unpin,
-U: Fn(&str) -> Box<dyn Future<Output=Box<Result<S,Error>>>+Unpin> {
+S: RandomAccess<Error=Error>+Send+Sync+Unpin,
+U: Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin> {
   pub open_store: U,
   pub fields: SetupFields
 }
 
 impl<S,U> Setup<S,U> where
-S: RandomAccess<Error=Box<Error>>+Send+Sync+'static+Unpin,
-U: Fn(&str) -> Box<dyn Future<Output=Box<Result<S,Error>>>+Unpin> {
+S: RandomAccess<Error=Error>+Send+Sync+'static+Unpin,
+U: Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin> {
   /// Create a new `Setup` builder from a storage function.
   pub fn new (open_store: U) -> Self {
     Self {
@@ -83,7 +82,7 @@ U: Fn(&str) -> Box<dyn Future<Output=Box<Result<S,Error>>>+Unpin> {
     self.fields.data_list_cache_size = size;
     self
   }
-  pub async fn build<P,V> (self) -> Result<DB<S,U,P,V>,Box<Error>>
+  pub async fn build<P,V> (self) -> Result<DB<S,U,P,V>,Error>
   where P: Point+'static, V: Value+'static {
     DB::open_from_setup(self).await
   }

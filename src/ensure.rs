@@ -5,9 +5,10 @@ macro_rules! ensure_eq_box {
     match (&$left, &$right) {
       (left_val, right_val) => {
         if !(*left_val == *right_val) {
+          //return Err(format_err!(r#"assertion failed: `(left == right)`
           return Err(Box::new(format_err!(r#"assertion failed: `(left == right)`
   left: `{:?}`,
- right: `{:?}`"#, left_val, right_val)));
+ right: `{:?}`"#, left_val, right_val).compat()));
         }
       }
     }
@@ -16,9 +17,10 @@ macro_rules! ensure_eq_box {
     match (&($left), &($right)) {
       (left_val, right_val) => {
         if !(*left_val == *right_val) {
+          //return Err(format_err!(r#"assertion failed: `(left == right)`
           return Err(Box::new(format_err!(r#"assertion failed: `(left == right)`
   left: `{:?}`,
- right: `{:?}`: {}"#, left_val, right_val, format_args!($($arg)*))));
+ right: `{:?}`: {}"#, left_val, right_val, format_args!($($arg)*)).compat()));
         }
       }
     }
@@ -86,7 +88,8 @@ macro_rules! ensure {
     match &($x) {
       x => {
         if !*x {
-          return Err(Box::new(format_err!(r#"assertion failed"#)));
+          return Err(Box::new(format_err!(r#"assertion failed"#).compat()));
+          //return Err(format_err!(r#"assertion failed"#));
         }
       }
     }
@@ -95,7 +98,8 @@ macro_rules! ensure {
     match &($x) {
      x => {
         if !*x {
-          return Err(Box::new(format_err!(r#"assertion failed"#)));
+          return Err(Box::new(format_err!(r#"assertion failed"#).compat()));
+          //return Err(format_err!(r#"assertion failed"#));
         }
       }
     }
@@ -106,6 +110,7 @@ macro_rules! ensure {
 #[macro_export]
 macro_rules! fail {
   ($($arg:tt)*) => ({
-    return Err(Box::new(failure::err_msg(format![$($arg)*])));
+    return Err(Box::new(failure::err_msg(format![$($arg)*]).compat()));
+    //return Err(failure::err_msg(format![$($arg)*]));
   });
 }

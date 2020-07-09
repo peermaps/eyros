@@ -1,9 +1,9 @@
-use crate::{data::DataBatch,point::Point,Value,pivots};
+use crate::{data::DataBatch,point::Point,Value,pivots,Error};
 use crate::order::{order,order_len};
 use std::cmp::Ordering;
 use std::mem::size_of;
 use async_std::sync::{Arc,Mutex};
-use failure::{Error,bail,format_err};
+use failure::format_err;
 use desert::ToBytes;
 
 #[derive(Clone)]
@@ -66,7 +66,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
       a.cmp_at(b, level)
     });
     if pivots.is_empty() {
-      bail!["empty set of pivots"]
+      fail!["empty set of pivots"]
     } else if pivots.len() == 1 {
       pivots = vec![pivots[0],pivots[0]];
       /*
@@ -121,7 +121,7 @@ impl<D,P,V> Branch<D,P,V> where D: DataBatch<P,V>, P: Point, V: Value {
     4 + pivot_size + bitfield_size + intersect_size + bucket_size
   }
   pub async fn build (&mut self, alloc: &mut dyn FnMut (usize) -> u64)
-  -> Result<(Vec<u8>,Vec<Node<D,P,V>>),Box<Error>> {
+  -> Result<(Vec<u8>,Vec<Node<D,P,V>>),Error> {
     let n = order_len(self.branch_factor);
     let bf = self.branch_factor;
     for k in 0..n {

@@ -1,10 +1,12 @@
-use failure::{Error,format_err};
+//use failure::{Error,format_err};
+use failure::{format_err};
+use crate::Error;
 use random_access_storage::RandomAccess;
 use std::cmp::Ordering;
 
 pub async fn read_block<S> (store: &mut S, offset: u64, max_size: u64, guess: u64)
--> Result<Vec<u8>,Box<Error>>
-where S: RandomAccess<Error=Box<Error>> {
+-> Result<Vec<u8>,Error>
+where S: RandomAccess<Error=Error> {
   let size_guess = guess.min(max_size - offset.min(max_size));
   if size_guess < 4 { fail!["block too small for length field"] }
   let fbuf: Vec<u8> = store.read(offset, size_guess).await?;

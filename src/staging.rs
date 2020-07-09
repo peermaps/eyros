@@ -1,5 +1,4 @@
-use crate::{Point,Value,Location};
-use failure::{Error};
+use crate::{Point,Value,Location,Error};
 use random_access_storage::RandomAccess;
 use std::collections::HashSet;
 use async_std::sync::{Arc,Mutex};
@@ -12,7 +11,7 @@ pub struct StagingIterator<P,V> where P: Point, V: Value {
   index: u32
 }
 
-type Item<P,V> = Result<(P,V,Location),Box<Error>>;
+type Item<P,V> = Result<(P,V,Location),Error>;
 impl<P,V> StagingIterator<P,V> where P: Point, V: Value {
   pub fn new (inserts: Arc<Mutex<Vec<(P,V)>>>,
   deletes: Arc<Mutex<HashSet<Location>>>, bbox: Arc<P::Bounds>) -> Self {
@@ -36,7 +35,7 @@ impl<P,V> StagingIterator<P,V> where P: Point, V: Value {
 }
 
 pub struct Staging<S,P,V>
-where S: RandomAccess<Error=Box<Error>>, P: Point, V: Value {
+where S: RandomAccess<Error=Error>, P: Point, V: Value {
   insert_store: S,
   delete_store: S,
   pub inserts: Arc<Mutex<Vec<(P,V)>>>,
@@ -45,8 +44,8 @@ where S: RandomAccess<Error=Box<Error>>, P: Point, V: Value {
 }
 
 impl<S,P,V> Staging<S,P,V>
-where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
-  pub async fn open (istore: S, dstore: S) -> Result<Self,Box<Error>> {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+  pub async fn open (istore: S, dstore: S) -> Result<Self,Error> {
     let mut staging = Self {
       insert_store: istore,
       delete_store: dstore,
@@ -57,7 +56,7 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
     staging.load().await?;
     Ok(staging)
   }
-  async fn load (&mut self) -> Result<(),Box<Error>> {
+  async fn load (&mut self) -> Result<(),Error> {
     if !self.insert_store.is_empty().await? {
       let mut inserts = self.inserts.lock().await;
       inserts.clear();
@@ -87,23 +86,23 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
     }
     Ok(())
   }
-  pub async fn clear (&mut self) -> Result<(),Box<Error>> {
+  pub async fn clear (&mut self) -> Result<(),Error> {
     self.clear_inserts().await?;
     self.clear_deletes().await?;
     Ok(())
   }
-  pub async fn clear_inserts (&mut self) -> Result<(),Box<Error>> {
+  pub async fn clear_inserts (&mut self) -> Result<(),Error> {
     self.insert_store.truncate(0).await?;
     self.inserts.lock().await.clear();
     Ok(())
   }
-  pub async fn clear_deletes (&mut self) -> Result<(),Box<Error>> {
+  pub async fn clear_deletes (&mut self) -> Result<(),Error> {
     self.delete_store.truncate(0).await?;
     self.deletes.lock().await.clear();
     self.delete_set.lock().await.clear();
     Ok(())
   }
-  pub async fn delete (&mut self, deletes: &Vec<Location>) -> Result<(),Box<Error>> {
+  pub async fn delete (&mut self, deletes: &Vec<Location>) -> Result<(),Error> {
     let mut del_set: HashSet<u32> = HashSet::new();
     for delete in deletes {
       if delete.0 == 0 { del_set.insert(delete.1); }
@@ -116,17 +115,17 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
     });
     Ok(())
   }
-  pub async fn bytes (&mut self) -> Result<u64,Box<Error>> {
+  pub async fn bytes (&mut self) -> Result<u64,Error> {
     Ok(self.insert_store.len().await? + self.delete_store.len().await?)
   }
-  pub async fn len (&mut self) -> Result<usize,Box<Error>> {
+  pub async fn len (&mut self) -> Result<usize,Error> {
     Ok(
       self.inserts.lock().await.len()
       + self.deletes.lock().await.len()
     )
   }
   pub async fn batch (&mut self, inserts: &Vec<(P,V)>, deletes: &Vec<Location>)
-  -> Result<(),Box<Error>> {
+  -> Result<(),Error> {
     // todo: calculate the necessary size before allocating
     let mut i_size = 0;
     for insert in inserts.iter() {
@@ -166,7 +165,7 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
     }
     Ok(())
   }
-  pub async fn commit (&mut self) -> Result<(),Box<Error>> {
+  pub async fn commit (&mut self) -> Result<(),Error> {
     self.insert_store.sync_all().await?;
     self.delete_store.sync_all().await?;
     Ok(())

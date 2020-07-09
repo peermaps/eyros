@@ -1,6 +1,6 @@
-use crate::{Point,Value,Location,read_block::read_block};
+use crate::{Point,Value,Location,read_block::read_block,Error};
 use random_access_storage::RandomAccess;
-use failure::{Error,format_err};
+use failure::format_err;
 use async_std::{sync::{Arc,Mutex}};
 
 use lru::LruCache;
@@ -9,16 +9,16 @@ use desert::{FromBytes,ToBytes,CountBytes};
 
 #[async_trait::async_trait]
 pub trait DataBatch<P,V>: Send+Sync where P: Point, V: Value {
-  async fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Box<Error>>;
+  async fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error>;
 }
 
 pub struct DataMerge<S,P,V>
-where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   data_store: Arc<Mutex<DataStore<S,P,V>>>
 }
 
 impl<S,P,V> DataMerge<S,P,V>
-where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   pub fn new (data_store: Arc<Mutex<DataStore<S,P,V>>>) -> Self {
     Self { data_store }
   }
@@ -26,8 +26,8 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
 
 #[async_trait::async_trait]
 impl<S,P,V> DataBatch<P::Range,u64> for DataMerge<S,P,V>
-where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
-  async fn batch (&mut self, rows: &Vec<&(P::Range,u64)>) -> Result<u64,Box<Error>> {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+  async fn batch (&mut self, rows: &Vec<&(P::Range,u64)>) -> Result<u64,Error> {
     if rows.len() == 1 { // use existing address
       Ok(rows[0].1)
     } else { // combine addresses into a new block
@@ -61,7 +61,7 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
 
 //#[derive(Debug,Clone)]
 pub struct DataStore<S,P,V>
-where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   store: S,
   range: DataRange<S,P>,
   list_cache: LruCache<u64,Vec<(P,V,Location)>>,
@@ -70,8 +70,8 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
 
 #[async_trait::async_trait]
 impl<S,P,V> DataBatch<P,V> for DataStore<S,P,V>
-where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
-  async fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Box<Error>> {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
+  async fn batch (&mut self, rows: &Vec<&(P,V)>) -> Result<u64,Error> {
     ensure![rows.len() <= self.max_data_size,
       "data size limit exceeded in data merge"];
     let bitfield_len = (rows.len()+7)/8;
@@ -104,7 +104,7 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
 }
 
 impl<S,P,V> DataStore<S,P,V>
-where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
   pub fn open (store: S, range_store: S, max_data_size: usize,
   bbox_cache_size: usize, list_cache_size: usize) -> Result<Self,Error> {
     Ok(Self {
@@ -114,19 +114,19 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
       max_data_size
     })
   }
-  pub async fn commit (&mut self) -> Result<(),Box<Error>> {
+  pub async fn commit (&mut self) -> Result<(),Error> {
     self.store.sync_all().await?;
     Ok(())
   }
   pub async fn query (&mut self, offset: u64, bbox: &P::Bounds)
-  -> Result<Vec<(P,V,Location)>,Box<Error>> {
+  -> Result<Vec<(P,V,Location)>,Error> {
     let rows = self.list(offset).await?;
     Ok(rows.iter().filter(|row| {
       row.0.overlaps(bbox)
     }).map(|row| { row.clone() }).collect())
   }
   pub async fn list (&mut self, offset: u64)
-  -> Result<Vec<(P,V,Location)>,Box<Error>> {
+  -> Result<Vec<(P,V,Location)>,Error> {
     match self.list_cache.get(&offset) {
       Some(rows) => return Ok(rows.to_vec()),
       None => {}
@@ -158,13 +158,13 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
     }
     Ok(results)
   }
-  pub async fn read (&mut self, offset: u64) -> Result<Vec<u8>,Box<Error>> {
+  pub async fn read (&mut self, offset: u64) -> Result<Vec<u8>,Error> {
     let len = self.store.len().await? as u64;
     read_block(&mut self.store, offset, len, 1024).await
   }
   // todo: replace() similar to delete but with an additional array of
   // replacement candidates
-  pub async fn delete (&mut self, locations: &Vec<Location>) -> Result<(),Box<Error>> {
+  pub async fn delete (&mut self, locations: &Vec<Location>) -> Result<(),Error> {
     let mut by_block: HashMap<u64,Vec<u32>> = HashMap::new();
     for (block,index) in locations {
       if *block == 0 { continue } // staging block
@@ -208,11 +208,11 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
     }
     Ok(())
   }
-  pub async fn bytes (&mut self) -> Result<u64,Box<Error>> {
+  pub async fn bytes (&mut self) -> Result<u64,Error> {
     Ok(self.store.len().await? as u64)
   }
   pub async fn bbox (&mut self, offset: u64)
-  -> Result<Option<(P::Bounds,u64)>,Box<Error>> {
+  -> Result<Option<(P::Bounds,u64)>,Error> {
     match self.range.cache.get(&offset) {
       None => {},
       Some(r) => return Ok(Some(*r))
@@ -232,25 +232,25 @@ where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point, V: Value {
 }
 
 pub struct DataRange<S,P>
-where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point {
   pub store: S,
   pub cache: LruCache<u64,(P::Bounds,u64)>
 }
 
 impl<S,P> DataRange<S,P>
-where S: RandomAccess<Error=Box<Error>>+Send+Sync, P: Point {
+where S: RandomAccess<Error=Error>+Send+Sync, P: Point {
   pub fn new (store: S, cache_size: usize) -> Self {
     Self {
       store,
       cache: LruCache::new(cache_size)
     }
   }
-  pub async fn write (&mut self, b: &(u64,P::Range,u64)) -> Result<(),Box<Error>> {
+  pub async fn write (&mut self, b: &(u64,P::Range,u64)) -> Result<(),Error> {
     let offset = self.store.len().await?;
     let data = b.to_bytes()?;
     self.store.write(offset, &data).await
   }
-  pub async fn list (&mut self) -> Result<Vec<(u64,P,u64)>,Box<Error>> {
+  pub async fn list (&mut self) -> Result<Vec<(u64,P,u64)>,Error> {
     let len = self.store.len().await?;
     // TODO: read in chunks instead of all at once
     let buf = self.store.read(0, len).await?;

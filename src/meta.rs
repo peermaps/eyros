@@ -1,16 +1,17 @@
-use failure::{Error,bail};
+use crate::Error;
+//use failure::{Error,bail};
 //use std::mem::size_of;
 use random_access_storage::RandomAccess;
 
 #[derive(Debug)]
-pub struct Meta<S> where S: RandomAccess<Error=Box<Error>> {
+pub struct Meta<S> where S: RandomAccess<Error=Error> {
   store: S,
   pub mask: Vec<bool>,
   pub branch_factor: u16
 }
 
-impl<S> Meta<S> where S: RandomAccess<Error=Box<Error>> {
-  pub async fn open(store: S) -> Result<Self,Box<Error>> {
+impl<S> Meta<S> where S: RandomAccess<Error=Error> {
+  pub async fn open(store: S) -> Result<Self,Error> {
     let mut meta = Self {
       store,
       mask: vec![],
@@ -23,7 +24,7 @@ impl<S> Meta<S> where S: RandomAccess<Error=Box<Error>> {
     }
     Ok(meta)
   }
-  pub async fn save (&mut self) -> Result<(),Box<Error>> {
+  pub async fn save (&mut self) -> Result<(),Error> {
     let mut bytes = vec![];
     bytes.extend(&self.branch_factor.to_be_bytes());
     bytes.extend(&(self.mask.len() as u32).to_be_bytes());
@@ -43,7 +44,7 @@ impl<S> Meta<S> where S: RandomAccess<Error=Box<Error>> {
     self.mask.clear();
     let len = u32::from_be_bytes([buf[2],buf[3],buf[4],buf[5]]) as usize;
     if (len+7)/8+6 != buf.len() {
-      bail!("unexpected buffer length");
+      fail!("unexpected buffer length");
     }
     for i in 0..(len+7)/8 {
       let b = buf[i+6];
@@ -53,7 +54,7 @@ impl<S> Meta<S> where S: RandomAccess<Error=Box<Error>> {
       }
     }
     if self.mask.len() != len {
-      bail!("mask has unexpected length");
+      fail!("mask has unexpected length");
     }
     Ok(())
   }
