@@ -200,7 +200,7 @@ use failure::format_err;
 pub type Error = Box<dyn std::error::Error + Sync + Send>;
 use desert::{ToBytes,FromBytes,CountBytes};
 use std::fmt::Debug;
-use async_std::{sync::{Arc,Mutex},future::Future};
+use async_std::{sync::{Arc,Mutex}};
 use std::collections::HashSet;
 
 use std::pin::Pin;
@@ -235,12 +235,16 @@ pub enum Row<P,V> where P: Point, V: Value {
   Delete(Location)
 }
 
+#[async_trait::async_trait]
+pub trait Storage<S> {
+  async fn open (&mut self, name: &str) -> Result<S,Error>;
+}
+
 /// Top-level database API.
-pub struct DB<S,U,P,V> where
+pub struct DB<S,P,V> where
 S: RandomAccess<Error=Error>+Send+Sync+Unpin,
-U: Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin>,
 P: Point, V: Value {
-  open_store: U,
+  storage: Box<dyn Storage<S>>,
   pub trees: Vec<Arc<Mutex<Tree<S,P,V>>>>,
   pub staging: Staging<S,P,V>,
   pub data_store: Arc<Mutex<DataStore<S,P,V>>>,
@@ -248,9 +252,8 @@ P: Point, V: Value {
   pub fields: SetupFields
 }
 
-impl<S,U,P,V> DB<S,U,P,V> where
+impl<S,P,V> DB<S,P,V> where
 S: RandomAccess<Error=Error>+Send+Sync+'static+Unpin,
-U: Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin>,
 P: Point+'static, V: Value+'static {
   /// Create a new database instance from `open_store`, a function that receives
   /// a string path as an argument and returns a Result with a RandomAccess
@@ -279,8 +282,8 @@ P: Point+'static, V: Value+'static {
   ///   Ok(RandomAccessDisk::builder(p).auto_sync(false).build()?)
   /// }
   /// ```
-  pub async fn open(open_store: U) -> Result<Self,Error> {
-    Setup::new(open_store).build().await
+  pub async fn open(storage: Box<dyn Storage<S>>) -> Result<Self,Error> {
+    Setup::new(storage).build().await
   }
 
   /// Create a new database instance from `setup`, a configuration builder.
@@ -336,21 +339,21 @@ P: Point+'static, V: Value+'static {
   /// Always open a database with the same settings. Things will break if you
   /// change . There is no runtime check yet to ensure a database is opened with
   /// the same configuration that it was created with.
-  pub async fn open_from_setup(setup: Setup<S,U>) -> Result<Self,Error> {
-    let meta = Meta::open((setup.open_store)("meta").await?).await?;
+  pub async fn open_from_setup(mut setup: Setup<S>) -> Result<Self,Error> {
+    let meta = Meta::open(setup.storage.open("meta").await?).await?;
     let staging = Staging::open(
-      (setup.open_store)("staging_inserts").await?,
-      (setup.open_store)("staging_deletes").await?
+      setup.storage.open("staging_inserts").await?,
+      setup.storage.open("staging_deletes").await?
     ).await?;
     let data_store = DataStore::open(
-      (setup.open_store)("data").await?,
-      (setup.open_store)("range").await?,
+      setup.storage.open("data").await?,
+      setup.storage.open("range").await?,
       setup.fields.max_data_size,
       setup.fields.bbox_cache_size,
       setup.fields.data_list_cache_size
     )?;
     let mut db = Self {
-      open_store: setup.open_store,
+      storage: setup.storage,
       staging,
       data_store: Arc::new(Mutex::new(data_store)),
       meta: meta,
@@ -483,7 +486,7 @@ P: Point+'static, V: Value+'static {
 
   async fn create_tree (&mut self, index: usize) -> Result<(),Error> {
     for i in self.trees.len()..index+1 {
-      let store = (self.open_store)(&format!("tree{}",i)).await?;
+      let store = self.storage.open(&format!("tree{}",i)).await?;
       self.trees.push(Arc::new(Mutex::new(Tree::open(TreeOpts {
         store,
         index,

@@ -6,16 +6,39 @@ use tempfile::Builder as Tmpfile;
 use std::cmp::Ordering;
 use async_std::prelude::*;
 
-type E = Box<dyn std::error::Error + Sync + Send>;
+type E = Box<dyn std::error::Error+Sync+Send>;
 type S = RandomAccessDisk;
-type U = Box<dyn Fn(&str) -> Box<dyn Future<Output=Result<S,E>>+Unpin>>;
 type P = Mix3<f32,f32,u64>;
 type V = u32;
 
+pub struct Store {
+  dir: tempfile::TempDir
+}
+
+impl Store {
+  fn init (prefix: &str) -> Result<Self,E> {
+    Ok(Self { dir: Tmpfile::new().prefix(prefix).tempdir()? })
+  }
+}
+
+#[async_trait::async_trait]
+impl eyros::Storage<RandomAccessDisk> for Store {
+  async fn open (&mut self, name: &str) -> Result<S,E> {
+    let p = self.dir.path().join(name);
+    RandomAccessDisk::builder(p)
+      .auto_sync(false)
+      .build()
+      .await
+      .map_err(|e| e.into())
+  }
+}
+
 #[async_std::test]
 async fn mix3() -> Result<(),E> {
-  let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<S,U,P,V> = DB::open((async move |name: &str| -> Result<S,E> {
+  let mut db: DB<S,P,V> = DB::open(Box::new(Store::init("eyros")?)).await?;
+  /*
+  let dir: &str = Tmpfile::new().prefix("eyros").tempdir()?;
+  let mut db: DB<S,P,V> = DB::open((async move |name: &str| -> Result<S,E> {
     let p = dir.path().join(name);
     RandomAccessDisk::builder(p)
       .auto_sync(false)
@@ -23,6 +46,7 @@ async fn mix3() -> Result<(),E> {
       .await
       .map_err(|e| e.into())
   }).into()).await?;
+  */
   let mut inserted: Vec<(P,V)> = vec![];
   let mut r = rand().seed([13,12]);
   for _n in 0..50_usize {
@@ -71,7 +95,7 @@ async fn mix3() -> Result<(),E> {
     .map(|(p,v)| (*p,*v))
     .collect();
   let mut results = vec![];
-  let stream = db.query(&bbox).await?;
+  let mut stream = db.query(&bbox).await?;
   while let Some(result) = stream.next().await {
     let r = result.unwrap();
     results.push((r.0,r.1));

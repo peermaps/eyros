@@ -1,6 +1,5 @@
-use crate::{DB,Point,Value,Error};
+use crate::{DB,Storage,Point,Value,Error};
 use random_access_storage::RandomAccess;
-use async_std::future::Future;
 
 /// Struct for reading database properties.
 pub struct SetupFields {
@@ -39,20 +38,16 @@ pub struct SetupFields {
 ///   Ok(RandomAccessDisk::builder(p).auto_sync(false).build()?)
 /// }
 /// ```
-pub struct Setup<S,U> where
-S: RandomAccess<Error=Error>+Send+Sync+Unpin,
-U: Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin> {
-  pub open_store: U,
+pub struct Setup<S> where S: RandomAccess<Error=Error>+Send+Sync+Unpin {
+  pub storage: Box<dyn Storage<S>>,
   pub fields: SetupFields
 }
 
-impl<S,U> Setup<S,U> where
-S: RandomAccess<Error=Error>+Send+Sync+'static+Unpin,
-U: Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin> {
+impl<S> Setup<S> where S: RandomAccess<Error=Error>+Send+Sync+'static+Unpin {
   /// Create a new `Setup` builder from a storage function.
-  pub fn new (open_store: U) -> Self {
+  pub fn new (storage: Box<dyn Storage<S>>) -> Self {
     Self {
-      open_store,
+      storage,
       fields: SetupFields {
         branch_factor: 5,
         max_data_size: 3_000,
@@ -82,7 +77,7 @@ U: Fn(&str) -> Box<dyn Future<Output=Result<S,Error>>+Unpin> {
     self.fields.data_list_cache_size = size;
     self
   }
-  pub async fn build<P,V> (self) -> Result<DB<S,U,P,V>,Error>
+  pub async fn build<P,V> (self) -> Result<DB<S,P,V>,Error>
   where P: Point+'static, V: Value+'static {
     DB::open_from_setup(self).await
   }
