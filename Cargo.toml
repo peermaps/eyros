@@ -15,7 +15,6 @@ edition = "2018"
 [dependencies]
 failure = "0.1.5"
 lru = "0.4.3"
-random-access-disk = "2.0.0"
 random-access-storage = "4.0.0"
 desert = "1.0.3"
 #async-std = "1.6.0"
@@ -24,6 +23,7 @@ futures = "0.3.5"
 pin-utils = "0.1.0"
 futures-core = "0.3.5"
 pin-project-lite = "0.1.7"
+wasm-bindgen = "0.2.63"
 
 [dev-dependencies]
 rand = "0.6.1"
@@ -31,5 +31,17 @@ random = "0.12.2"
 tempfile = "3.0.7"
 
 [dependencies.async-std]
-version = "1.6.1"
-features = ["attributes"]
+version = "1.6.2"
+features = ["attributes","unstable"]
+
+[dependencies.random-access-disk]
+version = "2.0.0"
+optional = true
+
+[lib]
+crate-type = ["rlib","cdylib"]
+
+[features]
+default = ["random-access-disk"]
+wasm = []
+no-debug = []

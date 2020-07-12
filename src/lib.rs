@@ -187,7 +187,14 @@ pub use crate::mix::{Mix,Mix2,Mix3,Mix4,Mix5,Mix6,Mix7,Mix8};
 #[doc(hidden)] pub use crate::data::{DataStore,DataRange};
 use crate::meta::Meta;
 pub use order::{order,order_len};
+
+#[cfg(not(feature="wasm"))]
 pub use store::{Storage,FileStore};
+#[cfg(feature="wasm")]
+pub use store::Storage;
+
+#[cfg(feature="wasm")]
+mod wasm;
 
 use random_access_storage::RandomAccess;
 use failure::format_err;
