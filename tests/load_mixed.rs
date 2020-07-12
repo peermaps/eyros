@@ -1,24 +1,16 @@
-extern crate eyros;
-extern crate failure;
-extern crate random;
-extern crate random_access_disk;
-extern crate random_access_storage;
-extern crate tempfile;
-
-use eyros::{DB,Row};
-use failure::Error;
-use random_access_disk::RandomAccessDisk;
+use eyros::{DB,Row,Error};
 use random_access_storage::RandomAccess;
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
+use async_std::prelude::*;
 
 use std::cmp::Ordering;
 
 type P = ((f32,f32),(f64,f64),f32);
 type V = u32;
 
-#[test]
-fn load() -> Result<(),Error> {
+#[async_std::test]
+async fn load() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
   let size = 4000;
   let mut r = rand().seed([13,12]);
@@ -34,34 +26,20 @@ fn load() -> Result<(),Error> {
   }).collect();
   {
     // seed the db
-    let mut db: DB<_,_,P,V> = DB::open(
-      |name: &str| -> Result<RandomAccessDisk,Error> {
-        let p = dir.path().join(name);
-        Ok(RandomAccessDisk::builder(p)
-          .auto_sync(false)
-          .build()?)
-      }
-    )?;
+    let mut db: DB<_,P,V> = DB::open_from_path(dir.path()).await?;
     let n = 4;
     let batches: Vec<Vec<Row<P,V>>> = (0..n).map(|i| {
       inserts[size/n*i..size/n*(i+1)].to_vec()
     }).collect();
     for batch in batches {
-      db.batch(&batch)?;
+      db.batch(&batch).await?;
     }
   }
   {
     // let the previous db fall out of scope and create a new one
     // so it loads records from zero
-    let mut db: DB<_,_,P,V> = DB::open(
-      |name: &str| -> Result<RandomAccessDisk,Error> {
-        let p = dir.path().join(name);
-        Ok(RandomAccessDisk::builder(p)
-          .auto_sync(false)
-          .build()?)
-      }
-    )?;
-    check(&mut db, &inserts, size)?;
+    let mut db: DB<_,P,V> = DB::open_from_path(dir.path()).await?;
+    check(&mut db, &inserts, size).await?;
   }
   // create more records
   let newsize = 2000;
@@ -77,22 +55,15 @@ fn load() -> Result<(),Error> {
   }
   {
     // batch insert the records on a new db
-    let mut db: DB<_,_,P,V> = DB::open(
-      |name: &str| -> Result<RandomAccessDisk,Error> {
-        let p = dir.path().join(name);
-        Ok(RandomAccessDisk::builder(p)
-          .auto_sync(false)
-          .build()?)
-      }
-    )?;
+    let mut db: DB<_,P,V> = DB::open_from_path(dir.path()).await?;
     let n = 5;
     let batches: Vec<Vec<Row<P,V>>> = (0..n).map(|i| {
       inserts[size+newsize/n*i..size+newsize/n*(i+1)].to_vec()
     }).collect();
     for batch in batches {
-      db.batch(&batch)?;
+      db.batch(&batch).await?;
     }
-    check(&mut db, &inserts, size + newsize)?;
+    check(&mut db, &inserts, size + newsize).await?;
   }
   Ok(())
 }
@@ -111,14 +82,13 @@ fn contains_pt<T> (min: T, max: T, pt: T) -> bool where T: PartialOrd {
   min <= pt && pt <= max
 }
 
-fn check<S,U> (db: &mut DB<S,U,P,V>, inserts: &Vec<Row<P,V>>, size: usize)
--> Result<(),Error> where
-S: RandomAccess<Error=Error>,
-U: (Fn(&str) -> Result<S,Error>) {
+async fn check<S> (db: &mut DB<S,P,V>, inserts: &Vec<Row<P,V>>, size: usize)
+-> Result<(),Error> where S: RandomAccess<Error=Error>+Send+Sync+Unpin+'static {
   {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }
@@ -137,7 +107,8 @@ U: (Fn(&str) -> Result<S,Error>) {
   {
     let bbox = ((-0.8,0.1,0.0),(0.2,0.5,500.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }

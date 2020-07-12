@@ -1,30 +1,15 @@
-extern crate eyros;
-extern crate failure;
-extern crate random;
-extern crate random_access_disk;
-extern crate tempfile;
-
-use eyros::{DB,Row};
-use failure::Error;
-use random_access_disk::RandomAccessDisk;
+use eyros::{DB,Row,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
-
 use std::cmp::Ordering;
+use async_std::prelude::*;
 
-#[test]
-fn multi_batch_f32_f64_u16() -> Result<(),Error> {
+#[async_std::test]
+async fn multi_batch_f32_f64_u16() -> Result<(),Error> {
   type P = (f32,f64);
   type V = u16;
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<_,_,P,V> = DB::open(
-    |name: &str| -> Result<RandomAccessDisk,Error> {
-      let p = dir.path().join(name);
-      Ok(RandomAccessDisk::builder(p)
-        .auto_sync(false)
-        .build()?)
-    }
-  )?;
+  let mut db: DB<_,P,V> = DB::open_from_path(dir.path()).await?;
   let mut r = rand().seed([13,12]);
   let size = 10_000;
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
@@ -38,13 +23,14 @@ fn multi_batch_f32_f64_u16() -> Result<(),Error> {
     inserts[size/n*i..size/n*(i+1)].to_vec()
   }).collect();
   for batch in batches {
-    db.batch(&batch)?;
+    db.batch(&batch).await?;
   }
 
   {
     let bbox = ((-1000.0,2000.0),(1000.0,6000.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }
@@ -64,7 +50,8 @@ fn multi_batch_f32_f64_u16() -> Result<(),Error> {
   {
     let bbox = ((-800.0,1000.0),(-400.0,4000.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }
@@ -89,19 +76,12 @@ fn multi_batch_f32_f64_u16() -> Result<(),Error> {
   Ok(())
 }
 
-#[test]
-fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
+#[async_std::test]
+async fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
   type P = ((f64,f64),f32);
   type V = u16;
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<_,_,P,V> = DB::open(
-    |name: &str| -> Result<RandomAccessDisk,Error> {
-      let p = dir.path().join(name);
-      Ok(RandomAccessDisk::builder(p)
-        .auto_sync(false)
-        .build()?)
-    }
-  )?;
+  let mut db: DB<_,P,V> = DB::open_from_path(dir.path()).await?;
   let mut r = rand().seed([13,12]);
   let size = 10_000;
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
@@ -116,13 +96,14 @@ fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
     inserts[size/n*i..size/n*(i+1)].to_vec()
   }).collect();
   for batch in batches {
-    db.batch(&batch)?;
+    db.batch(&batch).await?;
   }
 
   {
     let bbox = ((-1500.0,2000.0),(1500.0,6000.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }
@@ -141,7 +122,8 @@ fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
   {
     let bbox = ((-800.0,1000.0),(-400.0,4000.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }

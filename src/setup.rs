@@ -10,6 +10,18 @@ pub struct SetupFields {
   pub data_list_cache_size: usize
 }
 
+impl SetupFields {
+  pub fn default () -> Self {
+    Self {
+      branch_factor: 5,
+      max_data_size: 3_000,
+      base_size: 9_000,
+      bbox_cache_size: 10_000,
+      data_list_cache_size: 16_000
+    }
+  }
+}
+
 /// Builder to configure and instantiate an eyros database.
 ///
 /// The `Setup` builder lets you create a database with a more custom
@@ -19,24 +31,19 @@ pub struct SetupFields {
 /// use eyros::{DB,Setup};
 /// use random_access_disk::RandomAccessDisk;
 /// use std::path::PathBuf;
-/// # use failure::Error;
 ///
 /// type P = ((f32,f32),(f32,f32));
 /// type V = u32;
 ///
-/// # fn main () -> Result<(),Error> {
-/// let mut db: DB<_,_,P,V> = Setup::new(storage)
+/// # #[async_std::main]
+/// # async fn main () -> Result<(),Box<dyn std::error::Error+Sync+Send>> {
+/// let mut db: DB<_,P,V> = Setup::from_path(&PathBuf::from("/tmp/eyros-db/"))
 ///   .branch_factor(5)
 ///   .max_data_size(3_000)
 ///   .base_size(1_000)
-///   .build()?;
+///   .build()
+///   .await?;
 /// # Ok(()) }
-///
-/// fn storage(name: &str) -> Result<RandomAccessDisk,Error> {
-///   let mut p = PathBuf::from("/tmp/eyros-db/");
-///   p.push(name);
-///   Ok(RandomAccessDisk::builder(p).auto_sync(false).build()?)
-/// }
 /// ```
 pub struct Setup<S> where S: RandomAccess<Error=Error>+Send+Sync+Unpin {
   pub storage: Box<dyn Storage<S>>,
@@ -45,16 +52,10 @@ pub struct Setup<S> where S: RandomAccess<Error=Error>+Send+Sync+Unpin {
 
 impl<S> Setup<S> where S: RandomAccess<Error=Error>+Send+Sync+'static+Unpin {
   /// Create a new `Setup` builder from a storage function.
-  pub fn new (storage: Box<dyn Storage<S>>) -> Self {
+  pub fn from_storage (storage: Box<dyn Storage<S>>) -> Self {
     Self {
-      storage,
-      fields: SetupFields {
-        branch_factor: 5,
-        max_data_size: 3_000,
-        base_size: 9_000,
-        bbox_cache_size: 10_000,
-        data_list_cache_size: 16_000
-      }
+      storage: storage,
+      fields: SetupFields::default()
     }
   }
   pub fn branch_factor (mut self, bf: usize) -> Self {

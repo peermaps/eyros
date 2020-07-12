@@ -1,14 +1,7 @@
-extern crate eyros;
-extern crate failure;
-extern crate random;
-extern crate random_access_disk;
-extern crate tempfile;
-
-use eyros::{DB,Row,Location};
-use failure::Error;
-use random_access_disk::RandomAccessDisk;
+use eyros::{DB,Row,Location,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
+use async_std::prelude::*;
 
 use std::cmp::Ordering;
 use std::time;
@@ -17,17 +10,10 @@ use std::collections::HashSet;
 type P = ((f32,f32),(f32,f32),f32);
 type V = u32;
 
-#[test]
-fn delete() -> Result<(),Error> {
+#[async_std::test]
+async fn delete() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<_,_,P,V> = DB::open(
-    |name: &str| -> Result<RandomAccessDisk,Error> {
-      let p = dir.path().join(name);
-      Ok(RandomAccessDisk::builder(p)
-        .auto_sync(false)
-        .build()?)
-    }
-  )?;
+  let mut db: DB<_,P,V> = DB::open_from_path(dir.path()).await?;
   let mut r = rand().seed([13,12]);
   let size = 40_000;
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
@@ -49,7 +35,7 @@ fn delete() -> Result<(),Error> {
     let mut total = 0f64;
     for batch in batches {
       let start = time::Instant::now();
-      db.batch(&batch)?;
+      db.batch(&batch).await?;
       let elapsed = start.elapsed().as_secs_f64();
       total += elapsed;
       eprintln!["batch write for {} records in {} seconds",
@@ -62,7 +48,8 @@ fn delete() -> Result<(),Error> {
   let full: Vec<(P,V,Location)> = {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       results.push(result?);
     }
     results
@@ -81,7 +68,7 @@ fn delete() -> Result<(),Error> {
       }
     }
     let start = time::Instant::now();
-    db.batch(&deletes)?;
+    db.batch(&deletes).await?;
     let elapsed = start.elapsed().as_secs_f64();
     eprintln!["batch delete for {} records in {} seconds",
       deletes.len(), elapsed];
@@ -91,7 +78,8 @@ fn delete() -> Result<(),Error> {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
     let mut results = vec![];
     let start = time::Instant::now();
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       results.push(result?);
     }
     eprintln!["query for {} records in {} seconds",
@@ -112,7 +100,8 @@ fn delete() -> Result<(),Error> {
     let bbox = ((-0.8,0.1,0.0),(0.2,0.5,500.0));
     let mut results = vec![];
     let start = time::Instant::now();
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       results.push(result?)
     }
     eprintln!["query for {} records in {} seconds",
@@ -137,7 +126,8 @@ fn delete() -> Result<(),Error> {
     let bbox = ((-0.500,0.800,200.0),(-0.495,0.805,300.0));
     let mut results = vec![];
     let start = time::Instant::now();
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       results.push(result?);
     }
     eprintln!["query for {} records in {} seconds",

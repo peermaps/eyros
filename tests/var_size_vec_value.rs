@@ -1,31 +1,16 @@
-extern crate eyros;
-extern crate failure;
-extern crate random;
-extern crate random_access_disk;
-extern crate tempfile;
-
-use eyros::{DB,Row};
-use failure::Error;
-use random_access_disk::RandomAccessDisk;
+use eyros::{DB,Row,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
-
 use std::cmp::Ordering;
+use async_std::prelude::*;
 
 type P = ((f32,f32),(f32,f32),f32);
 type V = Vec<u8>;
 
-#[test]
-fn var_size_vec_value() -> Result<(),Error> {
+#[async_std::test]
+async fn var_size_vec_value() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<_,_,P,V> = DB::open(
-    |name: &str| -> Result<RandomAccessDisk,Error> {
-      let p = dir.path().join(name);
-      Ok(RandomAccessDisk::builder(p)
-        .auto_sync(false)
-        .build()?)
-    }
-  )?;
+  let mut db: DB<_,P,V> = DB::open_from_path(dir.path()).await?;
   let mut r = rand().seed([13,12]);
   let size = 40_000;
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
@@ -46,13 +31,14 @@ fn var_size_vec_value() -> Result<(),Error> {
     inserts[size/n*i..size/n*(i+1)].to_vec()
   }).collect();
   for batch in batches {
-    db.batch(&batch)?;
+    db.batch(&batch).await?;
   }
 
   {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }
@@ -71,7 +57,8 @@ fn var_size_vec_value() -> Result<(),Error> {
   {
     let bbox = ((-0.8,0.1,0.0),(0.2,0.5,500.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }

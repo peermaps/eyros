@@ -1,7 +1,5 @@
 #![recursion_limit="1024"]
 
-extern crate failure;
-
 #[path="../src/ensure.rs"]
 #[macro_use] mod ensure;
 

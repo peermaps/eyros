@@ -1,35 +1,22 @@
-extern crate eyros;
-extern crate failure;
-extern crate random;
-extern crate random_access_disk;
-extern crate tempfile;
-
-use eyros::{DB,Row,Setup};
-use failure::Error;
-use random_access_disk::RandomAccessDisk;
+use eyros::{DB,Row,Setup,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
 use std::time;
-
 use std::cmp::Ordering;
+use async_std::prelude::*;
 
 type P = ((f32,f32),(f32,f32),f32);
 type V = u32;
 
-#[test]
-fn multi_batch() -> Result<(),Error> {
+#[async_std::test]
+async fn multi_batch() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let storage = |name: &str| -> Result<RandomAccessDisk,Error> {
-    let p = dir.path().join(name);
-    Ok(RandomAccessDisk::builder(p)
-      .auto_sync(false)
-      .build()?)
-  };
-  let mut db: DB<_,_,P,V> = Setup::new(storage)
+  let mut db: DB<_,P,V> = Setup::from_path(dir.path())
     .branch_factor(5)
     .max_data_size(3_000)
     .base_size(1_000)
-    .build()?;
+    .build()
+    .await?;
   let mut r = rand().seed([13,12]);
   let size = 1_000_000;
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
@@ -50,7 +37,7 @@ fn multi_batch() -> Result<(),Error> {
   }).collect();
   for batch in batches {
     let batch_start = time::Instant::now();
-    db.batch(&batch)?;
+    db.batch(&batch).await?;
     let batch_elapsed = batch_start.elapsed().as_secs_f64();
     count += batch.len() as u64;
     total += batch_elapsed;
@@ -62,7 +49,8 @@ fn multi_batch() -> Result<(),Error> {
   {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }
@@ -82,7 +70,8 @@ fn multi_batch() -> Result<(),Error> {
   {
     let bbox = ((-0.8,0.1,0.0),(0.2,0.5,500.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }

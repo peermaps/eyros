@@ -1,65 +1,52 @@
-extern crate eyros;
-extern crate failure;
-extern crate random;
-extern crate random_access_disk;
-extern crate tempfile;
-
-use eyros::{Setup,Row};
-use failure::Error;
-use random_access_disk::RandomAccessDisk;
+use eyros::{Setup,Row,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
 use std::time;
-
 use std::cmp::Ordering;
+use async_std::prelude::*;
 
 type P = ((f32,f32),(f32,f32),f32);
 type V = u32;
 
-#[test]
-fn single_4k_batch_xxyyz_9_bf_10_data_16_base() -> Result<(),Error> {
-  from_params(4000, 9, 10, 16)
+#[async_std::test]
+async fn single_4k_batch_xxyyz_9_bf_10_data_16_base() -> Result<(),Error> {
+  from_params(4000, 9, 10, 16).await
 }
 
-#[test]
-fn single_4k_batch_xxyyz_5_bf_10_data_16_base() -> Result<(),Error> {
-  from_params(4000, 5, 10, 16)
+#[async_std::test]
+async fn single_4k_batch_xxyyz_5_bf_10_data_16_base() -> Result<(),Error> {
+  from_params(4000, 5, 10, 16).await
 }
 
-#[test]
-fn single_4k_batch_xxyyz_17_bf_10_data_16_base() -> Result<(),Error> {
-  from_params(4000, 17, 10, 16)
+#[async_std::test]
+async fn single_4k_batch_xxyyz_17_bf_10_data_16_base() -> Result<(),Error> {
+  from_params(4000, 17, 10, 16).await
 }
 
-#[test]
-fn single_32k_batch_xxyyz_9_bf_400_data_1k_base() -> Result<(),Error> {
-  from_params(32_000, 9, 400, 1000)
+#[async_std::test]
+async fn single_32k_batch_xxyyz_9_bf_400_data_1k_base() -> Result<(),Error> {
+  from_params(32_000, 9, 400, 1000).await
 }
 
-#[test]
-fn single_64k_batch_xxyyz_9_bf_1k_data_16k_base() -> Result<(),Error> {
-  from_params(64_000, 9, 1_000, 16_000)
+#[async_std::test]
+async fn single_64k_batch_xxyyz_9_bf_1k_data_16k_base() -> Result<(),Error> {
+  from_params(64_000, 9, 1_000, 16_000).await
 }
 
-#[test]
-fn single_200k_batch_xxyyz_9_bf_400_data_1k_base() -> Result<(),Error> {
-  from_params(200_000, 9, 400, 1000)
+#[async_std::test]
+async fn single_200k_batch_xxyyz_9_bf_400_data_1k_base() -> Result<(),Error> {
+  from_params(200_000, 9, 400, 1000).await
 }
 
-fn from_params (size: usize, bf: usize, max_data_size: usize,
+async fn from_params (size: usize, bf: usize, max_data_size: usize,
 base_size: usize) -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let open = |name: &str| -> Result<RandomAccessDisk,Error> {
-    let p = dir.path().join(name);
-    Ok(RandomAccessDisk::builder(p)
-      .auto_sync(false)
-      .build()?)
-  };
-  let mut db = Setup::new(open)
+  let mut db = Setup::from_path(dir.path())
     .branch_factor(bf)
     .max_data_size(max_data_size)
     .base_size(base_size)
-    .build()?;
+    .build()
+    .await?;
   let mut r = rand().seed([13,12]);
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
     let xmin: f32 = r.read::<f32>()*2.0-1.0;
@@ -73,7 +60,7 @@ base_size: usize) -> Result<(),Error> {
   }).collect();
   {
     let start = time::Instant::now();
-    db.batch(&inserts)?;
+    db.batch(&inserts).await?;
     eprintln!["batch write for {} records in {} seconds",
       size, start.elapsed().as_secs_f64()];
   }
@@ -82,7 +69,8 @@ base_size: usize) -> Result<(),Error> {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
     let mut results = vec![];
     let start = time::Instant::now();
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }
@@ -105,7 +93,8 @@ base_size: usize) -> Result<(),Error> {
     let bbox = ((-0.8,0.1,0.0),(0.2,0.5,500.0));
     let mut results = vec![];
     let start = time::Instant::now();
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }

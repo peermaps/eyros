@@ -1,31 +1,16 @@
-extern crate eyros;
-extern crate failure;
-extern crate random;
-extern crate random_access_disk;
-extern crate tempfile;
-
-use eyros::{DB,Row};
-use failure::Error;
-use random_access_disk::RandomAccessDisk;
+use eyros::{DB,Row,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
-
 use std::cmp::Ordering;
+use async_std::prelude::*;
 
 type P = ((f32,f32),(f32,f32),f32);
 type V = u32;
 
-#[test]
-fn single_batch() -> Result<(),Error> {
+#[async_std::test]
+async fn single_batch() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<_,_,((f32,f32),(f32,f32),f32),u32> = DB::open(
-    |name: &str| -> Result<RandomAccessDisk,Error> {
-      let p = dir.path().join(name);
-      Ok(RandomAccessDisk::builder(p)
-        .auto_sync(false)
-        .build()?)
-    }
-  )?;
+  let mut db: DB<_,P,V> = DB::open_from_path(dir.path()).await?;
   let mut r = rand().seed([13,12]);
   let size = 4000;
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
@@ -38,12 +23,13 @@ fn single_batch() -> Result<(),Error> {
     let point = ((xmin,xmax),(ymin,ymax),time);
     Row::Insert(point, value)
   }).collect();
-  db.batch(&inserts)?;
+  db.batch(&inserts).await?;
 
   {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }
@@ -63,7 +49,8 @@ fn single_batch() -> Result<(),Error> {
   {
     let bbox = ((-0.8,0.1,0.0),(0.2,0.5,500.0));
     let mut results = vec![];
-    for result in db.query(&bbox)? {
+    let mut stream = db.query(&bbox).await?;
+    while let Some(result) = stream.next().await {
       let r = result?;
       results.push((r.0,r.1));
     }

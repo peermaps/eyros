@@ -1,4 +1,3 @@
-extern crate eyros;
 #[path="../src/planner.rs"]
 mod planner;
 use planner::plan;

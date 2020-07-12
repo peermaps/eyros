@@ -1,14 +1,17 @@
 use eyros::{DB,Row};
 use rand::random;
-use failure::Error;
-use random_access_disk::RandomAccessDisk;
 use std::path::PathBuf;
+use async_std::prelude::*;
 
 type P = ((f32,f32),(f32,f32),f32);
 type V = u32;
+type E = Box<dyn std::error::Error+Sync+Send>;
 
-fn main() -> Result<(),Error> {
-  let mut db: DB<_,_,((f32,f32),(f32,f32),f32),u32> = DB::open(storage)?;
+#[async_std::main]
+async fn main() -> Result<(),E> {
+  let mut db: DB<_,P,V> = DB::open_from_path(
+    &PathBuf::from("/tmp/eyros-polygons.db")
+  ).await?;
   let polygons: Vec<Row<P,V>> = (0..800).map(|_| {
     let xmin: f32 = random::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + random::<f32>().powf(64.0)*(1.0-xmin);
@@ -19,19 +22,12 @@ fn main() -> Result<(),Error> {
     let point = ((xmin,xmax),(ymin,ymax),time);
     Row::Insert(point, value)
   }).collect();
-  db.batch(&polygons)?;
+  db.batch(&polygons).await?;
 
   let bbox = ((-0.5,-0.8,0.0),(0.3,-0.5,100.0));
-  for result in db.query(&bbox)? {
+  let mut stream = db.query(&bbox).await?;
+  while let Some(result) = stream.next().await {
     println!("{:?}", result?);
   }
   Ok(())
-}
-
-fn storage(name:&str) -> Result<RandomAccessDisk,Error> {
-  let mut p = PathBuf::from("/tmp/eyros-polygons-db/");
-  p.push(name);
-  Ok(RandomAccessDisk::builder(p)
-    .auto_sync(false)
-    .build()?)
 }

@@ -1,9 +1,9 @@
-use eyros::{DB,Row,Point,Cursor,Block,order,order_len};
-use random::{Source,default as rand};
+use eyros::{DB,Row,Point,Cursor,Block,order,order_len,Error as E};
 use failure::{Error,bail};
-use random_access_disk::RandomAccessDisk;
+use random::{Source,default as rand};
 use std::mem::size_of;
 use tempfile::Builder as Tmpfile;
+use async_std::prelude::*;
 
 use std::cmp::{Ordering,PartialOrd};
 use desert::{FromBytes,ToBytes,CountBytes};
@@ -297,17 +297,10 @@ impl Point for P {
   }
 }
 
-#[test]
-fn mix() -> Result<(),Error> {
+#[async_std::test]
+async fn mix() -> Result<(),E> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<_,_,P,V> = DB::open(
-    |name: &str| -> Result<RandomAccessDisk,Error> {
-      let p = dir.path().join(name);
-      Ok(RandomAccessDisk::builder(p)
-        .auto_sync(false)
-        .build()?)
-    }
-  )?;
+  let mut db: DB<_,P,V> = DB::open_from_path(dir.path()).await?;
   let mut inserted: Vec<(P,V)> = vec![];
   let mut r = rand().seed([13,12]);
   for _n in 0..50 {
@@ -328,7 +321,7 @@ fn mix() -> Result<(),Error> {
       inserted.push((point,value));
       Row::Insert(point,value)
     }).collect();
-    db.batch(&batch)?;
+    db.batch(&batch).await?;
   }
   let bbox = ((-0.5,-0.8),(0.3,-0.5));
   let mut expected: Vec<(P,V)> = inserted.iter()
@@ -336,7 +329,8 @@ fn mix() -> Result<(),Error> {
     .map(|(p,v)| (*p,*v))
     .collect();
   let mut results = vec![];
-  for result in db.query(&bbox)? {
+  let mut stream = db.query(&bbox).await?;
+  while let Some(result) = stream.next().await {
     let r = result?;
     results.push((r.0,r.1));
   }

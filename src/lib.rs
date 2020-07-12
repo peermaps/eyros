@@ -35,15 +35,18 @@
 //! ```rust,no_run
 //! use eyros::{DB,Row};
 //! use rand::random;
-//! use failure::Error;
-//! use random_access_disk::RandomAccessDisk;
 //! use std::path::PathBuf;
+//! use async_std::prelude::*;
 //!
 //! type P = ((f32,f32),(f32,f32),f32);
 //! type V = u32;
+//! type E = Box<dyn std::error::Error+Sync+Send>;
 //!
-//! fn main() -> Result<(),Error> {
-//!   let mut db: DB<_,_,((f32,f32),(f32,f32),f32),u32> = DB::open(storage)?;
+//! #[async_std::main]
+//! async fn main() -> Result<(),E> {
+//!   let mut db: DB<_,P,V> = DB::open_from_path(
+//!     &PathBuf::from("/tmp/eyros-polygons.db")
+//!   ).await?;
 //!   let polygons: Vec<Row<P,V>> = (0..800).map(|_| {
 //!     let xmin: f32 = random::<f32>()*2.0-1.0;
 //!     let xmax: f32 = xmin + random::<f32>().powf(64.0)*(1.0-xmin);
@@ -54,21 +57,14 @@
 //!     let point = ((xmin,xmax),(ymin,ymax),time);
 //!     Row::Insert(point, value)
 //!   }).collect();
-//!   db.batch(&polygons)?;
+//!   db.batch(&polygons).await?;
 //!
 //!   let bbox = ((-0.5,-0.8,0.0),(0.3,-0.5,100.0));
-//!   for result in db.query(&bbox)? {
+//!   let mut stream = db.query(&bbox).await?;
+//!   while let Some(result) = stream.next().await {
 //!     println!("{:?}", result?);
 //!   }
 //!   Ok(())
-//! }
-//!
-//! fn storage(name:&str) -> Result<RandomAccessDisk,Error> {
-//!   let mut p = PathBuf::from("/tmp/eyros-db/");
-//!   p.push(name);
-//!   Ok(RandomAccessDisk::builder(p)
-//!     .auto_sync(false)
-//!     .build()?)
 //! }
 //! ```
 //!
@@ -118,15 +114,18 @@
 //! ```rust,no_run
 //! use eyros::{DB,Row,Mix,Mix2};
 //! use rand::random;
-//! use failure::Error;
-//! use random_access_disk::RandomAccessDisk;
 //! use std::path::PathBuf;
+//! use async_std::prelude::*;
 //!
 //! type P = Mix2<f32,f32>;
 //! type V = u32;
+//! type E = Box<dyn std::error::Error+Sync+Send>;
 //!
-//! fn main() -> Result<(),Error> {
-//!   let mut db: DB<_,_,P,V> = DB::open(storage)?;
+//! #[async_std::main]
+//! async fn main() -> Result<(),E> {
+//!   let mut db: DB<_,P,V> = DB::open_from_path(
+//!     &PathBuf::from("/tmp/eyros-mix.db")
+//!   ).await?;
 //!   let batch: Vec<Row<P,V>> = (0..1_000).map(|_| {
 //!     let value = random::<u32>();
 //!     if random::<f32>() > 0.5 {
@@ -147,21 +146,14 @@
 //!       ), value)
 //!     }
 //!   }).collect();
-//!   db.batch(&batch)?;
+//!   db.batch(&batch).await?;
 //!
 //!   let bbox = ((-0.5,-0.8),(0.3,-0.5));
-//!   for result in db.query(&bbox)? {
+//!   let mut stream = db.query(&bbox).await?;
+//!   while let Some(result) = stream.next().await {
 //!     println!("{:?}", result?);
 //!   }
 //!   Ok(())
-//! }
-//!
-//! fn storage(name:&str) -> Result<RandomAccessDisk,Error> {
-//!   let mut p = PathBuf::from("/tmp/eyros-mix-db/");
-//!   p.push(name);
-//!   Ok(RandomAccessDisk::builder(p)
-//!     .auto_sync(false)
-//!     .build()?)
 //! }
 //! ```
 
@@ -183,6 +175,7 @@ mod bits;
 mod data;
 mod read_block;
 mod pivots;
+mod store;
 
 pub use crate::setup::{Setup,SetupFields};
 use crate::staging::{Staging,StagingIterator};
@@ -194,10 +187,11 @@ pub use crate::mix::{Mix,Mix2,Mix3,Mix4,Mix5,Mix6,Mix7,Mix8};
 #[doc(hidden)] pub use crate::data::{DataStore,DataRange};
 use crate::meta::Meta;
 pub use order::{order,order_len};
+pub use store::{Storage,FileStore};
 
 use random_access_storage::RandomAccess;
 use failure::format_err;
-pub type Error = Box<dyn std::error::Error + Sync + Send>;
+pub type Error = Box<dyn std::error::Error+Sync+Send>;
 use desert::{ToBytes,FromBytes,CountBytes};
 use std::fmt::Debug;
 use async_std::{sync::{Arc,Mutex}};
@@ -205,7 +199,6 @@ use std::collections::HashSet;
 
 use std::pin::Pin;
 use async_std::{prelude::*,stream::Stream};
-//use futures::stream::unfold;
 mod unfold;
 use unfold::unfold;
 
@@ -235,11 +228,6 @@ pub enum Row<P,V> where P: Point, V: Value {
   Delete(Location)
 }
 
-#[async_trait::async_trait]
-pub trait Storage<S> {
-  async fn open (&mut self, name: &str) -> Result<S,Error>;
-}
-
 /// Top-level database API.
 pub struct DB<S,P,V> where
 S: RandomAccess<Error=Error>+Send+Sync+Unpin,
@@ -255,9 +243,11 @@ P: Point, V: Value {
 impl<S,P,V> DB<S,P,V> where
 S: RandomAccess<Error=Error>+Send+Sync+'static+Unpin,
 P: Point+'static, V: Value+'static {
-  /// Create a new database instance from `open_store`, a function that receives
-  /// a string path as an argument and returns a Result with a RandomAccess
-  /// store. The database will be created with the default configuration.
+  /// Create a new database instance from `storage`, a struct that implements
+  /// the `eyros::Storage` trait. Storage providers have an `.open()` method
+  /// which returns a new `RandomAccess` instance for a given string. Often
+  /// these strings will correspond to files under a sub-directory.
+  /// The database will be created with the default configuration.
   ///
   /// For example:
   ///
@@ -265,75 +255,70 @@ P: Point+'static, V: Value+'static {
   /// use eyros::DB;
   /// use random_access_disk::RandomAccessDisk;
   /// use std::path::PathBuf;
-  /// use failure::Error;
+  /// use async_std::prelude::*;
   ///
   /// type P = ((f32,f32),(f32,f32));
   /// type V = u32;
+  /// type E = Box<dyn std::error::Error+Sync+Send>;
   ///
-  /// fn main () -> Result<(),Error> {
-  ///   let mut db: DB<_,_,P,V> = DB::open(storage)?;
+  /// #[async_std::main]
+  /// async fn main () -> Result<(),E> {
+  ///   let mut db: DB<_,P,V> = DB::open_from_storage(
+  ///     Box::new(DiskStore { path: PathBuf::from("/tmp/eyros-db/") })
+  ///   ).await?;
   ///   // ...
   ///   Ok(())
   /// }
   ///
-  /// fn storage (name: &str) -> Result<RandomAccessDisk,Error> {
-  ///   let mut p = PathBuf::from("/tmp/eyros-db/");
-  ///   p.push(name);
-  ///   Ok(RandomAccessDisk::builder(p).auto_sync(false).build()?)
+  /// struct DiskStore { path: PathBuf }
+  ///
+  /// #[async_trait::async_trait]
+  /// impl eyros::Storage<RandomAccessDisk> for DiskStore {
+  ///   async fn open (&mut self, name: &str) -> Result<RandomAccessDisk,E> {
+  ///     let mut p = self.path.join(PathBuf::from(name));
+  ///     Ok(RandomAccessDisk::builder(p).auto_sync(false).build().await?)
+  ///   }
   /// }
   /// ```
-  pub async fn open(storage: Box<dyn Storage<S>>) -> Result<Self,Error> {
-    Setup::new(storage).build().await
+  pub async fn open_from_storage(storage: Box<dyn Storage<S>>) -> Result<Self,Error> {
+    Setup::from_storage(storage).build().await
   }
 
   /// Create a new database instance from `setup`, a configuration builder.
   ///
   /// ```rust,no_run
   /// # use eyros::{DB,Setup};
-  /// # use failure::Error;
-  /// # use random_access_disk::RandomAccessDisk;
   /// # use std::path::PathBuf;
-  /// # fn main () -> Result<(),Error> {
+  /// # #[async_std::main]
+  /// # async fn main () -> Result<(),Box<dyn std::error::Error+Sync+Send>> {
   /// # type P = ((f32,f32),(f32,f32));
   /// # type V = u32;
-  /// let mut db: DB<_,_,P,V> = DB::open_from_setup(
-  ///   Setup::new(storage)
+  /// let mut db: DB<_,P,V> = DB::open_from_setup(
+  ///   Setup::from_path(&PathBuf::from("/tmp/eyros-db/"))
   ///     .branch_factor(5)
   ///     .max_data_size(3_000)
   ///     .base_size(1_000)
-  /// )?;
+  /// ).await?;
   /// # Ok(()) }
-  /// #
-  /// # fn storage(name: &str) -> Result<RandomAccessDisk,Error> {
-  /// #   let mut p = PathBuf::from("/tmp/eyros-db/");
-  /// #   p.push(name);
-  /// #   Ok(RandomAccessDisk::builder(p).auto_sync(false).build()?)
-  /// # }
   /// ```
   ///
   /// You can also use `Setup`'s `.build()?` method to get a `DB` instance:
   ///
   /// ```rust,no_run
   /// use eyros::{DB,Setup};
-  /// # use failure::Error;
   /// # use std::path::PathBuf;
-  /// # use random_access_disk::RandomAccessDisk;
   ///
   /// # type P = ((f32,f32),(f32,f32));
   /// # type V = u32;
-  /// # fn main () -> Result<(),Error> {
-  /// let mut db: DB<_,_,P,V> = Setup::new(storage)
+  /// # #[async_std::main]
+  /// # async fn main () -> Result<(),Box<dyn std::error::Error+Sync+Send>> {
+  /// let mut db: DB<_,P,V> = Setup::from_path(&PathBuf::from("/tmp/eyros-db/"))
   ///   .branch_factor(5)
   ///   .max_data_size(3_000)
   ///   .base_size(1_000)
-  ///   .build()?;
+  ///   .build()
+  ///   .await?;
   /// # Ok(()) }
-  /// #
-  /// # fn storage(name: &str) -> Result<RandomAccessDisk,Error> {
-  /// #   let mut p = PathBuf::from("/tmp/eyros-db/");
-  /// #   p.push(name);
-  /// #   Ok(RandomAccessDisk::builder(p).auto_sync(false).build()?)
-  /// # }
   /// ```
   ///
   /// Always open a database with the same settings. Things will break if you
@@ -505,27 +490,25 @@ P: Point+'static, V: Value+'static {
   /// x-y cartesian grid, the first bbox point would be the "bottom-left" (or
   /// west-south) and the second point would be the "top-right" (or east-north).
   ///
-  /// You will receive an iterator of `Result<(P,V,Location),Error>` results
+  /// You will receive a stream of `Result<(P,V,Location),Error>` results
   /// that you can step through like this:
   ///
   /// ```rust,no_run
   /// # use eyros::DB;
-  /// # use failure::Error;
   /// # use std::path::PathBuf;
   /// # use random_access_disk::RandomAccessDisk;
-  /// # fn main () -> Result<(),Error> {
-  /// # let mut db: DB<_,_,((f32,f32),(f32,f32)),u32> = DB::open(storage)?;
+  /// # use async_std::prelude::*;
+  /// # #[async_std::main]
+  /// # async fn main () -> Result<(),Box<dyn std::error::Error+Sync+Send>> {
+  /// # let mut db: DB<_,((f32,f32),(f32,f32)),u32> = DB::open_from_path(
+  /// #   &PathBuf::from("/tmp/eyros-db/")).await?;
   /// let bbox = ((-0.5,-0.8),(0.3,-0.5));
-  /// for result in db.query(&bbox)? {
+  /// let mut stream = db.query(&bbox).await?;
+  /// while let Some(result) = stream.next().await {
   ///   let (point,value,location) = result?;
   ///   // ...
   /// }
   /// # Ok(()) }
-  /// # fn storage(name: &str) -> Result<RandomAccessDisk,Error> {
-  /// #   let mut p = PathBuf::from("/tmp/eyros-db/");
-  /// #   p.push(name);
-  /// #   Ok(RandomAccessDisk::builder(p).auto_sync(false).build()?)
-  /// # }
   /// ```
   ///
   /// If you want to delete records, you will need to use the `Location` records

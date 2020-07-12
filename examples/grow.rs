@@ -1,27 +1,22 @@
 use eyros::{Setup,Row};
 use rand::random;
-use failure::Error;
-use random_access_disk::RandomAccessDisk;
 use std::path::PathBuf;
 use std::time;
 
 type P = ((f32,f32),(f32,f32));
 type V = u32;
+type E = Box<dyn std::error::Error+Sync+Send>;
 
-fn main() -> Result<(),Error> {
+#[async_std::main]
+async fn main() -> Result<(),E> {
   let args: Vec<String> = std::env::args().collect();
   let base = PathBuf::from(args[1].clone());
-  let mut db = Setup::new(|name| {
-    let mut p = base.clone();
-    p.push(name);
-    Ok(RandomAccessDisk::builder(p)
-      .auto_sync(false)
-      .build()?)
-  })
+  let mut db = Setup::from_path(&base)
     .branch_factor(5)
     .max_data_size(3_000)
     .base_size(1_000)
-    .build()?;
+    .build()
+    .await?;
   let batch_size = 10_000;
   let mut count = 0_u64;
   let mut total = 0f64;
@@ -36,7 +31,7 @@ fn main() -> Result<(),Error> {
       Row::Insert(point, value)
     }).collect();
     let batch_start = time::Instant::now();
-    db.batch(&rows)?;
+    db.batch(&rows).await?;
     let batch_elapsed = batch_start.elapsed().as_secs_f64();
     count += batch_size;
     total += batch_elapsed;

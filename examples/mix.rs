@@ -1,14 +1,17 @@
 use eyros::{DB,Row,Mix,Mix2};
 use rand::random;
-use failure::Error;
-use random_access_disk::RandomAccessDisk;
 use std::path::PathBuf;
+use async_std::prelude::*;
 
 type P = Mix2<f32,f32>;
 type V = u32;
+type E = Box<dyn std::error::Error+Sync+Send>;
 
-fn main() -> Result<(),Error> {
-  let mut db: DB<_,_,P,V> = DB::open(storage)?;
+#[async_std::main]
+async fn main() -> Result<(),E> {
+  let mut db: DB<_,P,V> = DB::open_from_path(
+    &PathBuf::from("/tmp/eyros-mix.db")
+  ).await?;
   let batch: Vec<Row<P,V>> = (0..1_000).map(|_| {
     let value = random::<u32>();
     if random::<f32>() > 0.5 {
@@ -29,19 +32,12 @@ fn main() -> Result<(),Error> {
       ), value)
     }
   }).collect();
-  db.batch(&batch)?;
+  db.batch(&batch).await?;
 
   let bbox = ((-0.5,-0.8),(0.3,-0.5));
-  for result in db.query(&bbox)? {
+  let mut stream = db.query(&bbox).await?;
+  while let Some(result) = stream.next().await {
     println!("{:?}", result?);
   }
   Ok(())
-}
-
-fn storage(name:&str) -> Result<RandomAccessDisk,Error> {
-  let mut p = PathBuf::from("/tmp/eyros-mix-db/");
-  p.push(name);
-  Ok(RandomAccessDisk::builder(p)
-    .auto_sync(false)
-    .build()?)
 }
