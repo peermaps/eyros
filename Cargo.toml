@@ -15,33 +15,29 @@ edition = "2018"
 [dependencies]
 failure = "0.1.5"
 lru = "0.4.3"
+async-std = { version = "1.6.2", features = ["attributes","unstable"] }
 random-access-storage = "4.0.0"
+random-access-disk = { version = "2.0.0", optional = true }
 desert = "1.0.3"
-#async-std = "1.6.0"
 async-trait = "0.1.30"
 futures = "0.3.5"
 pin-utils = "0.1.0"
 futures-core = "0.3.5"
 pin-project-lite = "0.1.7"
-wasm-bindgen = "0.2.63"
+wasm-bindgen = { version = "0.2.63", optional = true }
+wasm-bindgen-futures = { version = "0.4.14", optional = true }
+futures-io = { version = "0.3.5", optional = true }
+js-sys = { version = "0.3.41", optional = true }
 
 [dev-dependencies]
 rand = "0.6.1"
 random = "0.12.2"
 tempfile = "3.0.7"
 
-[dependencies.async-std]
-version = "1.6.2"
-features = ["attributes","unstable"]
-
-[dependencies.random-access-disk]
-version = "2.0.0"
-optional = true
-
 [lib]
 crate-type = ["rlib","cdylib"]
 
 [features]
 default = ["random-access-disk"]
-wasm = []
+wasm = ["wasm-bindgen","wasm-bindgen-futures","futures-io","js-sys"]
 no-debug = []
