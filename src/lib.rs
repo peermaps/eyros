@@ -237,7 +237,7 @@ pub enum Row<P,V> where P: Point, V: Value {
 
 /// Top-level database API.
 pub struct DB<S,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync+Unpin,
+S: RandomAccess<Error=Error>+Unpin+Send+Sync,
 P: Point, V: Value {
   storage: Box<dyn Storage<S>>,
   pub trees: Vec<Arc<Mutex<Tree<S,P,V>>>>,
@@ -248,7 +248,7 @@ P: Point, V: Value {
 }
 
 impl<S,P,V> DB<S,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync+'static+Unpin,
+S: RandomAccess<Error=Error>+'static+Unpin+Send+Sync,
 P: Point+'static, V: Value+'static {
   /// Create a new database instance from `storage`, a struct that implements
   /// the `eyros::Storage` trait. Storage providers have an `.open()` method

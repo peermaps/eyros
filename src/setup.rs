@@ -45,12 +45,12 @@ impl SetupFields {
 ///   .await?;
 /// # Ok(()) }
 /// ```
-pub struct Setup<S> where S: RandomAccess<Error=Error>+Send+Sync+Unpin {
+pub struct Setup<S> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
   pub storage: Box<dyn Storage<S>>,
   pub fields: SetupFields
 }
 
-impl<S> Setup<S> where S: RandomAccess<Error=Error>+Send+Sync+'static+Unpin {
+impl<S> Setup<S> where S: RandomAccess<Error=Error>+'static+Unpin+Send+Sync {
   /// Create a new `Setup` builder from a storage function.
   pub fn from_storage (storage: Box<dyn Storage<S>>) -> Self {
     Self {
