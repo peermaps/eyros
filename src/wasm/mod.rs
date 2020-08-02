@@ -17,7 +17,7 @@ impl JsDB2 {
     if !Array::is_array(rows) {
       panic!["must be an array. todo make this fail properly"]
     }
-    let errf = |_e| Error::new("error");
+    let errf = |e| Error::new(&format!["{:?}",e]);
     let arows: Array = rows.clone().into();
     let mut batch: Vec<Row<P2,Vec<u8>>> = Vec::with_capacity(arows.length() as usize);
     for row in arows.iter() {
@@ -73,7 +73,7 @@ impl JsDB2 {
         _ => panic!["unknown row type"]
       });
     }
-    self.db.batch(&batch).await.map_err(|_e| Error::new("error"))
+    self.db.batch(&batch).await.map_err(|e| Error::new(&format!["{:?}",e]))
   }
   /*
   pub async fn query(&mut self, bbox: &JsValue) -> JsStream {
@@ -88,7 +88,7 @@ pub async fn open(storage_fn: Function) -> Result<JsDB2,Error> {
   type V = Vec<u8>;
   let db: DB<S,P,V> = DB::open_from_storage(Box::new(JsStorage {
     storage_fn
-  })).await.map_err(|e| Error::new("error"))?;
+  })).await.map_err(|e| Error::new(&format!["{:?}",e]))?;
   Ok(JsDB2 { db })
 }
 

@@ -13,9 +13,9 @@ pub struct JsStorage {
 #[async_trait::async_trait]
 impl Storage<JsRandomAccess> for JsStorage {
   async fn open(&mut self, name: &str) -> Result<JsRandomAccess,Error> {
-    let errf = |_e| failure::err_msg("error").compat();
+    let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
     let context = self.storage_fn.call1(&JsValue::NULL, &name.into())
-      .map_err(|_e| failure::err_msg("error").compat())?;
+      .map_err(errf)?;
     Ok(JsRandomAccess {
       write_fn: get(&context,&"write".into())
         .map_err(errf)?.into(),
@@ -42,16 +42,16 @@ unsafe impl Sync for JsStorage {}
 #[async_trait::async_trait]
 impl RandomAccess for JsRandomAccess {
   type Error = Box<dyn std::error::Error+Sync+Send>;
-
   async fn write(&mut self, offset: u64, data: &[u8]) -> Result<(), Self::Error> {
     let mut errback = ErrBack::new();
+    let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
     self.write_fn.call3(
       &JsValue::NULL,
       &JsValue::from_f64(offset as f64),
       unsafe { &Uint8Array::view(&data) },
       &errback.cb().as_ref()
-    ).map_err(|_e| failure::err_msg("error").compat())?;
-    errback.await.map_err(|_e| failure::err_msg("error").compat())?;
+    ).map_err(errf)?;
+    errback.await.map_err(|e| failure::err_msg(format!["{:?}",e]).compat())?;
     Ok(())
   }
 
