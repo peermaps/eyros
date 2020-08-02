@@ -24,7 +24,7 @@ futures = "0.3.5"
 pin-utils = "0.1.0"
 futures-core = "0.3.5"
 pin-project-lite = "0.1.7"
-wasm-bindgen = { version = "0.2.63", optional = true }
+wasm-bindgen = { version = "0.2.67", optional = true }
 wasm-bindgen-futures = { version = "0.4.14", optional = true }
 futures-io = { version = "0.3.5", optional = true }
 js-sys = { version = "0.3.41", optional = true }
