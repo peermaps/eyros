@@ -1,7 +1,7 @@
 // Create a new rust future with a callback field.
 
 use async_std::{future::Future,task::{Context, Poll, Waker}};
-use async_std::sync::{Arc,Mutex};
+use async_std::{sync::{Arc,Mutex},task};
 use wasm_bindgen::prelude::{JsValue,Closure};
 use std::pin::Pin;
 use js_sys::{Error as JsError};
@@ -20,7 +20,6 @@ pub struct ErrBackState {
 // this MAY work only because wasm is single-threaded:
 unsafe impl Send for ErrBack {}
 unsafe impl Sync for ErrBack {}
-//impl Unpin for ErrBackState {}
 
 impl Future for ErrBack {
   type Output = Result<JsValue, JsError>;
@@ -52,7 +51,9 @@ impl ErrBack {
   pub fn cb(&mut self) -> Closure<dyn FnMut(JsError, JsValue)> {
     let state = Arc::clone(&self.state);
     Closure::once(Box::new(|err: JsError, value: JsValue| {
-      Self::call(state, err, value);
+      task::block_on(async {
+        Self::call(state, err, value).await;
+      });
     }) as Box<dyn FnOnce(JsError, JsValue)>)
   }
   async fn call(state: Arc<Mutex<ErrBackState>>, err: JsError, value: JsValue) -> () {

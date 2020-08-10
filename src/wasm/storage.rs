@@ -2,7 +2,6 @@ use crate::{Storage,Error};
 use random_access_storage::RandomAccess;
 use wasm_bindgen::prelude::JsValue;
 use js_sys::{Function,Uint8Array,Reflect::get};
-use async_std::sync::{Arc,Mutex};
 #[path="./errback.rs"] mod errback;
 use errback::ErrBack;
 
@@ -56,7 +55,17 @@ impl RandomAccess for JsRandomAccess {
   }
 
   async fn read(&mut self, offset: u64, length: u64) -> Result<Vec<u8>, Self::Error> {
-    unimplemented![]
+    let mut errback = ErrBack::new();
+    let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
+    self.read_fn.call3(
+      &JsValue::NULL,
+      &JsValue::from_f64(offset as f64),
+      &JsValue::from_f64(length as f64),
+      &errback.cb().as_ref()
+    ).map_err(errf)?;
+    Ok(errback.await
+      .map(|v| { let u: Uint8Array = v.into(); u.to_vec() })
+      .map_err(|e| failure::err_msg(format!["{:?}",e]).compat())?)
   }
 
   async fn read_to_writer(&mut self, offset: u64, length: u64,
@@ -73,14 +82,31 @@ impl RandomAccess for JsRandomAccess {
   }
 
   async fn len(&self) -> Result<u64, Self::Error> {
-    unimplemented![]
+    let mut errback = ErrBack::new();
+    let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
+    self.len_fn.call1(
+      &JsValue::NULL,
+      &errback.cb().as_ref()
+    ).map_err(errf)?;
+    Ok(errback.await
+      .map(|v| v.as_f64().unwrap() as u64)
+      .map_err(|e| failure::err_msg(format!["{:?}",e]).compat())?)
   }
 
   async fn is_empty(&mut self) -> Result<bool, Self::Error> {
-    unimplemented![]
+    let mut errback = ErrBack::new();
+    let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
+    self.len_fn.call1(
+      &JsValue::NULL,
+      &errback.cb().as_ref()
+    ).map_err(errf)?;
+    Ok(errback.await
+      .map(|v| v.as_f64().unwrap() as u64 == 0)
+      .map_err(|e| failure::err_msg(format!["{:?}",e]).compat())?)
   }
 
   async fn sync_all(&mut self) -> Result<(), Self::Error> {
-    unimplemented![]
+    Ok(())
+    //unimplemented![]
   }
 }
