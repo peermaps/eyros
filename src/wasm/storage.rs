@@ -1,4 +1,4 @@
-use crate::{Storage,Error};
+use crate::{Storage,Error,wasm::log};
 use random_access_storage::RandomAccess;
 use wasm_bindgen::prelude::JsValue;
 use js_sys::{Function,Uint8Array,Reflect::get};
@@ -42,15 +42,19 @@ unsafe impl Sync for JsStorage {}
 impl RandomAccess for JsRandomAccess {
   type Error = Box<dyn std::error::Error+Sync+Send>;
   async fn write(&mut self, offset: u64, data: &[u8]) -> Result<(), Self::Error> {
+    log(&format!["WRITE {} {:?}", offset, data]);
     let mut errback = ErrBack::new();
     let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
+    log(&format!["write_fn {} {:?}", offset, data]);
     self.write_fn.call3(
       &JsValue::NULL,
       &JsValue::from_f64(offset as f64),
       unsafe { &Uint8Array::view(&data) },
-      &errback.cb().as_ref()
+      &errback.cb()
     ).map_err(errf)?;
+    log(&format!["await errback {} {:?}", offset, data]);
     errback.await.map_err(|e| failure::err_msg(format!["{:?}",e]).compat())?;
+    log(&format!["WROTE {} {:?}", offset, data]);
     Ok(())
   }
 
@@ -61,7 +65,7 @@ impl RandomAccess for JsRandomAccess {
       &JsValue::NULL,
       &JsValue::from_f64(offset as f64),
       &JsValue::from_f64(length as f64),
-      &errback.cb().as_ref()
+      &errback.cb()
     ).map_err(errf)?;
     Ok(errback.await
       .map(|v| { let u: Uint8Array = v.into(); u.to_vec() })
@@ -86,7 +90,7 @@ impl RandomAccess for JsRandomAccess {
     let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
     self.len_fn.call1(
       &JsValue::NULL,
-      &errback.cb().as_ref()
+      &errback.cb()
     ).map_err(errf)?;
     Ok(errback.await
       .map(|v| v.as_f64().unwrap() as u64)
@@ -98,7 +102,7 @@ impl RandomAccess for JsRandomAccess {
     let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
     self.len_fn.call1(
       &JsValue::NULL,
-      &errback.cb().as_ref()
+      &errback.cb()
     ).map_err(errf)?;
     Ok(errback.await
       .map(|v| v.as_f64().unwrap() as u64 == 0)

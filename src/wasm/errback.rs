@@ -5,6 +5,7 @@ use async_std::{sync::{Arc,Mutex},task};
 use wasm_bindgen::prelude::{JsValue,Closure};
 use std::pin::Pin;
 use js_sys::{Error as JsError};
+use crate::wasm::log;
 
 pin_project_lite::pin_project!{
   pub struct ErrBack {
@@ -13,7 +14,7 @@ pin_project_lite::pin_project!{
 }
 
 pub struct ErrBackState {
-  result: Option<Result<JsValue, JsError>>,
+  result: Option<Result<JsValue, JsValue>>,
   waker: Option<Waker>
 }
 
@@ -22,7 +23,7 @@ unsafe impl Send for ErrBack {}
 unsafe impl Sync for ErrBack {}
 
 impl Future for ErrBack {
-  type Output = Result<JsValue, JsError>;
+  type Output = Result<JsValue, JsValue>;
   fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
     let mut f = self.project().state.lock();
     match (unsafe { Pin::new_unchecked(&mut f) }).poll(ctx) {
@@ -48,15 +49,17 @@ impl ErrBack {
     }));
     Self { state }
   }
-  pub fn cb(&mut self) -> Closure<dyn FnMut(JsError, JsValue)> {
+  pub fn cb(&mut self) -> JsValue {
     let state = Arc::clone(&self.state);
-    Closure::once(Box::new(|err: JsError, value: JsValue| {
+    Closure::once_into_js(Box::new(|err: JsValue, value: JsValue| {
+      log(&format!["called back err={:?} value={:?}", err, value]);
       task::block_on(async {
         Self::call(state, err, value).await;
       });
-    }) as Box<dyn FnOnce(JsError, JsValue)>)
+    }) as Box<dyn FnOnce(JsValue, JsValue)>)
   }
-  async fn call(state: Arc<Mutex<ErrBackState>>, err: JsError, value: JsValue) -> () {
+  async fn call(state: Arc<Mutex<ErrBackState>>, err: JsValue, value: JsValue) -> () {
+    log(&"call");
     let mut s = state.lock().await;
     if err.is_falsy() {
       s.result = Some(Ok(value))
@@ -64,6 +67,7 @@ impl ErrBack {
       s.result = Some(Err(err.into()))
     }
     if let Some(waker) = s.waker.take() {
+      log(&"wake");
       waker.wake();
     }
   }

@@ -111,4 +111,5 @@ pub async fn open(storage_fn: Function) -> Result<JsDB2,Error> {
 
 #[wasm_bindgen]
 extern "C" {
+  fn log(msg: &str);
 }
