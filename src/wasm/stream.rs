@@ -19,12 +19,7 @@ impl JsStream {
 
 #[wasm_bindgen]
 impl JsStream {
-  //pub async fn next (mut self) -> Option<Result<(P2,V,Location),JsError>> {
   pub async fn next (mut self) -> Result<JsValue,JsError> {
-    /*
-    let res = self.stream.next().await
-      .map(|x| x.map_err(|e| JsError::new(&format!["{:?}",e])))?;
-    */
     match self.stream.next().await {
       None => Ok(JsValue::NULL),
       Some(Err(e)) => {

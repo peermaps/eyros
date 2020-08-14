@@ -1,4 +1,4 @@
-use crate::{Storage,Error,wasm::log};
+use crate::{Storage,Error};
 use random_access_storage::RandomAccess;
 use wasm_bindgen::prelude::JsValue;
 use js_sys::{Function,Uint8Array,Reflect::get};
@@ -42,19 +42,15 @@ unsafe impl Sync for JsStorage {}
 impl RandomAccess for JsRandomAccess {
   type Error = Box<dyn std::error::Error+Sync+Send>;
   async fn write(&mut self, offset: u64, data: &[u8]) -> Result<(), Self::Error> {
-    log(&format!["WRITE {} {:?}", offset, data]);
     let mut errback = ErrBack::new();
     let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
-    log(&format!["write_fn {} {:?}", offset, data]);
     self.write_fn.call3(
       &JsValue::NULL,
       &JsValue::from_f64(offset as f64),
       unsafe { &Uint8Array::view(&data) },
       &errback.cb()
     ).map_err(errf)?;
-    log(&format!["await errback {} {:?}", offset, data]);
     errback.await.map_err(|e| failure::err_msg(format!["{:?}",e]).compat())?;
-    log(&format!["WROTE {} {:?}", offset, data]);
     Ok(())
   }
 

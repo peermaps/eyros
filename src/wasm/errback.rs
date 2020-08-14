@@ -5,7 +5,7 @@ use async_std::{sync::{Arc,Mutex},task};
 use wasm_bindgen::prelude::{JsValue,Closure};
 use std::pin::Pin;
 use js_sys::{Error as JsError};
-use crate::wasm::log;
+//use crate::wasm::log;
 
 pin_project_lite::pin_project!{
   pub struct ErrBack {
@@ -52,14 +52,13 @@ impl ErrBack {
   pub fn cb(&mut self) -> JsValue {
     let state = Arc::clone(&self.state);
     Closure::once_into_js(Box::new(|err: JsValue, value: JsValue| {
-      log(&format!["called back err={:?} value={:?}", err, value]);
+      //log(&format!["called back err={:?} value={:?}", err, value]);
       task::block_on(async {
         Self::call(state, err, value).await;
       });
     }) as Box<dyn FnOnce(JsValue, JsValue)>)
   }
   async fn call(state: Arc<Mutex<ErrBackState>>, err: JsValue, value: JsValue) -> () {
-    log(&"call");
     let mut s = state.lock().await;
     if err.is_falsy() {
       s.result = Some(Ok(value))
@@ -67,7 +66,6 @@ impl ErrBack {
       s.result = Some(Err(err.into()))
     }
     if let Some(waker) = s.waker.take() {
-      log(&"wake");
       waker.wake();
     }
   }

@@ -94,6 +94,7 @@ impl JsDB2 {
         bbox_a.get(3).as_f64().unwrap() as f32,
       )
     );
+    log(&format!["bbox={:?}", bbox]);
     Ok(JsStream::new(
       self.db.query(&bbox).await
         .map_err(|e| Error::new(&format!["{:?}",e]))?
