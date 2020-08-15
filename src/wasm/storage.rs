@@ -68,16 +68,16 @@ impl RandomAccess for JsRandomAccess {
       .map_err(|e| failure::err_msg(format!["{:?}",e]).compat())?)
   }
 
-  async fn read_to_writer(&mut self, offset: u64, length: u64,
-  buf: &mut (impl futures_io::AsyncWrite + Send)) -> Result<(), Self::Error> {
+  async fn read_to_writer(&mut self, _offset: u64, _length: u64,
+  _buf: &mut (impl futures_io::AsyncWrite + Send)) -> Result<(), Self::Error> {
     unimplemented![]
   }
 
-  async fn del(&mut self, offset: u64, length: u64) -> Result<(), Self::Error> {
+  async fn del(&mut self, _offset: u64, _length: u64) -> Result<(), Self::Error> {
     unimplemented![]
   }
 
-  async fn truncate(&mut self, length: u64) -> Result<(), Self::Error> {
+  async fn truncate(&mut self, _length: u64) -> Result<(), Self::Error> {
     unimplemented![]
   }
 

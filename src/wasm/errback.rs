@@ -1,10 +1,10 @@
 // Create a new rust future with a callback field.
 
 use async_std::{future::Future,task::{Context, Poll, Waker}};
-use async_std::{sync::{Arc,Mutex},task};
+use async_std::sync::{Arc,Mutex};
 use wasm_bindgen::prelude::{JsValue,Closure};
+use wasm_bindgen_futures::spawn_local;
 use std::pin::Pin;
-use js_sys::{Error as JsError};
 //use crate::wasm::log;
 
 pin_project_lite::pin_project!{
@@ -53,7 +53,7 @@ impl ErrBack {
     let state = Arc::clone(&self.state);
     Closure::once_into_js(Box::new(|err: JsValue, value: JsValue| {
       //log(&format!["called back err={:?} value={:?}", err, value]);
-      task::block_on(async {
+      spawn_local(async {
         Self::call(state, err, value).await;
       });
     }) as Box<dyn FnOnce(JsValue, JsValue)>)

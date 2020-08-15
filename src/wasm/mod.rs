@@ -4,7 +4,9 @@ pub use storage::{JsStorage,JsRandomAccess};
 mod stream;
 pub use stream::JsStream;
 use wasm_bindgen::prelude::{wasm_bindgen,JsValue};
-use js_sys::{Error,Function,Array,Uint8Array,Reflect::get};
+use wasm_bindgen_futures::future_to_promise;
+use js_sys::{Error,Function,Array,Uint8Array,Promise,Reflect::get};
+use async_std::sync::{Arc,Mutex};
 
 type S = JsRandomAccess;
 type P2 = Mix2<f32,f32>;
@@ -12,12 +14,21 @@ type V = Vec<u8>;
 
 #[wasm_bindgen]
 pub struct JsDB2 {
-  db: DB<S,P2,V>
+  db: Arc<Mutex<DB<S,P2,V>>>
 }
 
 #[wasm_bindgen]
 impl JsDB2 {
-  pub async fn batch(mut self, rows: JsValue) -> Result<(),Error> {
+  pub fn batch(&self, rows: JsValue) -> Promise {
+    let db_ref = Arc::clone(&self.db);
+    future_to_promise(async move {
+      let mut db = db_ref.lock().await;
+      let batch = Self::batch_rows(rows)?;
+      db.batch(&batch).await.map_err(|e| Error::new(&format!["{:?}",e]))?;
+      Ok(JsValue::NULL)
+    })
+  }
+  fn batch_rows(rows: JsValue) -> Result<Vec<Row<P2,V>>,Error> {
     if !Array::is_array(&rows) {
       panic!["must be an array. todo make this fail properly"]
     }
@@ -50,7 +61,7 @@ impl JsDB2 {
             }
           };
           let y = {
-            let p = point.get(0);
+            let p = point.get(1);
             match Array::is_array(&p) {
               true => {
                 let a: Array = p.into();
@@ -77,28 +88,31 @@ impl JsDB2 {
         _ => panic!["unknown row type"]
       });
     }
-    self.db.batch(&batch).await.map_err(|e| Error::new(&format!["{:?}",e]))
+    Ok(batch)
   }
-  pub async fn query(mut self, bbox_js: JsValue) -> Result<JsStream,Error> {
-    if !Array::is_array(&bbox_js) {
-      return Err(Error::new(&"provided bbox is not an array"))
-    }
-    let bbox_a: Array = bbox_js.into();
-    let bbox = (
-      (
-        bbox_a.get(0).as_f64().unwrap() as f32,
-        bbox_a.get(1).as_f64().unwrap() as f32,
-      ),
-      (
-        bbox_a.get(2).as_f64().unwrap() as f32,
-        bbox_a.get(3).as_f64().unwrap() as f32,
-      )
-    );
-    log(&format!["bbox={:?}", bbox]);
-    Ok(JsStream::new(
-      self.db.query(&bbox).await
-        .map_err(|e| Error::new(&format!["{:?}",e]))?
-    ))
+  pub fn query(&self, bbox_js: JsValue) -> Promise {
+    let db_ref = Arc::clone(&self.db);
+    future_to_promise(async move {
+      if !Array::is_array(&bbox_js) {
+        return Err(Error::new(&"provided bbox is not an array").into())
+      }
+      let bbox_a: Array = bbox_js.into();
+      let bbox = (
+        (
+          bbox_a.get(0).as_f64().unwrap() as f32,
+          bbox_a.get(1).as_f64().unwrap() as f32,
+        ),
+        (
+          bbox_a.get(2).as_f64().unwrap() as f32,
+          bbox_a.get(3).as_f64().unwrap() as f32,
+        )
+      );
+      //log(&format!["bbox={:?}", bbox]);
+      let mut db = db_ref.lock().await;
+      db.query(&bbox).await
+        .map_err(|e| Error::new(&format!["{:?}",e]).into())
+        .map(|x| JsStream::new(x).into())
+    })
   }
 }
 
@@ -107,10 +121,10 @@ pub async fn open(storage_fn: Function) -> Result<JsDB2,Error> {
   let db: DB<S,P2,V> = DB::open_from_storage(Box::new(JsStorage {
     storage_fn
   })).await.map_err(|e| Error::new(&format!["{:?}",e]))?;
-  Ok(JsDB2 { db })
+  Ok(JsDB2 { db: Arc::new(Mutex::new(db)) })
 }
 
 #[wasm_bindgen]
 extern "C" {
-  fn log(msg: &str);
+  //fn log(msg: &str);
 }
