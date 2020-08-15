@@ -1,7 +1,6 @@
-window.RAW = require('random-access-web')
-window.RAM = require('random-access-memory')
-window.eyros = require('./eyros.js')
-window.Buffer = require('buffer').Buffer
+var RAM = require('random-access-memory')
+var eyros = require('./eyros.js')
+var Buffer = require('buffer').Buffer
 
 window.log = function (msg) {
   console.log(msg)
@@ -21,7 +20,6 @@ window.log = function (msg) {
     r.len = function (cb) { cb(null, r.length) }
     return r
   })
-  window.db = db
   await db.batch([
     { type:'insert', point:[+1,+2], value: Uint8Array.from([97,98,99]) },
     { type:'insert', point:[-5,4], value: Uint8Array.from([100,101]) },
