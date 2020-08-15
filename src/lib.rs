@@ -7,7 +7,7 @@
 //! * high batch-write performance (expect 100,000s to 1,000,000s writes per second
 //!   on modest hardware)
 //! * designed for peer-to-peer distribution and query-driven sparse replication
-//! * compiles to web assembly for use in the browser
+//! * [compiles to web assembly for use in the browser][eyros-npm]
 //! * good for geospatial and time-series data
 //!
 //! eyros operates on scalar (x) or interval (min,max) coordinates for each
@@ -21,6 +21,7 @@
 //!
 //! [bkd]: https://users.cs.duke.edu/~pankaj/publications/papers/bkd-sstd.pdf
 //! [interval]: http://www.dgp.toronto.edu/~jstewart/378notes/22intervals/
+//! [eyros-npm]: https://npmjs.com/package/eyros
 //!
 //! # fixed example
 //!
@@ -186,12 +187,11 @@ pub use crate::mix::{Mix,Mix2,Mix3,Mix4,Mix5,Mix6,Mix7,Mix8};
 #[doc(hidden)] pub use crate::branch::Branch;
 #[doc(hidden)] pub use crate::data::{DataStore,DataRange};
 use crate::meta::Meta;
-pub use order::{order,order_len};
+use order::{order,order_len};
 
-#[cfg(not(feature="wasm"))]
-pub use store::{Storage,FileStore};
-#[cfg(feature="wasm")]
 pub use store::Storage;
+#[cfg(not(feature="wasm"))]
+#[doc(hidden)] pub use store::FileStore;
 
 #[cfg(feature="wasm")]
 mod wasm;

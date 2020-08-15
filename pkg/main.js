@@ -9,10 +9,7 @@ window.log = function (msg) {
 ;(async function () {
   var db = await eyros.open(function (x) {
     var r = new RAM()
-    var {read,write} = r
-    r.read = function (offset, length, cb) {
-      return read.call(r, offset,length,cb)
-    }
+    var {write} = r
     r.write = function (offset, buf, cb) {
       if (!Buffer.isBuffer(buf)) buf = Buffer.from(buf)
       return write.call(r, offset, buf, cb)

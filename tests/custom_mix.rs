@@ -1,4 +1,7 @@
-use eyros::{DB,Row,Point,Cursor,Block,order,order_len,Error as E};
+use eyros::{DB,Row,Point,Cursor,Block,Error as E};
+#[path="../src/order.rs"]
+mod order;
+use order::{order,order_len};
 use failure::{Error,bail};
 use random::{Source,default as rand};
 use std::mem::size_of;

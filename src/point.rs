@@ -6,6 +6,12 @@ use std::mem::size_of;
 use crate::order;
 use desert::{ToBytes,FromBytes,CountBytes};
 
+/// `(branch_offset, tree depth)` tuple for branch traversal
+pub type Cursor = (u64,usize);
+
+/// File offset into bulk data
+pub type Block = u64;
+
 /// Points (scalar or interval) must implement these methods.
 /// There's a lot going on here, so you'll most likely want to use one of the
 /// built-in implementations rather than write your own.
@@ -16,9 +22,6 @@ use desert::{ToBytes,FromBytes,CountBytes};
 /// each of `(-2.0,4.5)`, `6.0`, and `(9.0,11.0)` is an "element".
 ///
 /// Presently only types with static sizes are supported.
-
-pub type Cursor = (u64,usize);
-pub type Block = u64;
 
 pub trait Point: Copy+Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes {
   /// Bounding-box corresponding to `(min,max)` as used by `db.query(bbox)`.

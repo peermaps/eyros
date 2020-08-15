@@ -1,4 +1,3 @@
-extern crate eyros;
 #[path="../src/order.rs"]
 mod order;
 use order::{order,order_len};

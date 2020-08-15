@@ -10,6 +10,7 @@ use random_access_disk::RandomAccessDisk;
 #[cfg(feature="wasm")]
 use crate::Error;
 
+/// Return random access storage adaptors for files by a string name
 #[async_trait::async_trait]
 pub trait Storage<S> {
   async fn open (&mut self, name: &str) -> Result<S,Error>;
