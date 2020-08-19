@@ -8,6 +8,6 @@ console.log(lines.map((line,i) => {
     .replace(
       /^const bytes = .*/,
       `const bytes = require('fs').readFileSync(`
-        + `path.join(__dirname,'eyros_bg.wasm'));`
+        + `path.join(__dirname,'eyros.wasm'));`
     )
 }).join('\n'))

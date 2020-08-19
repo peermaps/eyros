@@ -16,12 +16,12 @@ impl Storage<JsRandomAccess> for JsStorage {
     let context = self.storage_fn.call1(&JsValue::NULL, &name.into())
       .map_err(errf)?;
     Ok(JsRandomAccess {
-      write_fn: get(&context,&"write".into())
-        .map_err(errf)?.into(),
-      read_fn: get(&context,&"read".into())
-        .map_err(errf)?.into(),
-      len_fn: get(&context,&"len".into())
-        .map_err(errf)?.into(),
+      write_fn: get(&context,&"write".into()).map_err(errf)?.into(),
+      read_fn: get(&context,&"read".into()).map_err(errf)?.into(),
+      len_fn: get(&context,&"len".into()).map_err(errf)?.into(),
+      truncate_fn: get(&context,&"truncate".into()).map_err(errf)?.into(),
+      del_fn: get(&context,&"del".into()).map_err(errf)?.into(),
+      sync_fn: get(&context,&"sync".into()).map_err(errf)?.into(),
     })
   }
 }
@@ -29,10 +29,13 @@ impl Storage<JsRandomAccess> for JsStorage {
 pub struct JsRandomAccess {
   pub write_fn: Function,
   pub read_fn: Function,
-  pub len_fn: Function
+  pub len_fn: Function,
+  pub truncate_fn: Function,
+  pub del_fn: Function,
+  pub sync_fn: Function,
 }
 
-// this MAY work only because wasm is single-threaded:
+// this MAY work only because wasm is single-threaded (in the browser, for now):
 unsafe impl Send for JsRandomAccess {}
 unsafe impl Sync for JsRandomAccess {}
 unsafe impl Send for JsStorage {}
@@ -73,12 +76,29 @@ impl RandomAccess for JsRandomAccess {
     unimplemented![]
   }
 
-  async fn del(&mut self, _offset: u64, _length: u64) -> Result<(), Self::Error> {
-    unimplemented![]
+  async fn del(&mut self, offset: u64, length: u64) -> Result<(), Self::Error> {
+    let mut errback = ErrBack::new();
+    let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
+    self.del_fn.call3(
+      &JsValue::NULL,
+      &JsValue::from_f64(offset as f64),
+      &JsValue::from_f64(length as f64),
+      &errback.cb()
+    ).map_err(errf)?;
+    errback.await.map_err(|e| failure::err_msg(format!["{:?}",e]).compat())?;
+    Ok(())
   }
 
-  async fn truncate(&mut self, _length: u64) -> Result<(), Self::Error> {
-    unimplemented![]
+  async fn truncate(&mut self, length: u64) -> Result<(), Self::Error> {
+    let mut errback = ErrBack::new();
+    let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
+    self.truncate_fn.call2(
+      &JsValue::NULL,
+      &JsValue::from_f64(length as f64),
+      &errback.cb()
+    ).map_err(errf)?;
+    errback.await.map_err(|e| failure::err_msg(format!["{:?}",e]).compat())?;
+    Ok(())
   }
 
   async fn len(&self) -> Result<u64, Self::Error> {
@@ -106,7 +126,13 @@ impl RandomAccess for JsRandomAccess {
   }
 
   async fn sync_all(&mut self) -> Result<(), Self::Error> {
+    let mut errback = ErrBack::new();
+    let errf = |e| failure::err_msg(format!["{:?}",e]).compat();
+    self.sync_fn.call1(
+      &JsValue::NULL,
+      &errback.cb()
+    ).map_err(errf)?;
+    errback.await.map_err(|e| failure::err_msg(format!["{:?}",e]).compat())?;
     Ok(())
-    //unimplemented![]
   }
 }

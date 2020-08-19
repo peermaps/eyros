@@ -1,5 +1,5 @@
 var RAM = require('random-access-memory')
-var eyros = require('./eyros.js')
+var eyros = require('./')
 var Buffer = require('buffer').Buffer
 
 window.log = function (msg) {
@@ -7,16 +7,7 @@ window.log = function (msg) {
 }
 
 ;(async function () {
-  var db = await eyros.open(function (x) {
-    var r = new RAM()
-    var {write} = r
-    r.write = function (offset, buf, cb) {
-      if (!Buffer.isBuffer(buf)) buf = Buffer.from(buf)
-      return write.call(r, offset, buf, cb)
-    }
-    r.len = function (cb) { cb(null, r.length) }
-    return r
-  })
+  var db = await eyros(RAM)
   await db.batch([
     { type:'insert', point:[+1,+2], value: Uint8Array.from([97,98,99]) },
     { type:'insert', point:[-5,4], value: Uint8Array.from([100,101]) },
