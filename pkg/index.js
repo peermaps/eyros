@@ -1,9 +1,13 @@
 var eyros = require('./eyros.js')
+window.eyros = eyros
 var { Buffer } = require('buffer')
 var { nextTick } = require('process/')
 
-module.exports = function (Storage) {
-  return eyros.open(function (x) {
+module.exports = function (Storage, opts) {
+  if (typeof opts === 'string') {
+    opts = { type: opts }
+  }
+  return eyros.open_mix_f32_f32(function (x) {
     var r = new Storage(x)
     return {
       write: function (offset, buf, cb) {

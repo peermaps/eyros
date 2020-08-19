@@ -1,6 +1,6 @@
 [package]
 name = "eyros"
-version = "2.0.0"
+version = "3.0.0"
 description = "multi-dimensional interval database"
 license-file = "LICENSE"
 readme = "readme.md"
