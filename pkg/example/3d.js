@@ -1,5 +1,5 @@
-var RAM = require('random-access-memory')
-var eyros = require('../3d')
+const RAM = require('random-access-memory')
+const eyros = require('../3d')
 
 ;(async function () {
   var db = await eyros({

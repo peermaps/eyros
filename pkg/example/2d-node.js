@@ -1,10 +1,12 @@
+// replace "../" with "eyros/" in your project
 const RAM = require('random-access-memory')
 const eyros = require('../2d')
+const fs = require('fs')
 
 ;(async function () {
   var db = await eyros({
     storage: RAM,
-    wasmSource: await (await fetch('2d.wasm')).arrayBuffer()
+    wasmSource: fs.readFileSync(require.resolve('../2d.wasm'))
   })
   await db.batch([
     { type:'insert', point:[+1,+2], value: Uint8Array.from([97,98,99]) },

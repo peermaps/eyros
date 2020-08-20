@@ -1,9 +1,6 @@
-const { Buffer } = require('buffer')
-const { nextTick } = require('process/')
-
-module.exports = function (Storage) {
+module.exports = function (storage) {
   return function (x) {
-    var r = new Storage(x)
+    var r = storage(x)
     return {
       write: function (offset, buf, cb) {
         if (!Buffer.isBuffer(buf)) buf = Buffer.from(buf)
@@ -14,7 +11,7 @@ module.exports = function (Storage) {
       },
       len: function (cb) {
         if (typeof r.length === 'number') {
-          nextTick(cb, null, r.length)
+          process.nextTick(cb, null, r.length)
         } else if (typeof r.len === 'function') {
           r.len(cb)
         } else if (typeof r.length === 'function') {
@@ -43,7 +40,7 @@ module.exports = function (Storage) {
         if (typeof r.sync === 'function') {
           r.sync(cb)
         } else {
-          nextTick(cb)
+          process.nextTick(cb)
         }
       }
     }

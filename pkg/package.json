@@ -1,4 +1,23 @@
 {
   "name": "eyros",
-  "version": "3.0.0"
+  "version": "3.0.0",
+  "description": "multi-dimensional interval database",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/peermaps/eyros.git"
+  },
+  "devDependencies": {
+    "budo": "^11.6.4"
+  },
+  "keywords": [
+    "database",
+    "wasm",
+    "geospatial",
+    "time-series"
+  ],
+  "scripts": {
+    "2d": "budo -d . example/2d.js",
+    "3d": "budo -d . example/3d.js"
+  },
+  "license": "Parity-7.0.0 AND Apache-2.0"
 }
