@@ -45,7 +45,7 @@ macro_rules! def_mix {
       }
       fn batch_rows(rows: JsValue) -> Result<Vec<Row<$P,V>>,Error> {
         if !Array::is_array(&rows) {
-          panic!["must be an array. todo make this fail properly"]
+          return Err(Error::new(&"row must be an array").into())
         }
         let errf = |e| Error::new(&format!["{:?}",e]);
         let arows: Array = rows.clone().into();
@@ -88,7 +88,7 @@ macro_rules! def_mix {
               );
               Row::Delete(loc)
             },
-            _ => panic!["unknown row type"]
+            _ => return Err(Error::new(&"unsupported row type").into())
           });
         }
         Ok(batch)

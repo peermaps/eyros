@@ -1,4 +1,3 @@
-// replace "../" with "eyros/" in your project
 const RAM = require('random-access-memory')
 const eyros = require('../2d')
 const fs = require('fs')
