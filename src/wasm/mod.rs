@@ -1,8 +1,23 @@
-use crate::{DB,Row,Location,Mix,Mix2,Mix3,Mix4,Mix5};
+use crate::{DB,Row,Location,Mix};
+#[cfg(feature="2d")] use crate::Mix2;
+#[cfg(feature="3d")] use crate::Mix3;
+#[cfg(feature="4d")] use crate::Mix4;
+#[cfg(feature="5d")] use crate::Mix5;
+#[cfg(feature="6d")] use crate::Mix6;
+#[cfg(feature="7d")] use crate::Mix7;
+#[cfg(feature="8d")] use crate::Mix8;
+
 mod storage;
 pub use storage::{JsStorage,JsRandomAccess};
 mod stream;
-pub use stream::{JsStream2,JsStream3,JsStream4,JsStream5};
+#[cfg(feature="2d")] pub use stream::JsStream2;
+#[cfg(feature="3d")] pub use stream::JsStream3;
+#[cfg(feature="4d")] pub use stream::JsStream4;
+#[cfg(feature="5d")] pub use stream::JsStream5;
+#[cfg(feature="6d")] pub use stream::JsStream6;
+#[cfg(feature="7d")] pub use stream::JsStream7;
+#[cfg(feature="8d")] pub use stream::JsStream8;
+
 use wasm_bindgen::prelude::{wasm_bindgen,JsValue};
 use wasm_bindgen_futures::future_to_promise;
 use js_sys::{Error,Function,Array,Uint8Array,Promise,Reflect::get};
@@ -110,14 +125,37 @@ macro_rules! def_mix {
   }
 }
 
+#[cfg(feature="2d")]
 def_mix![JsDB2,JsStream2,Mix2,
   open_mix_f32_f32,Mix2<f32,f32>,2,(f32,f32),(0,1)];
+
+#[cfg(feature="3d")]
 def_mix![JsDB3,JsStream3,Mix3,
   open_mix_f32_f32_f32,Mix3<f32,f32,f32>,3,(f32,f32,f32),(0,1,2)];
+
+#[cfg(feature="4d")]
 def_mix![JsDB4,JsStream4,Mix4,
   open_mix_f32_f32_f32_f32,Mix4<f32,f32,f32,f32>,4,(f32,f32,f32,f32),(0,1,2,3)];
+
+#[cfg(feature="5d")]
 def_mix![JsDB5,JsStream5,Mix5,
-  open_mix_f32_f32_f32_f32_f32,Mix5<f32,f32,f32,f32,f32>,5,(f32,f32,f32,f32,f32),(0,1,2,3,4)];
+  open_mix_f32_f32_f32_f32_f32,Mix5<f32,f32,f32,f32,f32>,
+  5,(f32,f32,f32,f32,f32),(0,1,2,3,4)];
+
+#[cfg(feature="6d")]
+def_mix![JsDB6,JsStream6,Mix6,
+  open_mix_f32_f32_f32_f32_f32_f32,Mix6<f32,f32,f32,f32,f32,f32>,
+  6,(f32,f32,f32,f32,f32,f32),(0,1,2,3,4,5)];
+
+#[cfg(feature="7d")]
+def_mix![JsDB7,JsStream7,Mix7,
+  open_mix_f32_f32_f32_f32_f32_f32_f32,Mix7<f32,f32,f32,f32,f32,f32,f32>,
+  7,(f32,f32,f32,f32,f32,f32,f32),(0,1,2,3,4,5,6)];
+
+#[cfg(feature="8d")]
+def_mix![JsDB8,JsStream8,Mix8,
+  open_mix_f32_f32_f32_f32_f32_f32_f32_f32,Mix8<f32,f32,f32,f32,f32,f32,f32,f32>,
+  8,(f32,f32,f32,f32,f32,f32,f32,f32),(0,1,2,3,4,5,6,7)];
 
 #[wasm_bindgen]
 extern "C" {

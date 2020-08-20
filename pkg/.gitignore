@@ -1,3 +1,15 @@
 node_modules
-eyros.js
-eyros.wasm
+/2d.wasm
+/3d.wasm
+/4d.wasm
+/5d.wasm
+/6d.wasm
+/7d.wasm
+/8d.wasm
+/lib/2d-api.js
+/lib/3d-api.js
+/lib/4d-api.js
+/lib/5d-api.js
+/lib/6d-api.js
+/lib/7d-api.js
+/lib/8d-api.js
