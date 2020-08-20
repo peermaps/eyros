@@ -17,7 +17,7 @@ In this example, we populate an in-memory database with 2-dimensional points and
 intervals. Any points or intervals that intersect the bounding box from `-10` to
 `+10` on the x and y coordinates is returned in the query result.
 
-```
+``` js
 const RAM = require('random-access-memory')
 const eyros = require('eyros/2d')
 
@@ -25,6 +25,35 @@ const eyros = require('eyros/2d')
   var db = await eyros({
     storage: RAM,
     wasmSource: await (await fetch('2d.wasm')).arrayBuffer()
+  })
+  await db.batch([
+    { type:'insert', point:[+1,+2], value: Uint8Array.from([97,98,99]) },
+    { type:'insert', point:[-5,+4], value: Uint8Array.from([100,101]) },
+    { type:'insert', point:[+9,-3], value: Uint8Array.from([102,103,104]) },
+    { type:'insert', point:[+5,-15], value: Uint8Array.from([105,106]) },
+    { type:'insert', point:[[+5,+12],[-15,-3]], value: Uint8Array.from([105,106]) },
+    { type:'insert', point:[[-20,-11],[-8,+2]], value: Uint8Array.from([107]) },
+  ])
+  var q = await db.query([-10,-10,+10,+10])
+  var row
+  while (row = await q.next()) {
+    console.log('row=',row)
+  }
+})()
+```
+
+To use the database from node, you can use `fs.readFileSync()` with
+`require.resolve()` to get the wasmSource:
+
+``` js
+const RAM = require('random-access-memory')
+const eyros = require('eyros/2d')
+const fs = require('fs')
+
+;(async function () {
+  var db = await eyros({
+    storage: RAM,
+    wasmSource: fs.readFileSync(require.resolve('eyros/2d.wasm'))
   })
   await db.batch([
     { type:'insert', point:[+1,+2], value: Uint8Array.from([97,98,99]) },
