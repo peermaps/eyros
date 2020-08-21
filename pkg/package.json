@@ -7,7 +7,8 @@
     "url": "git://github.com/peermaps/eyros.git"
   },
   "devDependencies": {
-    "budo": "^11.6.4"
+    "budo": "^11.6.4",
+    "tape": "^5.0.1"
   },
   "keywords": [
     "database",
@@ -16,6 +17,7 @@
     "time-series"
   ],
   "scripts": {
+    "test": "tape test/*.js",
     "2d": "budo -d . example/2d.js",
     "3d": "budo -d . example/3d.js"
   },
