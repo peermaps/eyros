@@ -7,7 +7,7 @@ The database is based on [bkd][] and [interval][] trees.
 * high batch-write performance (expect 100,000s to 1,000,000s writes per second
   on modest hardware)
 * designed for peer-to-peer distribution and query-driven sparse replication
-* compiles to web assembly for use in the browser
+* [compiles to web assembly for use in the browser][eyros-npm]
 * good for geospatial and time-series data
 
 eyros operates on scalar (x) or interval (min,max) coordinates for each
@@ -21,6 +21,7 @@ future, requiring data migrations.
 
 [bkd]: https://users.cs.duke.edu/~pankaj/publications/papers/bkd-sstd.pdf
 [interval]: http://www.dgp.toronto.edu/~jstewart/378notes/22intervals/
+[eyros-npm]: https://www.npmjs.com/package/eyros
 
 # fixed example
 
