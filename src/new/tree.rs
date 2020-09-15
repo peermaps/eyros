@@ -1,8 +1,10 @@
-//use desert::{ToBytes,FromBytes};
+use desert::{ToBytes,FromBytes,CountBytes};
+use failure::{Error,bail};
 use std::ops::{Add,Div};
 //#[path="../order.rs"] mod order;
 //use order::order;
 #[path="../ensure.rs"] #[macro_use] mod ensure;
+#[path="./varint.rs"] mod varint;
 
 pub trait Scalar: Copy+PartialOrd+From<u8>+core::fmt::Debug
   +Add<Output=Self>+Div<Output=Self> {}
@@ -18,17 +20,16 @@ pub struct Bucket<X,Y> where X: Scalar, Y: Scalar {
 pub enum Node<X,Y> where X: Scalar, Y: Scalar {
   BranchMem(Branch<X,Y>),
   BucketListMem(Vec<Bucket<X,Y>>),
-  Empty(),
   //BranchOffset(u64),
   //BranchFile(u32),
 }
 
 #[derive(Debug)]
 pub struct Branch<X,Y> where X: Scalar, Y: Scalar {
-  offset: u64,
-  pivots: (Option<Vec<X>>,Option<Vec<Y>>),
-  intersections: Vec<Node<X,Y>>,
-  nodes: Vec<Node<X,Y>>,
+  pub offset: u64,
+  pub pivots: (Option<Vec<X>>,Option<Vec<Y>>),
+  pub intersections: Vec<Node<X,Y>>,
+  pub nodes: Vec<Node<X,Y>>,
 }
 
 impl<X,Y> Branch<X,Y> where X: Scalar, Y: Scalar {
@@ -62,7 +63,7 @@ impl<X,Y> Branch<X,Y> where X: Scalar, Y: Scalar {
   pub fn from_sorted(branch_factor: usize, level: usize, buckets: &[Bucket<X,Y>],
   sorted: (&[usize],&[usize])) -> Node<X,Y> {
     if sorted.0.len() == 0 {
-      return Node::Empty();
+      return Node::BucketListMem(vec![]);
     } else if sorted.0.len() < branch_factor {
       return Node::BucketListMem(buckets.to_vec());
     }
@@ -160,7 +161,7 @@ impl<X,Y> Branch<X,Y> where X: Scalar, Y: Scalar {
           matched[*i] = true;
         });
         b
-      }).filter(|b| { match b { Node::Empty() => false, _ => true } }).collect(),
+      }).collect(),
       1 => pivots.1.as_ref().unwrap().iter().map(|pivot| {
         let indexes: Vec<usize> = sorted.1.iter()
           .map(|j| *j)
@@ -192,7 +193,7 @@ impl<X,Y> Branch<X,Y> where X: Scalar, Y: Scalar {
           matched[*i] = true;
         });
         b
-      }).filter(|b| { match b { Node::Empty() => false, _ => true } }).collect(),
+      }).collect(),
       _ => panic!["unexpected level modulo dimension"]
     };
 
@@ -239,14 +240,7 @@ impl<X,Y> Branch<X,Y> where X: Scalar, Y: Scalar {
               (next_sorted.0.as_slice(), next_sorted.1.as_slice())
             )
           }
-        })
-        .filter(|b| {
-          match b {
-            Node::Empty() => false,
-            _ => true
-          }
-        })
-        .collect(),
+        }).collect(),
       1 => pivots.1.as_ref().unwrap().iter().enumerate()
         .map(|(i,pivot)| {
           if i == pivot_lens.1-1 {
@@ -279,18 +273,17 @@ impl<X,Y> Branch<X,Y> where X: Scalar, Y: Scalar {
               (next_sorted.0.as_slice(), next_sorted.1.as_slice())
             )
           }
-        })
-        .filter(|b| {
-          match b {
-            Node::Empty() => false,
-            _ => true
-          }
-        })
-        .collect(),
+        }).collect(),
       _ => panic!["unexpected level modulo dimension"]
     };
 
-    if nodes.len() <= 1 {
+    let node_count = nodes.iter().fold(0usize, |count,node| {
+      count + match node {
+        Node::BucketListMem(bs) => if bs.is_empty() { 0 } else { 1 },
+        Node::BranchMem(_) => 1,
+      }
+    });
+    if node_count <= 1 {
       return Node::BucketListMem(buckets.to_vec());
     }
 
@@ -336,8 +329,7 @@ impl<X,Y> Tree<X,Y> where X: Scalar, Y: Scalar {
         },
         Node::BucketListMem(bucket_list) => {
           buckets.extend_from_slice(bucket_list.as_slice());
-        },
-        Node::Empty() => {},
+        }
       }
     }
     buckets
@@ -347,8 +339,178 @@ impl<X,Y> Tree<X,Y> where X: Scalar, Y: Scalar {
     for tree in trees.iter_mut() {
       buckets.extend(tree.list());
     }
-    // todo: check for bucket intersections
+    // todo: split large intersecting buckets
     Self::build(branch_factor, buckets.as_slice())
+  }
+}
+
+impl<X,Y> ToBytes for Tree<X,Y> where X: Scalar+ToBytes+CountBytes, Y: Scalar+ToBytes+CountBytes {
+  fn to_bytes(&self) -> Result<Vec<u8>,Error> {
+    let mut bytes = vec![0u8;self.count_bytes()];
+    self.write_bytes(&mut bytes)?;
+    Ok(bytes)
+  }
+  fn write_bytes(&self, dst: &mut [u8]) -> Result<usize,Error> {
+    match &self.root {
+      Node::BranchMem(b) => {
+        dst[0] = 0;
+        b.write_bytes(&mut dst[1..])
+      },
+      Node::BucketListMem(bs) => {
+        dst[0] = 1;
+        bs.write_bytes(&mut dst[1..])
+      },
+    }
+  }
+}
+
+impl<X,Y> CountBytes for Tree<X,Y>
+where X: Scalar+CountBytes, Y: Scalar+CountBytes {
+  fn count_bytes(&self) -> usize {
+    match &self.root {
+      Node::BranchMem(b) => 1 + b.count_bytes(),
+      Node::BucketListMem(bs) => 1 + bs.count_bytes(),
+    }
+  }
+  fn count_from_bytes(buf: &[u8]) -> Result<usize,Error> {
+    unimplemented![]
+  }
+  fn count_from_bytes_more(buf: &[u8]) -> Result<Option<usize>,Error> {
+    unimplemented![]
+  }
+}
+
+impl<X,Y> ToBytes for Branch<X,Y>
+where X: Scalar+ToBytes+CountBytes, Y: Scalar+ToBytes+CountBytes {
+  fn to_bytes(&self) -> Result<Vec<u8>,Error> {
+    let payload_len = self.payload_bytes();
+    let byte_len = varint::length(payload_len as u64) + payload_len;
+    let mut bytes = vec![0u8;byte_len];
+    self.write_bytes_with_lens(&mut bytes, payload_len, byte_len)?;
+    Ok(bytes)
+  }
+  fn write_bytes(&self, dst: &mut [u8]) -> Result<usize,Error> {
+    let payload_len = self.payload_bytes();
+    let byte_len = varint::length(payload_len as u64) + payload_len;
+    self.write_bytes_with_lens(dst, payload_len, byte_len)
+  }
+}
+
+impl<X,Y> Branch<X,Y> where X: CountBytes+Scalar, Y: CountBytes+Scalar {
+  fn payload_bytes(&self) -> usize {
+    (match &self.pivots {
+      (Some(pivots),_) => varint::length(pivots.len() as u64)
+        + pivots.iter().fold(0, |sum,p| sum + p.count_bytes()),
+      (_,Some(pivots)) => varint::length(pivots.len() as u64)
+        + pivots.iter().fold(0, |sum,p| sum + p.count_bytes()),
+      (_,_) => panic!["unexpected pivot state"]
+    }) + (self.intersections.len() + self.nodes.len() + 7) / 8
+      + self.intersections.len() * 0u64.count_bytes()
+      + self.nodes.len() * 0u64.count_bytes()
+  }
+}
+
+impl<X,Y> Branch<X,Y> where X: ToBytes+CountBytes+Scalar, Y: ToBytes+CountBytes+Scalar {
+  fn write_bytes_with_lens(&self, dst: &mut [u8], payload_len: usize, byte_len: usize) -> Result<usize,Error> {
+    if dst.len() < byte_len { bail!["buffer to small to write branch"] }
+    let mut offset = 0;
+    // byte length
+    offset += varint::encode(payload_len as u64, &mut dst[offset..])?;
+    // number of pivots
+    offset += match &self.pivots {
+      (Some(pivots),_) => varint::encode(pivots.len() as u64, &mut dst[offset..])?,
+      (_,Some(pivots)) => varint::encode(pivots.len() as u64, &mut dst[offset..])?,
+      (_,_) => bail!["unexpected pivot state"]
+    };
+    // pivots
+    match &self.pivots {
+      (Some(pivots),_) => {
+        for p in pivots.iter() {
+          offset += p.write_bytes(&mut dst[offset..])?;
+        }
+      },
+      (_,Some(pivots)) => {
+        for p in pivots.iter() {
+          offset += p.write_bytes(&mut dst[offset..])?;
+        }
+      },
+      (_,_) => bail!["unexpected pivot state"]
+    }
+    // data bitfield: 1 for bucket list, 0 for branch
+    let mut data_index = 0;
+    for node in self.intersections.iter() {
+      dst[offset+data_index/8] |= match node {
+        Node::BranchMem(_) => 0,
+        Node::BucketListMem(_) => 1 << (data_index%8),
+      };
+      data_index += 1;
+    }
+    for node in self.nodes.iter() {
+      dst[offset+data_index/8] |= match node {
+        Node::BranchMem(_) => 0,
+        Node::BucketListMem(_) => 1 << (data_index%8),
+      };
+      data_index += 1;
+    }
+    offset += (data_index+7)/8;
+    // intersecting, nodes
+    for x in [&self.intersections,&self.nodes].iter() {
+      for node in x.iter() {
+        match node {
+          Node::BucketListMem(bs) => {
+            offset += bs.write_bytes(&mut dst[offset..])?;
+          },
+          Node::BranchMem(b) => {
+            offset += varint::encode(b.offset, &mut dst[offset..])?;
+          },
+        }
+      }
+    }
+    Ok(offset)
+  }
+}
+
+impl<X,Y> ToBytes for Bucket<X,Y>
+where X: Scalar+ToBytes+CountBytes, Y: Scalar+ToBytes+CountBytes {
+  fn to_bytes(&self) -> Result<Vec<u8>,Error> {
+    let mut buf = vec![0u8;self.count_bytes()];
+    let mut offset = 0;
+    offset += varint::encode(self.offset, &mut buf[offset..])?;
+    offset += self.bounds.write_bytes(&mut buf[offset..])?;
+    Ok(buf)
+  }
+  fn write_bytes(&self, dst: &mut [u8]) -> Result<usize,Error> {
+    if dst.len() < self.count_bytes() { bail!["buffer too small to write bucket"] }
+    let mut offset = 0;
+    offset += varint::encode(self.offset, &mut dst[offset..])?;
+    offset += self.bounds.write_bytes(&mut dst[offset..])?;
+    Ok(offset)
+  }
+}
+
+impl<X,Y> CountBytes for Bucket<X,Y>
+where X: Scalar+CountBytes, Y: Scalar+CountBytes {
+  fn count_bytes(&self) -> usize {
+    varint::length(self.offset) + self.bounds.count_bytes()
+  }
+  fn count_from_bytes(buf: &[u8]) -> Result<usize,Error> {
+    unimplemented![]
+  }
+  fn count_from_bytes_more(buf: &[u8]) -> Result<Option<usize>,Error> {
+    unimplemented![]
+  }
+}
+
+impl<X,Y> CountBytes for Branch<X,Y> where X: CountBytes+Scalar, Y: CountBytes+Scalar {
+  fn count_bytes(&self) -> usize {
+    let len = self.payload_bytes();
+    varint::length(len as u64) + len
+  }
+  fn count_from_bytes(buf: &[u8]) -> Result<usize,Error> {
+    unimplemented![]
+  }
+  fn count_from_bytes_more(buf: &[u8]) -> Result<Option<usize>,Error> {
+    unimplemented![]
   }
 }
 
