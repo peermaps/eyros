@@ -1,23 +1,27 @@
-use crate::{DB,Storage,Point,Value,Error};
+use crate::{d2::DB,Storage,Scalar,Value,Error};
 use random_access_storage::RandomAccess;
 
 /// Struct for reading database properties.
 pub struct SetupFields {
+  /*
   pub max_data_size: usize,
   pub base_size: usize,
   pub branch_factor: usize,
   pub bbox_cache_size: usize,
   pub data_list_cache_size: usize
+  */
 }
 
 impl SetupFields {
   pub fn default () -> Self {
     Self {
+      /*
       branch_factor: 5,
       max_data_size: 3_000,
       base_size: 9_000,
       bbox_cache_size: 10_000,
       data_list_cache_size: 16_000
+      */
     }
   }
 }
@@ -45,12 +49,12 @@ impl SetupFields {
 ///   .await?;
 /// # Ok(()) }
 /// ```
-pub struct Setup<S> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
+pub struct Setup2<S> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
   pub storage: Box<dyn Storage<S>>,
   pub fields: SetupFields
 }
 
-impl<S> Setup<S> where S: RandomAccess<Error=Error>+'static+Unpin+Send+Sync {
+impl<S> Setup2<S> where S: RandomAccess<Error=Error>+'static+Unpin+Send+Sync {
   /// Create a new `Setup` builder from a storage function.
   pub fn from_storage (storage: Box<dyn Storage<S>>) -> Self {
     Self {
@@ -58,6 +62,7 @@ impl<S> Setup<S> where S: RandomAccess<Error=Error>+'static+Unpin+Send+Sync {
       fields: SetupFields::default()
     }
   }
+  /*
   pub fn branch_factor (mut self, bf: usize) -> Self {
     self.fields.branch_factor = bf;
     self
@@ -78,8 +83,9 @@ impl<S> Setup<S> where S: RandomAccess<Error=Error>+'static+Unpin+Send+Sync {
     self.fields.data_list_cache_size = size;
     self
   }
-  pub async fn build<P,V> (self) -> Result<DB<S,P,V>,Error>
-  where P: Point+'static, V: Value+'static {
+  */
+  pub async fn build<X,Y,V> (self) -> Result<DB<S,X,Y,V>,Error>
+  where X: Scalar, Y: Scalar, V: Value {
     DB::open_from_setup(self).await
   }
 }

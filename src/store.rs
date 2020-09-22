@@ -1,5 +1,5 @@
 #[cfg(not(feature="wasm"))]
-use crate::{DB,Point,Value,Setup,SetupFields,Error};
+use crate::{Scalar,Value,Error,SetupFields,d2};
 #[cfg(not(feature="wasm"))]
 use std::path::{Path,PathBuf};
 #[cfg(not(feature="wasm"))]
@@ -42,14 +42,14 @@ impl Storage<S> for FileStore {
 }
 
 #[cfg(not(feature="wasm"))]
-impl<P,V> DB<S,P,V> where P: Point+'static, V: Value+'static {
+impl<X,Y,V> d2::DB<S,X,Y,V> where X: Scalar+'static, Y: Scalar+'static, V: Value+'static {
   pub async fn open_from_path(path: &Path) -> Result<Self,Error> {
-    Ok(Setup::from_path(path).build().await?)
+    Ok(d2::Setup::from_path(path).build().await?)
   }
 }
 
 #[cfg(not(feature="wasm"))]
-impl Setup<S> {
+impl d2::Setup<S> {
   /// Create a new `Setup` builder from a string file path.
   pub fn from_path (path: &Path) -> Self {
     Self {

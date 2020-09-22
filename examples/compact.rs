@@ -1,7 +1,7 @@
 // analyze the compactness of data blocks
 // a smaller area is more compact and better
 
-use eyros::{DB,Row,Mix,Mix2};
+use eyros::{DB,Setup,Row,Mix,Mix2};
 use rand::random;
 use std::path::PathBuf;
 use async_std::prelude::*;
@@ -13,16 +13,26 @@ type E = Box<dyn std::error::Error+Sync+Send>;
 
 #[async_std::main]
 async fn main() -> Result<(),E> {
-  let mut db: DB<_,P,V> = DB::open_from_path(
-    &PathBuf::from("/tmp/eyros-compact.db")
-  ).await?;
-  let polygons: Vec<Row<P,V>> = (0..500_000).map(|_| {
-    let x = Mix::Scalar((random::<f32>()*2.0-1.0)*180.0);
-    let y = Mix::Scalar((random::<f32>()*2.0-1.0)*90.0);
-    let value: u32 = random();
-    Row::Insert(Mix2::new(x,y), value)
-  }).collect();
-  db.batch(&polygons).await?;
+  let path = &PathBuf::from("/tmp/eyros-compact.db");
+  let mut db: DB<_,P,V> = Setup::from_path(path)
+    //.branch_factor(17)
+    .max_data_size(1)
+    //.base_size(30_000)
+    .build().await?;
+  //let batch_size = 100_000_u64;
+  //let n = 5_000_000_u64;
+  let batch_size = 100_000_u64;
+  let n = 1_000_000_u64;
+  for i in 0..n/batch_size {
+    let batch: Vec<Row<P,V>> = (0..batch_size).map(|_| {
+      let x = Mix::Scalar((random::<f32>()*2.0-1.0)*180.0);
+      let y = Mix::Scalar((random::<f32>()*2.0-1.0)*90.0);
+      let value: u32 = random();
+      Row::Insert(Mix2::new(x,y), value)
+    }).collect();
+    db.batch(&batch).await?;
+    println!["i={}", i];
+  }
 
   let mut locations = HashSet::new();
   let bbox = ((-180.0,-90.0),(180.0,90.0));

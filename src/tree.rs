@@ -1,311 +1,353 @@
-use random_access_storage::RandomAccess;
-use failure::format_err;
-use crate::Error;
-use async_std::sync::{Arc,Mutex};
-use std::mem::size_of;
-use async_std::stream::Stream;
-use futures::stream::unfold;
+use failure::{Error,bail};
+use std::ops::{Add,Div};
+use desert::{ToBytes,FromBytes,CountBytes};
+#[path="../ensure.rs"] #[macro_use] mod ensure;
+#[path="./bytes.rs"] mod bytes;
+//#[path="./bucket.rs"] mod bucket;
+//pub use bucket::Bucket;
 
-use crate::{Point,Value,Location};
-use crate::branch::{Branch,Node};
-use crate::data::{DataStore,DataMerge,DataBatch};
-use crate::read_block::read_block;
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! iwrap {
-  ($x:expr) => {
-    match $x {
-      Err(e) => { return Some(Err(e.into())) },
-      Ok(b) => { b }
-    }
-  };
+#[derive(Debug)]
+pub enum Node<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
+  BranchMem(Branch<X,Y>),
+  DataMem(Vec<(X,Y,V)>),
+  //BranchRef(u64),
+  //BucketListRef(u64),
 }
 
-#[doc(hidden)]
-#[macro_export]
-macro_rules! swrap {
-  ($x:expr) => {
-    match $x {
-      Err(e) => { return Poll::Ready(Some(Err(Error::from(e)))) },
-      Ok(b) => { b }
-    }
-  };
+#[derive(Debug)]
+pub struct Branch<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
+  pub offset: u64,
+  pub pivots: (Option<Vec<X>>,Option<Vec<Y>>),
+  pub intersections: Vec<Node<X,Y,V>>,
+  pub nodes: Vec<Node<X,Y,V>>,
 }
 
-pub struct TreeStream<S,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
-  tree: Arc<Mutex<Tree<S,P,V>>>,
-  bbox: Arc<P::Bounds>,
-  cursors: Vec<(u64,usize)>,
-  blocks: Vec<u64>,
-  queue: Vec<(P,V,Location)>,
-  tree_size: u64
-}
-
-impl<S,P,V> TreeStream<S,P,V> where
-S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
-  pub async fn new (tree: Arc<Mutex<Tree<S,P,V>>>, bbox: Arc<P::Bounds>)
-  -> Result<Self,Error> {
-    let tree_size = tree.lock().await.store.len().await? as u64;
-    Ok(Self {
-      tree,
-      tree_size,
-      bbox,
-      cursors: vec![(0,0)],
-      blocks: vec![],
-      queue: vec![]
-    })
-  }
-  async fn get_next(&mut self) -> Option<Result<(P,V,Location),Error>> {
-    let bf = self.tree.lock().await.branch_factor;
-
-    // todo: used cached size or rolling max to implicitly read an appropriate
-    // amount of data
-    while !self.cursors.is_empty() || !self.blocks.is_empty()
-    || !self.queue.is_empty() {
-      if !self.queue.is_empty() {
-        return Some(Ok(self.queue.pop().unwrap()));
-      }
-      if !self.blocks.is_empty() { // data block:
-        let offset = self.blocks.pop().unwrap();
-        let rows = {
-          let tree = self.tree.lock().await;
-          let mut dstore = tree.data_store.lock().await;
-          iwrap![dstore.query(offset, &self.bbox).await]
-        };
-        self.queue.extend(rows);
-        continue
-      }
-      // branch block:
-      let (cursor,depth) = self.cursors.pop().unwrap();
-      if cursor >= self.tree_size { continue }
-
-      let buf = {
-        let mut tree = self.tree.lock().await;
-        iwrap![read_block(&mut tree.store, cursor, self.tree_size, 1024).await]
-      };
-      let (cursors,blocks) = iwrap![
-        P::query_branch(&buf, &self.bbox, bf, depth)
-      ];
-      self.blocks.extend(blocks);
-      self.cursors.extend(cursors);
-    }
-    None
-  }
-}
-
-pub struct TreeOpts<S,P,V>
-where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
-  pub store: S,
-  pub data_store: Arc<Mutex<DataStore<S,P,V>>>,
-  pub branch_factor: usize,
-  pub max_data_size: usize,
-  pub index: usize,
-}
-
-pub struct Tree<S,P,V>
-where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
-  pub store: S,
-  data_store: Arc<Mutex<DataStore<S,P,V>>>,
-  data_merge: Arc<Mutex<DataMerge<S,P,V>>>,
-  branch_factor: usize,
-  pub bytes: u64,
-  pub index: usize,
-  max_data_size: usize,
-}
-
-impl<S,P,V> Tree<S,P,V>
-where S: RandomAccess<Error=Error>+Send+Sync, P: Point, V: Value {
-  pub async fn open (opts: TreeOpts<S,P,V>) -> Result<Self,Error> {
-    let bytes = opts.store.len().await? as u64;
-    let data_merge = Arc::new(Mutex::new(
-      DataMerge::new(Arc::clone(&opts.data_store))));
-    Ok(Self {
-      store: opts.store,
-      data_store: opts.data_store,
-      data_merge,
-      index: opts.index,
-      bytes,
-      branch_factor: opts.branch_factor,
-      max_data_size: opts.max_data_size,
-    })
-  }
-  pub async fn clear (&mut self) -> Result<(),Error> {
-    if self.bytes > 0 {
-      self.bytes = 0;
-      self.store.truncate(0).await?;
-    }
-    self.store.sync_all().await?;
-    Ok(())
-  }
-  pub async fn is_empty (&mut self) -> Result<bool,Error> {
-    let r = self.store.is_empty().await?;
-    Ok(r)
-  }
-  pub async fn build (&mut self, rows: &Vec<(P,V)>) -> Result<(),Error> {
-    let dstore = Arc::clone(&self.data_store);
-    self.builder(
-      Arc::new(rows.iter().map(|row| { (row.clone(),1u64) }).collect()),
-      dstore
-    ).await
-  }
-  pub async fn build_from_blocks (&mut self, blocks: Vec<(P::Bounds,u64,u64)>)
-  -> Result<(),Error> {
-    let inserts: Vec<(P::Range,u64)> = blocks.iter()
-      .map(|(bbox,offset,_)| { (P::bounds_to_range(*bbox),*offset) })
-      .collect();
-    let rows = blocks.iter().enumerate().map(|(i,(_,_,len))| {
-      (inserts[i],*len)
-    }).collect();
-    let dmerge = Arc::clone(&self.data_merge);
-    self.builder(Arc::new(rows), dmerge).await
-  }
-  pub async fn builder<D,T,U> (&mut self, rows: Arc<Vec<((T,U),u64)>>,
-  data_store: Arc<Mutex<D>>) -> Result<(),Error>
-  where D: DataBatch<T,U>, T: Point, U: Value {
-    self.clear().await?;
-    let bucket = (0..rows.len()).collect();
-    let b = Branch::<D,T,U>::new(
-      0,
-      self.index,
-      self.max_data_size,
-      self.branch_factor,
-      Arc::clone(&data_store),
-      bucket, rows
-    )?;
-    let mut branches = vec![Node::Branch(b)];
-    match branches[0] {
-      Node::Branch(ref mut b) => {
-        let alloc = &mut {|bytes| self.alloc(bytes) };
-        b.alloc(alloc);
+impl<X,Y,V> Branch<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
+  fn dim() -> usize { 2 }
+  pub fn build(branch_factor: usize, buckets: &[Bucket<X,Y>]) -> Node<X,Y> {
+    let sorted = (
+      {
+        let mut xs: Vec<usize> = (0..buckets.len()).collect();
+        xs.sort_unstable_by(|a,b| {
+          let xa = buckets[*a].bounds;
+          let xb = buckets[*b].bounds;
+          xa.0.partial_cmp(&xb.0).unwrap()
+        });
+        xs
       },
-      _ => panic!["unexpected initial node type"]
-    };
-    while !branches.is_empty() {
-      let mut nbranches = vec![];
-      for mut branch in branches {
-        match branch {
-          Node::Empty => {},
-          Node::Data(_) => {},
-          Node::Branch(ref mut b) => {
-            let (data,nb) = {
-              let alloc = &mut {|bytes| self.alloc(bytes) };
-              b.build(alloc).await?
-            };
-            self.store.write(b.offset, &data).await?;
-            self.bytes = self.bytes.max(b.offset + (data.len() as u64));
-            nbranches.extend(nb);
+      {
+        let mut xs: Vec<usize> = (0..buckets.len()).collect();
+        xs.sort_unstable_by(|a,b| {
+          let xa = buckets[*a].bounds;
+          let xb = buckets[*b].bounds;
+          xa.1.partial_cmp(&xb.1).unwrap()
+        });
+        xs
+      },
+    );
+    Self::from_sorted(
+      branch_factor, 0, buckets,
+      (sorted.0.as_slice(), sorted.1.as_slice())
+    )
+  }
+  pub fn from_sorted(branch_factor: usize, level: usize, buckets: &[Bucket<X,Y>],
+  sorted: (&[usize],&[usize])) -> Node<X,Y> {
+    if sorted.0.len() == 0 {
+      return Node::BucketListMem(vec![]);
+    } else if sorted.0.len() < branch_factor {
+      return Node::BucketListMem(buckets.to_vec());
+    }
+    let n = (branch_factor-1).min(sorted.0.len()-1); // number of pivots
+    let is_min = (level / Self::dim()) % 2 != 0;
+    let mut pivots = (None,None);
+    match level % Self::dim() {
+      0 => {
+        let mut ps = match sorted.0.len() {
+          0 => panic!["not enough data to create a branch"],
+          1 => {
+            let b = &buckets[sorted.0[0]].bounds;
+            vec![find_separation(b.0,b.2,b.0,b.2,is_min)]
+          },
+          2 => {
+            let a = &buckets[sorted.0[0]].bounds;
+            let b = &buckets[sorted.0[1]].bounds;
+            vec![find_separation(a.0,a.2,b.0,b.2,is_min)]
+          },
+          _ => {
+            (0..n).map(|k| {
+              let m = k * sorted.0.len() / (n+1);
+              let a = &buckets[sorted.0[m+0]].bounds;
+              let b = &buckets[sorted.0[m+1]].bounds;
+              find_separation(a.0,a.2,b.0,b.2,is_min)
+            }).collect()
           }
+        };
+        ps.sort_unstable_by(|a,b| {
+          a.partial_cmp(b).unwrap()
+        });
+        pivots.0 = Some(ps);
+      },
+      1 => {
+        let mut ps = match sorted.1.len() {
+          0 => panic!["not enough data to create a branch"],
+          1 => {
+            let b = &buckets[sorted.1[0]].bounds;
+            vec![find_separation(b.1,b.3,b.1,b.3,is_min)]
+          },
+          2 => {
+            let a = &buckets[sorted.1[0]].bounds;
+            let b = &buckets[sorted.1[1]].bounds;
+            vec![find_separation(a.1,b.3,b.1,b.3,is_min)]
+          },
+          _ => {
+            (0..n).map(|k| {
+              let m = k * sorted.1.len() / (n+1);
+              let a = &buckets[sorted.1[m+0]].bounds;
+              let b = &buckets[sorted.1[m+1]].bounds;
+              find_separation(a.1,a.3,b.1,b.3,is_min)
+            }).collect()
+          }
+        };
+        ps.sort_unstable_by(|a,b| {
+          a.partial_cmp(b).unwrap()
+        });
+        pivots.1 = Some(ps);
+      },
+      _ => panic!["unexpected level modulo dimension"]
+    };
+    //pad_pivots(n, &mut pivots);
+    //eprintln!["n={}, pivots={:?}", n, pivots];
+
+    let mut matched = vec![false;buckets.len()];
+    let intersections: Vec<Node<X,Y>> = match level % Self::dim() {
+      0 => pivots.0.as_ref().unwrap().iter().map(|pivot| {
+        let indexes: Vec<usize> = sorted.0.iter()
+          .map(|j| *j)
+          .filter(|j| {
+            let b = &buckets[*j];
+            !matched[*j] && intersect(b.bounds.0, b.bounds.2, *pivot)
+          })
+          .collect();
+        if indexes.len() == sorted.0.len() {
+          //eprintln!["{} == {}", indexes.len(), sorted.0.len()];
+          return Node::BucketListMem(indexes.iter().map(|i| buckets[*i]).collect());
+        }
+        let b = Branch::from_sorted(
+          branch_factor,
+          level+1,
+          buckets,
+          (
+            sorted.1.iter()
+              .map(|j| *j)
+              .filter(|j| {
+                let b = &buckets[*j];
+                !matched[*j] && intersect(b.bounds.0, b.bounds.2, *pivot)
+              })
+              .collect::<Vec<usize>>().as_slice(),
+            &indexes
+          )
+        );
+        indexes.iter().for_each(|i| {
+          matched[*i] = true;
+        });
+        b
+      }).collect(),
+      1 => pivots.1.as_ref().unwrap().iter().map(|pivot| {
+        let indexes: Vec<usize> = sorted.1.iter()
+          .map(|j| *j)
+          .filter(|j| {
+            let b = &buckets[*j];
+            !matched[*j] && intersect(b.bounds.1, b.bounds.3, *pivot)
+          })
+          .collect();
+        if indexes.len() == sorted.1.len() {
+          //eprintln!["{} == {}", indexes.len(), sorted.0.len()];
+          return Node::BucketListMem(indexes.iter().map(|i| buckets[*i]).collect());
+        }
+        let b = Branch::from_sorted(
+          branch_factor,
+          level+1,
+          buckets,
+          (
+            sorted.1.iter()
+              .map(|j| *j)
+              .filter(|j| {
+                let b = &buckets[*j];
+                !matched[*j] && intersect(b.bounds.1, b.bounds.3, *pivot)
+              })
+              .collect::<Vec<usize>>().as_slice(),
+            &indexes
+          )
+        );
+        indexes.iter().for_each(|i| {
+          matched[*i] = true;
+        });
+        b
+      }).collect(),
+      _ => panic!["unexpected level modulo dimension"]
+    };
+
+    let pivot_lens = (
+      match &pivots.0 {
+        Some(p) => p.len(),
+        None => 0
+      },
+      match &pivots.1 {
+        Some(p) => p.len(),
+        None => 0
+      },
+    );
+    let nodes: Vec<Node<X,Y>> = match level % Self::dim() {
+      0 => pivots.0.as_ref().unwrap().iter().enumerate()
+        .map(|(i,pivot)| {
+          if i == pivot_lens.0-1 {
+            let next_sorted: (Vec<usize>,Vec<usize>) = (
+              sorted.0.iter().map(|j| *j).filter(|j| !matched[*j]).collect(),
+              sorted.1.iter().map(|j| *j).filter(|j| !matched[*j]).collect()
+            );
+            Branch::from_sorted(
+              branch_factor,
+              level+1,
+              buckets,
+              (next_sorted.0.as_slice(), next_sorted.1.as_slice())
+            )
+          } else {
+            let next_sorted: (Vec<usize>,Vec<usize>) = (
+              sorted.0.iter().map(|j| *j).filter(|j| {
+                !matched[*j] && buckets[*j].bounds.2 < *pivot
+              }).collect(),
+              sorted.1.iter().map(|j| *j).filter(|j| {
+                !matched[*j] && buckets[*j].bounds.2 < *pivot
+              }).collect()
+            );
+            for j in next_sorted.0.iter() {
+              matched[*j] = true;
+            }
+            Branch::from_sorted(
+              branch_factor,
+              level+1,
+              buckets,
+              (next_sorted.0.as_slice(), next_sorted.1.as_slice())
+            )
+          }
+        }).collect(),
+      1 => pivots.1.as_ref().unwrap().iter().enumerate()
+        .map(|(i,pivot)| {
+          if i == pivot_lens.1-1 {
+            let next_sorted: (Vec<usize>,Vec<usize>) = (
+              sorted.0.iter().map(|j| *j).filter(|j| !matched[*j]).collect(),
+              sorted.1.iter().map(|j| *j).filter(|j| !matched[*j]).collect()
+            );
+            Branch::from_sorted(
+              branch_factor,
+              level+1,
+              buckets,
+              (next_sorted.0.as_slice(), next_sorted.1.as_slice())
+            )
+          } else {
+            let next_sorted: (Vec<usize>,Vec<usize>) = (
+              sorted.0.iter().map(|j| *j).filter(|j| {
+                !matched[*j] && buckets[*j].bounds.3 < *pivot
+              }).collect(),
+              sorted.1.iter().map(|j| *j).filter(|j| {
+                !matched[*j] && buckets[*j].bounds.3 < *pivot
+              }).collect()
+            );
+            for j in next_sorted.1.iter() {
+              matched[*j] = true;
+            }
+            Branch::from_sorted(
+              branch_factor,
+              level+1,
+              buckets,
+              (next_sorted.0.as_slice(), next_sorted.1.as_slice())
+            )
+          }
+        }).collect(),
+      _ => panic!["unexpected level modulo dimension"]
+    };
+
+    let node_count = nodes.iter().fold(0usize, |count,node| {
+      count + match node {
+        Node::BucketListMem(bs) => if bs.is_empty() { 0 } else { 1 },
+        Node::BranchMem(_) => 1,
+      }
+    });
+    if node_count <= 1 {
+      return Node::BucketListMem(buckets.to_vec());
+    }
+
+    /*
+    eprintln!["({}, i={}, n={}) pivots:{}",
+      sorted.0.len(), intersections.len(), nodes.len(),
+      match level % Self::dim() { 0 => pivot_lens.0, 1 => pivot_lens.1, _ => panic!["!"] }
+    ];
+    */
+
+    Node::BranchMem(Self {
+      offset: 0,
+      pivots,
+      intersections,
+      nodes,
+    })
+  }
+}
+
+#[derive(Debug)]
+pub struct Tree<X,Y> where X: Scalar, Y: Scalar {
+  root: Node<X,Y>
+}
+
+impl<X,Y> Tree<X,Y> where X: Scalar, Y: Scalar {
+  pub fn build(branch_factor: usize, buckets: &[Bucket<X,Y>]) -> Self {
+    Self {
+      root: Branch::build(branch_factor, buckets)
+    }
+  }
+  pub fn list(&mut self) -> Vec<Bucket<X,Y>> {
+    let mut cursors = vec![&self.root];
+    let mut buckets = vec![];
+    while let Some(c) = cursors.pop() {
+      match c {
+        Node::BranchMem(branch) => {
+          for b in branch.intersections.iter() {
+            cursors.push(b);
+          }
+          for b in branch.nodes.iter() {
+            cursors.push(b);
+          }
+        },
+        Node::BucketListMem(bucket_list) => {
+          buckets.extend_from_slice(bucket_list.as_slice());
         }
       }
-      branches = nbranches;
     }
-    self.store.sync_all().await?;
-    Ok(())
+    buckets
   }
-  pub async fn query (tree: Arc<Mutex<Self>>, bbox: Arc<P::Bounds>)
-  -> Result<impl Stream<Item=Result<(P,V,Location),Error>>,Error> {
-    let ts = TreeStream::new(tree, bbox).await?;
-    Ok(unfold(ts, async move |mut ts| {
-      let res = ts.get_next().await;
-      match res {
-        Some(p) => Some((p,ts)),
-        None => None
-      }
-    }))
+  pub fn merge(branch_factor: usize, trees: &mut [&mut Self]) -> Self {
+    let mut buckets = vec![];
+    for tree in trees.iter_mut() {
+      buckets.extend(tree.list());
+    }
+    // todo: split large intersecting buckets
+    Self::build(branch_factor, buckets.as_slice())
   }
-  fn alloc (&mut self, bytes: usize) -> u64 {
-    let addr = self.bytes;
-    self.bytes += bytes as u64;
-    addr
+}
+
+fn find_separation<X>(amin: X, amax: X, bmin: X, bmax: X, is_min: bool) -> X where X: Scalar {
+  if is_min && intersect_iv(amin, amax, bmin, bmax) {
+    (amin + bmin) / 2.into()
+  } else if !is_min && intersect_iv(amin, amax, bmin, bmax) {
+    (amax + bmax) / 2.into()
+  } else {
+    (amax + bmin)/2.into()
   }
-  pub async fn merge (trees: &mut Vec<Arc<Mutex<Self>>>, dst: usize, src: Vec<usize>,
-  rows: &Vec<(P,V)>) -> Result<(),Error> {
-    let mut blocks = vec![];
-    for i in src.iter() {
-      blocks.extend(trees[*i].lock().await.unbuild().await?);
-    }
-    {
-      let tree = trees[dst].lock().await;
-      let mut dstore = tree.data_store.lock().await;
-      let m = tree.max_data_size;
-      let mut srow_len = 0;
-      for i in 0..(rows.len()+m-1)/m {
-        let srows = &rows[i*m..((i+1)*m).min(rows.len())];
-        srow_len += srows.len();
-        let inserts: Vec<(P,V)> = srows.iter()
-          .map(|(p,v)| (*p,v.clone())).collect();
-        let offset = dstore.batch(&inserts.iter().map(|pv| pv).collect()).await?;
-        match P::bounds(&inserts.iter().map(|(p,_)| *p).collect()) {
-          None => fail!["invalid data at offset {}", offset],
-          Some(bbox) => blocks.push((bbox,offset,inserts.len() as u64))
-        }
-      }
-      ensure_eq_box!(srow_len, rows.len(), "divided rows incorrectly");
-    }
-    trees[dst].lock().await.build_from_blocks(blocks).await?;
-    for i in src.iter() {
-      trees[*i].lock().await.clear().await?
-    }
-    Ok(())
-  }
-  async fn unbuild (&mut self) -> Result<Vec<(P::Bounds,u64,u64)>,Error> {
-    let mut offsets: Vec<u64> = vec![];
-    let mut cursors: Vec<(u64,usize)> = vec![(0,0)];
-    let bf = self.branch_factor;
-    let n = bf*2-3;
-    let tree_size = self.store.len().await? as u64;
-    while !cursors.is_empty() {
-      let (c,depth) = cursors.pop().unwrap();
-      let buf = read_block(&mut self.store, c, tree_size, 1024).await?;
-      let mut offset = 0;
-      for _i in 0..n {
-        offset += P::count_bytes_at(&buf[offset..], depth)?;
-      }
-      let d_start = offset;
-      let i_start = d_start + (n+bf+7)/8;
-      let b_start = i_start + n*size_of::<u64>();
-      let b_end = b_start+bf*size_of::<u64>();
-      ensure_eq_box!(b_end, buf.len(), "unexpected block length");
-      for i in 0..n {
-        let offset = u64::from_be_bytes([
-          buf[i_start+i*8+0], buf[i_start+i*8+1],
-          buf[i_start+i*8+2], buf[i_start+i*8+3],
-          buf[i_start+i*8+4], buf[i_start+i*8+5],
-          buf[i_start+i*8+6], buf[i_start+i*8+7]
-        ]);
-        let is_data = ((buf[d_start+i/8]>>(i%8))&1) == 1;
-        if offset > 0 && is_data {
-          offsets.push(offset-1);
-        } else if offset > 0 {
-          cursors.push((offset-1,depth+1));
-        }
-      }
-      for i in 0..bf {
-        let offset = u64::from_be_bytes([
-          buf[b_start+i*8+0], buf[b_start+i*8+1],
-          buf[b_start+i*8+2], buf[b_start+i*8+3],
-          buf[b_start+i*8+4], buf[b_start+i*8+5],
-          buf[b_start+i*8+6], buf[b_start+i*8+7]
-        ]);
-        let j = i + n;
-        let is_data = ((buf[d_start+(j/8)]>>(j%8))&1) == 1;
-        if offset > 0 && is_data {
-          offsets.push(offset-1);
-        } else if offset > 0 {
-          cursors.push((offset-1,depth+1));
-        }
-      }
-    }
-    let mut blocks = Vec::with_capacity(offsets.len());
-    let mut dstore = self.data_store.lock().await;
-    for offset in offsets {
-      match dstore.bbox(offset).await? {
-        Some((bbox,len)) => blocks.push((bbox,offset,len)),
-        None => {},
-      }
-    }
-    Ok(blocks)
-  }
+}
+
+fn intersect_iv<X>(a0: X, a1: X, b0: X, b1: X) -> bool where X: PartialOrd {
+  a0 <= b1 && a1 >= b0
+}
+
+fn intersect<X>(min: X, max: X, x: X) -> bool where X: PartialOrd {
+  min <= x && x <= max
 }
