@@ -1,13 +1,9 @@
 use failure::{Error,bail};
 use std::ops::{Add,Div};
 use desert::{ToBytes,FromBytes,CountBytes};
-#[path="../ensure.rs"] #[macro_use] mod ensure;
-#[path="./bytes.rs"] mod bytes;
-//#[path="./bucket.rs"] mod bucket;
-//pub use bucket::Bucket;
 
 #[derive(Debug)]
-pub enum Node<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
+pub enum Node2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
   BranchMem(Branch<X,Y>),
   DataMem(Vec<(X,Y,V)>),
   //BranchRef(u64),
@@ -15,14 +11,14 @@ pub enum Node<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
 }
 
 #[derive(Debug)]
-pub struct Branch<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
+pub struct Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
   pub offset: u64,
   pub pivots: (Option<Vec<X>>,Option<Vec<Y>>),
   pub intersections: Vec<Node<X,Y,V>>,
   pub nodes: Vec<Node<X,Y,V>>,
 }
 
-impl<X,Y,V> Branch<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
+impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
   fn dim() -> usize { 2 }
   pub fn build(branch_factor: usize, buckets: &[Bucket<X,Y>]) -> Node<X,Y> {
     let sorted = (
