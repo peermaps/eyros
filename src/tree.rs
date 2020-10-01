@@ -10,7 +10,6 @@ pub enum Node2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
 
 #[derive(Debug)]
 pub struct Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
-  pub offset: u64,
   pub pivots: (Option<Vec<X>>,Option<Vec<Y>>),
   pub intersections: Vec<Node2<X,Y,V>>,
   pub nodes: Vec<Node2<X,Y,V>>,
@@ -324,7 +323,6 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
     */
 
     Node2::Branch(Self {
-      offset: 0,
       pivots,
       intersections,
       nodes,
@@ -341,13 +339,40 @@ pub trait Tree<P,V>: Send+Sync where P: Point, V: Value {
 
 #[derive(Debug)]
 pub struct Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
-  root: Node2<X,Y,V>
+  root: Node2<X,Y,V>,
+  bounds: (X,Y,X,Y)
 }
 
 impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
   fn build(branch_factor: usize, rows: &[(&(Coord<X>,Coord<Y>),&V)]) -> Self {
+    let ibounds = (
+      match (rows[0].0).0.clone() {
+        Coord::Scalar(x) => x,
+        Coord::Interval(x,_) => x,
+      },
+      match (rows[0].0).1.clone() {
+        Coord::Scalar(x) => x,
+        Coord::Interval(x,_) => x,
+      },
+      match (rows[0].0).0.clone() {
+        Coord::Scalar(x) => x,
+        Coord::Interval(_,x) => x,
+      },
+      match (rows[0].0).1.clone() {
+        Coord::Scalar(x) => x,
+        Coord::Interval(_,x) => x,
+      }
+    );
     Self {
-      root: Branch2::build(branch_factor, rows)
+      root: Branch2::build(branch_factor, rows),
+      bounds: rows[1..].iter().fold(ibounds, |bounds,row| {
+        (
+          coord_min_x(&(row.0).0, &bounds.0),
+          coord_min_x(&(row.0).1, &bounds.1),
+          coord_max_x(&(row.0).0, &bounds.2),
+          coord_max_x(&(row.0).1, &bounds.3)
+        )
+      })
     }
   }
   fn list(&mut self) -> Vec<((Coord<X>,Coord<Y>),V)> {
@@ -415,6 +440,32 @@ fn coord_cmp<X>(x: &Coord<X>, y: &Coord<X>) -> Option<std::cmp::Ordering> where 
     (Coord::Scalar(a),Coord::Interval(b,_)) => a.partial_cmp(b),
     (Coord::Interval(a,_),Coord::Scalar(b)) => a.partial_cmp(b),
     (Coord::Interval(a,_),Coord::Interval(b,_)) => a.partial_cmp(b),
+  }
+}
+
+fn coord_min_x<X>(x: &Coord<X>, r: &X) -> X where X: Scalar {
+  let l = match x {
+    Coord::Scalar(a) => a,
+    Coord::Interval(a,_) => a,
+  };
+  match l.partial_cmp(r) {
+    None => l.clone(),
+    Some(std::cmp::Ordering::Less) => l.clone(),
+    Some(std::cmp::Ordering::Equal) => l.clone(),
+    Some(std::cmp::Ordering::Greater) => r.clone(),
+  }
+}
+
+fn coord_max_x<X>(x: &Coord<X>, r: &X) -> X where X: Scalar {
+  let l = match x {
+    Coord::Scalar(a) => a,
+    Coord::Interval(a,_) => a,
+  };
+  match l.partial_cmp(r) {
+    None => l.clone(),
+    Some(std::cmp::Ordering::Less) => r.clone(),
+    Some(std::cmp::Ordering::Equal) => r.clone(),
+    Some(std::cmp::Ordering::Greater) => l.clone(),
   }
 }
 
