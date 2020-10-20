@@ -10,7 +10,7 @@ async fn main() -> Result<(),E> {
   let mut db: DB<_,P,V> = DB::open_from_path(
     &std::path::PathBuf::from("/tmp/eyros.db")
   ).await?;
-  let rows: Vec<Row<P,V>> = (0..100).map(|_| {
+  let rows: Vec<Row<P,V>> = (0..10_000).map(|_| {
     let xmin = (random::<f32>()*2.0-1.0)*180.0;
     let xmax = xmin + random::<f32>().powf(4.0)*(180.0-xmin);
     let ymin = (random::<f32>()*2.0-1.0)*90.0;
@@ -21,6 +21,7 @@ async fn main() -> Result<(),E> {
   }).collect();
   db.batch(&rows).await?;
 
+  eprintln!["bytes={:?}", db.trees[0].to_bytes()];
   /*
   let bbox = ((-0.5,-0.8,0.0),(0.3,-0.5,100.0));
   let mut stream = db.query(&bbox).await?;

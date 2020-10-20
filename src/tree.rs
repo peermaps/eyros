@@ -1,4 +1,4 @@
-//use desert::{ToBytes,FromBytes,CountBytes};
+use desert::{ToBytes,FromBytes,CountBytes};
 use crate::{Scalar,Point,Value,Coord};
 
 #[derive(Debug)]
@@ -331,7 +331,7 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
 }
 
 #[async_trait::async_trait]
-pub trait Tree<P,V>: Send+Sync where P: Point, V: Value {
+pub trait Tree<P,V>: Send+Sync+ToBytes where P: Point, V: Value {
   fn build(branch_factor: usize, rows: &[(&P,&V)]) -> Self where Self: Sized;
   fn list(&mut self) -> Vec<(P,V)>;
   fn merge(branch_factor: usize, trees: &mut [&mut Self]) -> Self where Self: Sized;
@@ -339,8 +339,9 @@ pub trait Tree<P,V>: Send+Sync where P: Point, V: Value {
 
 #[derive(Debug)]
 pub struct Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
-  root: Node2<X,Y,V>,
-  bounds: (X,Y,X,Y)
+  pub root: Node2<X,Y,V>,
+  pub bounds: (X,Y,X,Y),
+  pub count: usize,
 }
 
 impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
@@ -365,6 +366,7 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
     );
     Self {
       root: Branch2::build(branch_factor, rows),
+      count: rows.len(),
       bounds: rows[1..].iter().fold(ibounds, |bounds,row| {
         (
           coord_min_x(&(row.0).0, &bounds.0),
