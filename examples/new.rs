@@ -21,7 +21,7 @@ async fn main() -> Result<(),E> {
   }).collect();
   db.batch(&rows).await?;
 
-  eprintln!["bytes={:?}", db.trees[0].to_bytes()];
+  eprintln!["bytes={:?}", db.trees[0].to_bytes()?];
   /*
   let bbox = ((-0.5,-0.8,0.0),(0.3,-0.5,100.0));
   let mut stream = db.query(&bbox).await?;
@@ -29,6 +29,5 @@ async fn main() -> Result<(),E> {
     println!("{:?}", result?);
   }
   */
-
   Ok(())
 }

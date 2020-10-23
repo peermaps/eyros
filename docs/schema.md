@@ -50,7 +50,7 @@ Each tree contains these fields:
 
 # node
 
-* `n` (`varint`) - branch offset, external tree id, or data length (see calculation)
+* `n` (`u32`) - branch offset, external tree id, or data length (see calculation)
 
 depending on the value of `n % 3`, the node is a:
 
@@ -66,3 +66,10 @@ depending on the value of `n % 3`, the node is a:
 
 A value of `n=1` indicates a node for an empty set (data block where `data_len=0`).
 
+The type of `n` as a `u32` naturally limits the size of a tree to slightly more than 1 gigabyte,
+with a maximum offset size of 1.43 GB (1.33 GiB). In practice, these files should be at most far
+smaller for the purpose of various rebalancing operations. Trees can link to each other after all.
+
+A `u32` for `n` is slightly wasteful compared to a varint but greatly simplifies tree serialization,
+as you can calculate the size of a branch without foreknowledge of the offset and therefore size of
+linked-to branches.

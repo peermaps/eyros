@@ -8,6 +8,7 @@ impl<X,Y,V> ToBytes for Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
   fn to_bytes(&self) -> Result<Vec<u8>,Error> {
     match &self.root {
       Node2::Data(data) => {
+        let mut offset = 0;
         let mut buf = vec![0u8;node_size(&self.root)];
         write_data_bytes(data, &mut buf)?;
         Ok(buf)
@@ -24,28 +25,22 @@ impl<X,Y,V> ToBytes for Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
 
 fn allocate<X,Y,V>(root: &Branch2<X,Y,V>) -> (HashMap<usize,(usize,usize)>,usize)
 where X: Scalar, Y: Scalar, V: Value {
-  let mut alloc: HashMap<usize,(usize,usize)> = HashMap::new(); // offset, size
-  let mut cursors = vec![(root,0usize)];
+  let mut alloc: HashMap<usize,(usize,usize)> = HashMap::new(); // index => (offset, size)
+  let mut cursors = vec![root];
   let mut index = 0;
   let mut offset = 0;
-  while let Some((branch,depth)) = cursors.pop() {
+  while let Some(branch) = cursors.pop() {
     let size = r_size(branch);
     alloc.insert(index, (offset,size));
     offset += size;
     for b in branch.intersections.iter() {
-      match b {
-        Node2::Branch(br) => {
-          cursors.push((br,depth+1));
-        },
-        Node2::Data(_data) => {},
+      if let Node2::Branch(br) = b {
+        cursors.push(br);
       }
     }
     for b in branch.nodes.iter() {
-      match b {
-        Node2::Branch(br) => {
-          cursors.push((br,depth+1));
-        },
-        Node2::Data(_data) => {},
+      if let Node2::Branch(br) = b {
+        cursors.push(br);
       }
     }
     index += 1;
@@ -53,26 +48,26 @@ where X: Scalar, Y: Scalar, V: Value {
   (alloc,offset)
 }
 
-fn write_branch_bytes<X,Y,V>(branch: &Branch2<X,Y,V>, alloc: &mut HashMap<usize,(usize,usize)>,
+fn write_branch_bytes<X,Y,V>(root: &Branch2<X,Y,V>, alloc: &mut HashMap<usize,(usize,usize)>,
 buf: &mut [u8]) -> Result<usize,Error> where X: Scalar, Y: Scalar, V: Value {
-  let mut cursors = vec![(branch,0usize)];
+  let mut cursors = vec![root];
   let mut offset = 0;
   let mut index = 0;
-  while let Some((branch,depth)) = cursors.pop() {
+  while let Some(branch) = cursors.pop() {
     offset += match &branch.pivots {
       (Some(x),None) => x.write_bytes(&mut buf[offset..])?,
       (None,Some(x)) => x.write_bytes(&mut buf[offset..])?,
       _ => panic![""]
     };
-    let mut i = index;
+    let mut i = index + 1;
     for x in [&branch.intersections,&branch.nodes].iter() {
       for b in x.iter() {
         match b {
           Node2::Branch(branch) => {
             let (j,_) = alloc.get(&i).unwrap();
-            offset += varint::encode(((*j)*3+0) as u64, &mut buf[offset..])?;
+            offset += (((*j)*3+0) as u32).write_bytes(&mut buf[offset..])?;
             i += 1;
-            cursors.push((branch,depth+1));
+            cursors.push(branch);
           },
           Node2::Data(data) => {
             offset += write_data_bytes(data, &mut buf[offset..])?;
@@ -125,17 +120,6 @@ where X: Scalar, Y: Scalar {
   Ok(offset)
 }
 
-fn node_size<X,Y,V>(node: &Node2<X,Y,V>) -> usize where X: Scalar, Y: Scalar, V: Value {
-  match node {
-    Node2::Branch(branch) => varint::length((r_size(branch) as u64)*3+0),
-    Node2::Data(rows) => varint::length((rows.len() as u64)*3+1)
-      + (rows.len()+7)/8 // deleted bitfield
-      + rows.iter().fold(0usize, |sum,row| {
-        sum + count_point_bytes(&row.0) + row.1.count_bytes()
-      }),
-  }
-}
-
 fn write_data_bytes<X,Y,V>(rows: &Vec<((Coord<X>,Coord<Y>),V)>, buf: &mut [u8]) -> Result<usize,Error>
 where X: Scalar, Y: Scalar, V: Value {
   let mut offset = 0;
@@ -165,4 +149,15 @@ fn r_size<X,Y,V>(branch: &Branch2<X,Y,V>) -> usize where X: Scalar, Y: Scalar, V
     size += node_size(&b);
   }
   size
+}
+
+fn node_size<X,Y,V>(node: &Node2<X,Y,V>) -> usize where X: Scalar, Y: Scalar, V: Value {
+  match node {
+    Node2::Branch(branch) => 4,
+    Node2::Data(rows) => varint::length((rows.len() as u64)*3+1)
+      + (rows.len()+7)/8 // deleted bitfield
+      + rows.iter().fold(0usize, |sum,row| {
+        sum + count_point_bytes(&row.0) + row.1.count_bytes()
+      }),
+  }
 }
