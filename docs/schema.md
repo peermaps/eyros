@@ -37,8 +37,7 @@ Each tree contains these fields:
 * `bounds` (`X,Y,...,X,Y,...`) - bounding extents of all records. tuple of minimums for each
   dimension followed by list of maximums `(minX,minY,...,maxX,maxY,...)`
 // * `start_dim` (`varint`) - dimension that the tree starts at
-* `branches` (`[branch]`) - list of branches. first branch is the root, sub-branches located by file
-  offset
+* `root` (`node`) - root of the tree
 
 # branch
 

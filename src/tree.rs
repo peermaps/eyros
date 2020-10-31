@@ -1,4 +1,4 @@
-use desert::{ToBytes,FromBytes,CountBytes};
+use desert::ToBytes;
 use crate::{Scalar,Point,Value,Coord};
 
 #[derive(Debug)]
@@ -214,92 +214,83 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
       }).collect(),
       _ => panic!["unexpected level modulo dimension"]
     };
-
-    let pivot_lens = (
-      match &pivots.0 {
-        Some(p) => p.len(),
-        None => 0
-      },
-      match &pivots.1 {
-        Some(p) => p.len(),
-        None => 0
-      },
-    );
-    let nodes: Vec<Node2<X,Y,V>> = match level % Self::dim() {
-      0 => pivots.0.as_ref().unwrap().iter().enumerate()
-        .map(|(i,pivot)| {
-          if i == pivot_lens.0-1 {
-            let next_sorted: (Vec<usize>,Vec<usize>) = (
-              sorted.0.iter().map(|j| *j).filter(|j| !matched[*j]).collect(),
-              sorted.1.iter().map(|j| *j).filter(|j| !matched[*j]).collect()
-            );
-            Branch2::from_sorted(
-              branch_factor,
-              level+1,
-              inserts,
-              (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-              matched
-            )
-          } else {
-            let next_sorted: (Vec<usize>,Vec<usize>) = (
-              sorted.0.iter().map(|j| *j).filter(|j| {
-                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
-                  == Some(std::cmp::Ordering::Less)
-              }).collect(),
-              sorted.1.iter().map(|j| *j).filter(|j| {
-                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
-                  == Some(std::cmp::Ordering::Less)
-              }).collect()
-            );
-            for j in next_sorted.0.iter() {
-              matched[*j] = true;
-            }
-            Branch2::from_sorted(
-              branch_factor,
-              level+1,
-              inserts,
-              (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-              matched
-            )
+    let nodes = match level % Self::dim() {
+      0 => {
+        let mut nodes: Vec<Node2<X,Y,V>> = pivots.0.as_ref().unwrap().iter().map(|pivot| {
+          let next_sorted: (Vec<usize>,Vec<usize>) = (
+            sorted.0.iter().map(|j| *j).filter(|j| {
+              !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
+                == Some(std::cmp::Ordering::Less)
+            }).collect(),
+            sorted.1.iter().map(|j| *j).filter(|j| {
+              !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
+                == Some(std::cmp::Ordering::Less)
+            }).collect()
+          );
+          for j in next_sorted.0.iter() {
+            matched[*j] = true;
           }
-        }).collect(),
-      1 => pivots.1.as_ref().unwrap().iter().enumerate()
-        .map(|(i,pivot)| {
-          if i == pivot_lens.1-1 {
-            let next_sorted: (Vec<usize>,Vec<usize>) = (
-              sorted.0.iter().map(|j| *j).filter(|j| !matched[*j]).collect(),
-              sorted.1.iter().map(|j| *j).filter(|j| !matched[*j]).collect()
-            );
-            Branch2::from_sorted(
-              branch_factor,
-              level+1,
-              inserts,
-              (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-              matched
-            )
-          } else {
-            let next_sorted: (Vec<usize>,Vec<usize>) = (
-              sorted.0.iter().map(|j| *j).filter(|j| {
-                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
-                  == Some(std::cmp::Ordering::Less)
-              }).collect(),
-              sorted.1.iter().map(|j| *j).filter(|j| {
-                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
-                  == Some(std::cmp::Ordering::Less)
-              }).collect()
-            );
-            for j in next_sorted.1.iter() {
-              matched[*j] = true;
-            }
-            Branch2::from_sorted(
-              branch_factor,
-              level+1,
-              inserts,
-              (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-              matched
-            )
+          Branch2::from_sorted(
+            branch_factor,
+            level+1,
+            inserts,
+            (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
+            matched
+          )
+        }).collect();
+        nodes.push({
+          let next_sorted: (Vec<usize>,Vec<usize>) = (
+            sorted.0.iter().map(|j| *j).filter(|j| !matched[*j]).collect(),
+            sorted.1.iter().map(|j| *j).filter(|j| !matched[*j]).collect()
+          );
+          Branch2::from_sorted(
+            branch_factor,
+            level+1,
+            inserts,
+            (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
+            matched
+          )
+        });
+        nodes
+      },
+      1 => {
+        let mut nodes: Vec<Node2<X,Y,V>> = pivots.1.as_ref().unwrap().iter().map(|pivot| {
+          let next_sorted: (Vec<usize>,Vec<usize>) = (
+            sorted.0.iter().map(|j| *j).filter(|j| {
+              !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
+                == Some(std::cmp::Ordering::Less)
+            }).collect(),
+            sorted.1.iter().map(|j| *j).filter(|j| {
+              !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
+                == Some(std::cmp::Ordering::Less)
+            }).collect()
+          );
+          for j in next_sorted.1.iter() {
+            matched[*j] = true;
           }
-        }).collect(),
+          Branch2::from_sorted(
+            branch_factor,
+            level+1,
+            inserts,
+            (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
+            matched
+          )
+        }).collect();
+        nodes.push({
+          let next_sorted: (Vec<usize>,Vec<usize>) = (
+            sorted.0.iter().map(|j| *j).filter(|j| !matched[*j]).collect(),
+            sorted.1.iter().map(|j| *j).filter(|j| !matched[*j]).collect()
+          );
+          Branch2::from_sorted(
+            branch_factor,
+            level+1,
+            inserts,
+            (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
+            matched
+          )
+        });
+        nodes
+      },
       _ => panic!["unexpected level modulo dimension"]
     };
 
@@ -314,13 +305,6 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
         ((x.clone(),y.clone()),(*v).clone())
       }).collect());
     }
-
-    /*
-    eprintln!["({}, i={}, n={}) pivots:{}",
-      sorted.0.len(), intersections.len(), nodes.len(),
-      match level % Self::dim() { 0 => pivot_lens.0, 1 => pivot_lens.1, _ => panic!["!"] }
-    ];
-    */
 
     Node2::Branch(Self {
       pivots,

@@ -1,5 +1,6 @@
-use eyros::{DB,Row,Coord};
+use eyros::{DB,Tree2,Row,Coord};
 use rand::random;
+use desert::FromBytes;
 
 type P = (Coord<f32>,Coord<f32>);
 type V = u64;
@@ -21,7 +22,8 @@ async fn main() -> Result<(),E> {
   }).collect();
   db.batch(&rows).await?;
 
-  eprintln!["bytes={:?}", db.trees[0].to_bytes()?];
+  let bytes = db.trees[0].to_bytes()?;
+  eprintln!["tree={:?}", <Tree2<f32,f32,V>>::from_bytes(&bytes)?];
   /*
   let bbox = ((-0.5,-0.8,0.0),(0.3,-0.5,100.0));
   let mut stream = db.query(&bbox).await?;
