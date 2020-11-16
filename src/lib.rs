@@ -1,3 +1,4 @@
+#![feature(async_closure)]
 mod store;
 pub use store::Storage;
 #[doc(hidden)] pub use store::FileStore;
@@ -6,7 +7,12 @@ pub use setup::{Setup,SetupFields};
 mod tree;
 pub use tree::{Tree,Tree2};
 mod bytes;
+mod query;
+pub use query::QueryStream;
+mod unfold;
+use unfold::Unfold;
 
+use async_std::{stream::Stream};
 use random_access_storage::RandomAccess;
 use desert::{ToBytes,FromBytes,CountBytes};
 use core::ops::{Add,Div};
@@ -36,9 +42,14 @@ pub enum Coord<X> where X: Scalar {
 }
 
 #[async_trait::async_trait]
-pub trait Point {
+pub trait Point: 'static {
   async fn batch<S,V>(db: &mut DB<S,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized;
+  async fn query<S,V,T>(db: &mut DB<S,Self,V>, bbox: &(Self,Self)) -> Result<Box<
+    dyn Stream<Item=Result<(Self,V,Location),Error>>
+  >,Error>
+    where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized,
+      T: Stream<Item=Result<(Self,V,Location),Error>>+Unpin+'static;
 }
 
 #[async_trait::async_trait]
@@ -53,11 +64,23 @@ impl<X,Y> Point for (Coord<X>,Coord<Y>) where X: Scalar, Y: Scalar {
       .filter(|row| !row.is_none())
       .map(|x| x.unwrap())
       .collect();
-    //db.trees.push(Box::new(Tree2::build(9, inserts.as_slice())));
     db.trees.push({
       Box::new(Tree2::build(9, inserts.as_slice()))
     });
     Ok(())
+  }
+  async fn query<S,V,T>(db: &mut DB<S,Self,V>, bbox: &(Self,Self)) -> Result<Box<
+    dyn Stream<Item=Result<(Self,V,Location),Error>>
+  >,Error>
+  where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized,
+  T: Stream<Item=Result<(Self,V,Location),Error>>+Unpin+'static {
+    let queries = vec![];
+    /*
+    for t in db.trees.iter() {
+      queries.push(t.query(bbox));
+    }
+    */
+    <QueryStream<Self,V,T>>::from_queries(queries)
   }
 }
 
@@ -82,5 +105,10 @@ impl<S,P,V> DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Poi
   }
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     P::batch(self, rows).await
+  }
+  pub async fn query<T>(&mut self, bbox: &(P,P)) -> Result<Box<
+    dyn Stream<Item=Result<(P,V,Location),Error>>
+  >,Error> where T: Stream<Item=Result<(P,V,Location),Error>>+Unpin+'static {
+    P::query::<S,V,T>(self, bbox).await
   }
 }

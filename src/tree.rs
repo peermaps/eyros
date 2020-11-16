@@ -155,6 +155,7 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           //eprintln!["{} == {}", indexes.len(), sorted.0.len()];
           return Node2::Data(indexes.iter().map(|i| {
             let pv = &inserts[*i];
+            matched[*i] = true;
             (((pv.0).0.clone(),(pv.0).1.clone()),pv.1.clone())
           }).collect());
         }
@@ -189,6 +190,7 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           //eprintln!["{} == {}", indexes.len(), sorted.0.len()];
           return Node2::Data(indexes.iter().map(|i| {
             let pv = &inserts[*i];
+            matched[*i] = true;
             (((pv.0).0.clone(),(pv.0).1.clone()),pv.1.clone())
           }).collect());
         }
@@ -214,6 +216,7 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
       }).collect(),
       _ => panic!["unexpected level modulo dimension"]
     };
+
     let nodes = match level % Self::dim() {
       0 => {
         let mut nodes: Vec<Node2<X,Y,V>> = pivots.0.as_ref().unwrap().iter().map(|pivot| {
