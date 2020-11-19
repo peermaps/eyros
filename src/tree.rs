@@ -1,5 +1,6 @@
 use desert::ToBytes;
-use crate::{Scalar,Point,Value,Coord};
+use crate::{Scalar,Point,Value,Coord,Location,Error};
+use async_std::stream::Stream;
 
 #[derive(Debug)]
 pub enum Node2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
@@ -322,12 +323,7 @@ pub trait Tree<P,V>: Send+Sync+ToBytes where P: Point, V: Value {
   fn build(branch_factor: usize, rows: &[(&P,&V)]) -> Self where Self: Sized;
   fn list(&mut self) -> Vec<(P,V)>;
   fn merge(branch_factor: usize, trees: &mut [&mut Self]) -> Self where Self: Sized;
-  /*
-  fn query(&mut self) -> Vec<(P,V)>;
-  async fn query<S,P,V,T>(db: &mut DB<S,Self,V>, bbox: &(Self,Self)) -> Result<Box<
-    dyn Stream<Item=Result<(Self,V,Location),Error>>
-  >,Error>
-  */
+  fn query(&mut self, bbox: &P::Bounds) -> Box<dyn Stream<Item=Result<(P,V,Location),Error>>+Unpin>;
 }
 
 #[derive(Debug)]
@@ -405,6 +401,10 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
     }
     // todo: split large intersecting buckets
     Self::build(branch_factor, rows.as_slice())
+  }
+  fn query(&mut self, bbox: &((X,Y),(X,Y)))
+  -> Box<dyn Stream<Item=Result<((Coord<X>,Coord<Y>),V,Location),Error>>+Unpin> {
+    unimplemented![]
   }
 }
 

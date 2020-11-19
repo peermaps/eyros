@@ -43,14 +43,16 @@ pub enum Coord<X> where X: Scalar {
 
 #[async_trait::async_trait]
 pub trait Point: 'static {
+  type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes;
   async fn batch<S,V>(db: &mut DB<S,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized;
-  async fn query<S,V>(db: &mut DB<S,Self,V>, bbox: &(Self,Self)) -> Result<query::QStream<Self,V>,Error>
+  async fn query<S,V>(db: &mut DB<S,Self,V>, bbox: &Self::Bounds) -> Result<query::QStream<Self,V>,Error>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized;
 }
 
 #[async_trait::async_trait]
 impl<X,Y> Point for (Coord<X>,Coord<Y>) where X: Scalar, Y: Scalar {
+  type Bounds = ((X,Y),(X,Y));
   async fn batch<S,V>(db: &mut DB<S,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
   where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value {
     let inserts: Vec<(&(Coord<X>,Coord<Y>),&V)> = rows.iter()
@@ -66,14 +68,12 @@ impl<X,Y> Point for (Coord<X>,Coord<Y>) where X: Scalar, Y: Scalar {
     });
     Ok(())
   }
-  async fn query<S,V>(db: &mut DB<S,Self,V>, bbox: &(Self,Self)) -> Result<query::QStream<Self,V>,Error>
+  async fn query<S,V>(db: &mut DB<S,Self,V>, bbox: &Self::Bounds) -> Result<query::QStream<Self,V>,Error>
   where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized {
-    let queries = vec![];
-    /*
-    for t in db.trees.iter() {
+    let mut queries = vec![];
+    for t in db.trees.iter_mut() {
       queries.push(t.query(bbox));
     }
-    */
     <QueryStream<Self,V>>::from_queries(queries)
   }
 }
@@ -100,7 +100,7 @@ impl<S,P,V> DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Poi
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     P::batch(self, rows).await
   }
-  pub async fn query(&mut self, bbox: &(P,P)) -> Result<query::QStream<P,V>,Error> {
+  pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
     P::query::<S,V>(self, bbox).await
   }
 }

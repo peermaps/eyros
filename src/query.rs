@@ -3,7 +3,6 @@ use async_std::{prelude::*,stream::Stream,sync::{Arc,Mutex}};
 use std::collections::HashSet;
 use crate::unfold::unfold;
 use std::marker::Unpin;
-use crate::unfold::Unfold;
 
 type Out<P,V> = Option<Result<(P,V,Location),Error>>;
 pub type QStream<P,V> = Box<dyn Stream<Item=Result<(P,V,Location),Error>>+Unpin>;
