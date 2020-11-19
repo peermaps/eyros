@@ -6,21 +6,18 @@ use std::marker::Unpin;
 use crate::unfold::Unfold;
 
 type Out<P,V> = Option<Result<(P,V,Location),Error>>;
-//type Q<P,V> = Box<dyn Stream<Item=Result<(P,V,Location),Error>>>;
+pub type QStream<P,V> = Box<dyn Stream<Item=Result<(P,V,Location),Error>>+Unpin>;
 
 pin_project_lite::pin_project! {
-  pub struct QueryStream<P,V,T> where P: Point, V: Value, T: Stream<Item=Result<(P,V,Location),Error>> {
+  pub struct QueryStream<P,V> where P: Point, V: Value {
     index: usize,
-    #[pin] queries: Vec<T>,
+    #[pin] queries: Vec<QStream<P,V>>,
     deletes: Arc<Mutex<HashSet<Location>>>,
   }
 }
 
-impl<P,V,T> QueryStream<P,V,T> where P: Point, V: Value,
-T: Stream<Item=Result<(P,V,Location),Error>>+Unpin+'static {
-  pub fn from_queries(queries: Vec<T>) -> Result<Box<
-    dyn Stream<Item=Result<(P,V,Location),Error>>
-  >,Error> {
+impl<P,V> QueryStream<P,V> where P: Point, V: Value {
+  pub fn from_queries(queries: Vec<QStream<P,V>>) -> Result<QStream<P,V>,Error> {
     let qs = Self {
       index: 0,
       queries,

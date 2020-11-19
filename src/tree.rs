@@ -322,6 +322,12 @@ pub trait Tree<P,V>: Send+Sync+ToBytes where P: Point, V: Value {
   fn build(branch_factor: usize, rows: &[(&P,&V)]) -> Self where Self: Sized;
   fn list(&mut self) -> Vec<(P,V)>;
   fn merge(branch_factor: usize, trees: &mut [&mut Self]) -> Self where Self: Sized;
+  /*
+  fn query(&mut self) -> Vec<(P,V)>;
+  async fn query<S,P,V,T>(db: &mut DB<S,Self,V>, bbox: &(Self,Self)) -> Result<Box<
+    dyn Stream<Item=Result<(Self,V,Location),Error>>
+  >,Error>
+  */
 }
 
 #[derive(Debug)]

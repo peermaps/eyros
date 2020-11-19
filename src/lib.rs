@@ -45,11 +45,8 @@ pub enum Coord<X> where X: Scalar {
 pub trait Point: 'static {
   async fn batch<S,V>(db: &mut DB<S,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized;
-  async fn query<S,V,T>(db: &mut DB<S,Self,V>, bbox: &(Self,Self)) -> Result<Box<
-    dyn Stream<Item=Result<(Self,V,Location),Error>>
-  >,Error>
-    where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized,
-      T: Stream<Item=Result<(Self,V,Location),Error>>+Unpin+'static;
+  async fn query<S,V>(db: &mut DB<S,Self,V>, bbox: &(Self,Self)) -> Result<query::QStream<Self,V>,Error>
+    where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized;
 }
 
 #[async_trait::async_trait]
@@ -69,18 +66,15 @@ impl<X,Y> Point for (Coord<X>,Coord<Y>) where X: Scalar, Y: Scalar {
     });
     Ok(())
   }
-  async fn query<S,V,T>(db: &mut DB<S,Self,V>, bbox: &(Self,Self)) -> Result<Box<
-    dyn Stream<Item=Result<(Self,V,Location),Error>>
-  >,Error>
-  where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized,
-  T: Stream<Item=Result<(Self,V,Location),Error>>+Unpin+'static {
+  async fn query<S,V>(db: &mut DB<S,Self,V>, bbox: &(Self,Self)) -> Result<query::QStream<Self,V>,Error>
+  where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized {
     let queries = vec![];
     /*
     for t in db.trees.iter() {
       queries.push(t.query(bbox));
     }
     */
-    <QueryStream<Self,V,T>>::from_queries(queries)
+    <QueryStream<Self,V>>::from_queries(queries)
   }
 }
 
@@ -106,9 +100,7 @@ impl<S,P,V> DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Poi
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     P::batch(self, rows).await
   }
-  pub async fn query<T>(&mut self, bbox: &(P,P)) -> Result<Box<
-    dyn Stream<Item=Result<(P,V,Location),Error>>
-  >,Error> where T: Stream<Item=Result<(P,V,Location),Error>>+Unpin+'static {
-    P::query::<S,V,T>(self, bbox).await
+  pub async fn query(&mut self, bbox: &(P,P)) -> Result<query::QStream<P,V>,Error> {
+    P::query::<S,V>(self, bbox).await
   }
 }
