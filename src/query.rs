@@ -10,13 +10,13 @@ pub type QStream<P,V> = Box<dyn Stream<Item=Result<(P,V,Location),Error>>+Unpin>
 pin_project_lite::pin_project! {
   pub struct QueryStream<P,V> where P: Point, V: Value {
     index: usize,
-    #[pin] queries: Vec<QStream<P,V>>,
+    #[pin] queries: Vec<Arc<Mutex<QStream<P,V>>>>,
     deletes: Arc<Mutex<HashSet<Location>>>,
   }
 }
 
 impl<P,V> QueryStream<P,V> where P: Point, V: Value {
-  pub fn from_queries(queries: Vec<QStream<P,V>>) -> Result<QStream<P,V>,Error> {
+  pub fn from_queries(queries: Vec<Arc<Mutex<QStream<P,V>>>>) -> Result<QStream<P,V>,Error> {
     let qs = Self {
       index: 0,
       queries,
@@ -37,7 +37,7 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
         let ix = self.index;
         let q = &mut self.queries[ix];
         let next = {
-          let result = q.next().await;
+          let result = q.lock().await.next().await;
           match result {
             Some(Err(e)) => return Some(Err(e.into())),
             Some(Ok((_,_,loc))) => {

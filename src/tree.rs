@@ -1,6 +1,7 @@
 use desert::ToBytes;
-use crate::{Scalar,Point,Value,Coord,Location,Error};
-use async_std::stream::Stream;
+use crate::{Scalar,Point,Value,Coord,Location,Error,query::QStream};
+use async_std::{stream::Stream,sync::{Arc,Mutex}};
+use crate::unfold::unfold;
 
 #[derive(Debug)]
 pub enum Node2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
@@ -12,8 +13,8 @@ pub enum Node2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
 #[derive(Debug)]
 pub struct Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
   pub pivots: (Option<Vec<X>>,Option<Vec<Y>>),
-  pub intersections: Vec<Node2<X,Y,V>>,
-  pub nodes: Vec<Node2<X,Y,V>>,
+  pub intersections: Vec<Arc<Node2<X,Y,V>>>,
+  pub nodes: Vec<Arc<Node2<X,Y,V>>>,
 }
 
 impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
@@ -144,7 +145,7 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
     //pad_pivots(n, &mut pivots);
     //eprintln!["n={}, pivots={:?}", n, pivots];
 
-    let intersections: Vec<Node2<X,Y,V>> = match level % Self::dim() {
+    let intersections: Vec<Arc<Node2<X,Y,V>>> = match level % Self::dim() {
       0 => pivots.0.as_ref().unwrap().iter().map(|pivot| {
         let indexes: Vec<usize> = sorted.0.iter()
           .map(|j| *j)
@@ -154,11 +155,11 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           .collect();
         if indexes.len() == sorted.0.len() {
           //eprintln!["{} == {}", indexes.len(), sorted.0.len()];
-          return Node2::Data(indexes.iter().map(|i| {
+          return Arc::new(Node2::Data(indexes.iter().map(|i| {
             let pv = &inserts[*i];
             matched[*i] = true;
             (((pv.0).0.clone(),(pv.0).1.clone()),pv.1.clone())
-          }).collect());
+          }).collect()));
         }
         let b = Branch2::from_sorted(
           branch_factor,
@@ -178,7 +179,7 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
         indexes.iter().for_each(|i| {
           matched[*i] = true;
         });
-        b
+        Arc::new(b)
       }).collect(),
       1 => pivots.1.as_ref().unwrap().iter().map(|pivot| {
         let indexes: Vec<usize> = sorted.1.iter()
@@ -189,11 +190,11 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           .collect();
         if indexes.len() == sorted.1.len() {
           //eprintln!["{} == {}", indexes.len(), sorted.0.len()];
-          return Node2::Data(indexes.iter().map(|i| {
+          return Arc::new(Node2::Data(indexes.iter().map(|i| {
             let pv = &inserts[*i];
             matched[*i] = true;
             (((pv.0).0.clone(),(pv.0).1.clone()),pv.1.clone())
-          }).collect());
+          }).collect()));
         }
         let b = Branch2::from_sorted(
           branch_factor,
@@ -213,14 +214,14 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
         indexes.iter().for_each(|i| {
           matched[*i] = true;
         });
-        b
+        Arc::new(b)
       }).collect(),
       _ => panic!["unexpected level modulo dimension"]
     };
 
     let nodes = match level % Self::dim() {
       0 => {
-        let mut nodes: Vec<Node2<X,Y,V>> = pivots.0.as_ref().unwrap().iter().map(|pivot| {
+        let mut nodes: Vec<Arc<Node2<X,Y,V>>> = pivots.0.as_ref().unwrap().iter().map(|pivot| {
           let next_sorted: (Vec<usize>,Vec<usize>) = (
             sorted.0.iter().map(|j| *j).filter(|j| {
               !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
@@ -234,31 +235,31 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           for j in next_sorted.0.iter() {
             matched[*j] = true;
           }
-          Branch2::from_sorted(
+          Arc::new(Branch2::from_sorted(
             branch_factor,
             level+1,
             inserts,
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
             matched
-          )
+          ))
         }).collect();
         nodes.push({
           let next_sorted: (Vec<usize>,Vec<usize>) = (
             sorted.0.iter().map(|j| *j).filter(|j| !matched[*j]).collect(),
             sorted.1.iter().map(|j| *j).filter(|j| !matched[*j]).collect()
           );
-          Branch2::from_sorted(
+          Arc::new(Branch2::from_sorted(
             branch_factor,
             level+1,
             inserts,
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
             matched
-          )
+          ))
         });
         nodes
       },
       1 => {
-        let mut nodes: Vec<Node2<X,Y,V>> = pivots.1.as_ref().unwrap().iter().map(|pivot| {
+        let mut nodes: Vec<Arc<Node2<X,Y,V>>> = pivots.1.as_ref().unwrap().iter().map(|pivot| {
           let next_sorted: (Vec<usize>,Vec<usize>) = (
             sorted.0.iter().map(|j| *j).filter(|j| {
               !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
@@ -272,26 +273,26 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           for j in next_sorted.1.iter() {
             matched[*j] = true;
           }
-          Branch2::from_sorted(
+          Arc::new(Branch2::from_sorted(
             branch_factor,
             level+1,
             inserts,
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
             matched
-          )
+          ))
         }).collect();
         nodes.push({
           let next_sorted: (Vec<usize>,Vec<usize>) = (
             sorted.0.iter().map(|j| *j).filter(|j| !matched[*j]).collect(),
             sorted.1.iter().map(|j| *j).filter(|j| !matched[*j]).collect()
           );
-          Branch2::from_sorted(
+          Arc::new(Branch2::from_sorted(
             branch_factor,
             level+1,
             inserts,
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
             matched
-          )
+          ))
         });
         nodes
       },
@@ -299,7 +300,7 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
     };
 
     let node_count = nodes.iter().fold(0usize, |count,node| {
-      count + match node {
+      count + match node.as_ref() {
         Node2::Data(bs) => if bs.is_empty() { 0 } else { 1 },
         Node2::Branch(_) => 1,
       }
@@ -323,12 +324,12 @@ pub trait Tree<P,V>: Send+Sync+ToBytes where P: Point, V: Value {
   fn build(branch_factor: usize, rows: &[(&P,&V)]) -> Self where Self: Sized;
   fn list(&mut self) -> Vec<(P,V)>;
   fn merge(branch_factor: usize, trees: &mut [&mut Self]) -> Self where Self: Sized;
-  fn query(&mut self, bbox: &P::Bounds) -> Box<dyn Stream<Item=Result<(P,V,Location),Error>>+Unpin>;
+  fn query(&mut self, bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>;
 }
 
 #[derive(Debug)]
 pub struct Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
-  pub root: Node2<X,Y,V>,
+  pub root: Arc<Node2<X,Y,V>>,
   pub bounds: (X,Y,X,Y),
   pub count: usize,
 }
@@ -354,7 +355,7 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
       }
     );
     Self {
-      root: Branch2::build(branch_factor, rows),
+      root: Arc::new(Branch2::build(branch_factor, rows)),
       count: rows.len(),
       bounds: rows[1..].iter().fold(ibounds, |bounds,row| {
         (
@@ -367,16 +368,16 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
     }
   }
   fn list(&mut self) -> Vec<((Coord<X>,Coord<Y>),V)> {
-    let mut cursors = vec![&self.root];
+    let mut cursors = vec![Arc::clone(&self.root)];
     let mut rows = vec![];
     while let Some(c) = cursors.pop() {
-      match c {
+      match c.as_ref() {
         Node2::Branch(branch) => {
           for b in branch.intersections.iter() {
-            cursors.push(b);
+            cursors.push(Arc::clone(b));
           }
           for b in branch.nodes.iter() {
-            cursors.push(b);
+            cursors.push(Arc::clone(b));
           }
         },
         Node2::Data(data) => {
@@ -402,9 +403,10 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
     // todo: split large intersecting buckets
     Self::build(branch_factor, rows.as_slice())
   }
-  fn query(&mut self, bbox: &((X,Y),(X,Y)))
-  -> Box<dyn Stream<Item=Result<((Coord<X>,Coord<Y>),V,Location),Error>>+Unpin> {
-    unimplemented![]
+  fn query(&mut self, bbox: &((X,Y),(X,Y))) -> Arc<Mutex<QStream<(Coord<X>,Coord<Y>),V>>> {
+    Arc::new(Mutex::new(Box::new(unfold(Arc::clone(&self.root), async move |mut s| {
+      None
+    }))))
   }
 }
 

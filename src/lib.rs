@@ -12,7 +12,7 @@ pub use query::QueryStream;
 mod unfold;
 use unfold::Unfold;
 
-use async_std::{stream::Stream};
+use async_std::{stream::Stream,sync::{Arc,Mutex}};
 use random_access_storage::RandomAccess;
 use desert::{ToBytes,FromBytes,CountBytes};
 use core::ops::{Add,Div};
@@ -46,8 +46,11 @@ pub trait Point: 'static {
   type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes;
   async fn batch<S,V>(db: &mut DB<S,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized;
-  async fn query<S,V>(db: &mut DB<S,Self,V>, bbox: &Self::Bounds) -> Result<query::QStream<Self,V>,Error>
+  /*
+  async fn query<S,V>(db: &mut DB<S,Self,V>, bbox: &Self::Bounds)
+    -> Result<query::QStream<Self,V>,Error>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized;
+  */
 }
 
 #[async_trait::async_trait]
@@ -64,17 +67,9 @@ impl<X,Y> Point for (Coord<X>,Coord<Y>) where X: Scalar, Y: Scalar {
       .map(|x| x.unwrap())
       .collect();
     db.trees.push({
-      Box::new(Tree2::build(9, inserts.as_slice()))
+      Arc::new(Mutex::new(Tree2::build(9, inserts.as_slice())))
     });
     Ok(())
-  }
-  async fn query<S,V>(db: &mut DB<S,Self,V>, bbox: &Self::Bounds) -> Result<query::QStream<Self,V>,Error>
-  where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized {
-    let mut queries = vec![];
-    for t in db.trees.iter_mut() {
-      queries.push(t.query(bbox));
-    }
-    <QueryStream<Self,V>>::from_queries(queries)
   }
 }
 
@@ -86,7 +81,7 @@ pub enum Row<P,V> where P: Point, V: Value {
 pub struct DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Point, V: Value {
   pub storage: Box<dyn Storage<S>+Unpin+Send+Sync>,
   pub fields: SetupFields,
-  pub trees: Vec<Box<dyn Tree<P,V>>>,
+  pub trees: Vec<Arc<Mutex<dyn Tree<P,V>>>>,
 }
 
 impl<S,P,V> DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Point, V: Value {
@@ -100,7 +95,15 @@ impl<S,P,V> DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Poi
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     P::batch(self, rows).await
   }
+  /*
   pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
     P::query::<S,V>(self, bbox).await
+  */
+  pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
+    let mut queries = vec![];
+    for t in self.trees.iter() {
+      queries.push(t.lock().await.query(bbox));
+    }
+    <QueryStream<P,V>>::from_queries(queries)
   }
 }

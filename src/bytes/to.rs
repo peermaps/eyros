@@ -15,7 +15,7 @@ impl<X,Y,V> ToBytes for Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
     offset += varint::encode(self.count as u64, &mut buf[offset..])?;
     offset += self.bounds.write_bytes(&mut buf[offset..])?;
     
-    match &self.root {
+    match self.root.as_ref() {
       Node2::Data(data) => {
         write_data_bytes(data, &mut buf[offset..])?;
       },
@@ -46,12 +46,12 @@ where X: Scalar, Y: Scalar, V: Value {
         alloc.insert(index, (offset,size));
         offset += size;
         for b in branch.intersections.iter() {
-          if let Node2::Branch(_br) = b {
+          if let Node2::Branch(_br) = b.as_ref() {
             cursors.push(b);
           }
         }
         for b in branch.nodes.iter() {
-          if let Node2::Branch(_br) = b {
+          if let Node2::Branch(_br) = b.as_ref() {
             cursors.push(b);
           }
         }
@@ -76,7 +76,7 @@ i_offset: usize, buf: &mut [u8]) -> Result<usize,Error> where X: Scalar, Y: Scal
     let mut i = index + 1;
     for x in [&branch.intersections,&branch.nodes].iter() {
       for b in x.iter() {
-        match b {
+        match b.as_ref() {
           Node2::Branch(branch) => {
             let (j,_) = alloc.get(&i).unwrap();
             offset += (((*j)*3+0) as u32).write_bytes(&mut buf[offset..])?;

@@ -23,7 +23,7 @@ async fn main() -> Result<(),E> {
   }).collect();
   db.batch(&rows).await?;
 
-  let bytes = db.trees[0].to_bytes()?;
+  let bytes = db.trees[0].lock().await.to_bytes()?;
   //eprintln!["tree={:#?}", <Tree2<f32,f32,V>>::from_bytes(&bytes)?];
   eprintln!["{} bytes", bytes.len()];
 

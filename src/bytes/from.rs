@@ -1,6 +1,7 @@
 use desert::FromBytes;
 use crate::{Scalar,Coord,Value,tree::{Tree2,Node2,Branch2},bytes::varint};
 use failure::Error;
+use async_std::sync::Arc;
 
 impl<X,Y,V> FromBytes for Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
   fn from_bytes(src: &[u8]) -> Result<(usize,Self),Error> {
@@ -47,7 +48,7 @@ impl<X,Y,V> FromBytes for Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
       _ => panic!["tree pointer not implemented"]
     };
     Ok((offset,Tree2 {
-      root,
+      root: Arc::new(root),
       bounds,
       count
     }))
@@ -75,12 +76,12 @@ fn parse_branch<X,Y,V>(src: &[u8], xoffset: usize, depth: usize)
     offset += s;
     match n%3 {
       0 => {
-        intersections.push(parse_branch(&src, (n/3) as usize, depth+1)?);
+        intersections.push(Arc::new(parse_branch(&src, (n/3) as usize, depth+1)?));
       },
       1 => {
         let (s,data) = parse_data(&src[offset..], (n/3) as usize)?;
         offset += s;
-        intersections.push(data);
+        intersections.push(Arc::new(data));
       },
       _ => {
         panic!["external trees not implemented"]
@@ -93,12 +94,12 @@ fn parse_branch<X,Y,V>(src: &[u8], xoffset: usize, depth: usize)
     offset += s;
     match n%3 {
       0 => {
-        nodes.push(parse_branch(&src, (n/3) as usize, depth+1)?);
+        nodes.push(Arc::new(parse_branch(&src, (n/3) as usize, depth+1)?));
       },
       1 => {
         let (s,data) = parse_data(&src[offset..], (n/3) as usize)?;
         offset += s;
-        nodes.push(data);
+        nodes.push(Arc::new(data));
       },
       _ => {
         panic!["external trees not implemented"]
