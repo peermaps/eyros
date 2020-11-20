@@ -404,8 +404,77 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
     Self::build(branch_factor, rows.as_slice())
   }
   fn query(&mut self, bbox: &((X,Y),(X,Y))) -> Arc<Mutex<QStream<(Coord<X>,Coord<Y>),V>>> {
-    Arc::new(Mutex::new(Box::new(unfold(Arc::clone(&self.root), async move |mut s| {
-      None
+    let mut istate = (
+      bbox.clone(),
+      vec![], // queue
+      vec![(0usize,Arc::clone(&self.root))] // cursors
+    );
+    Arc::new(Mutex::new(Box::new(unfold(istate, async move |mut state| {
+      let bbox = &state.0;
+      let queue = &mut state.1;
+      let cursors = &mut state.2;
+      loop {
+        if let Some(q) = queue.pop() {
+          return Some((Ok(q),state));
+        }
+        if cursors.is_empty() {
+          return None;
+        }
+        let (level,c) = cursors.pop().unwrap();
+        match c.as_ref() {
+          Node2::Branch(branch) => {
+            match level % 2 {
+              0 => {
+                let pivots = branch.pivots.0.as_ref().unwrap();
+                for xs in [&branch.intersections,&branch.nodes].iter() {
+                  let ranges = pivots.iter().zip(pivots.iter().skip(1));
+                  if &(bbox.0).0 <= pivots.first().unwrap() {
+                    cursors.push((level+1,Arc::clone(xs.first().unwrap())));
+                  }
+                  for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
+                    if intersect_iv(start, end, &(bbox.0).0, &(bbox.1).0) {
+                      cursors.push((level+1,Arc::clone(b)));
+                    }
+                  }
+                  if &(bbox.1).0 >= pivots.last().unwrap() {
+                    cursors.push((level+1,Arc::clone(xs.last().unwrap())));
+                  }
+                }
+              },
+              _ => {
+                let pivots = branch.pivots.1.as_ref().unwrap();
+                for xs in [&branch.intersections,&branch.nodes].iter() {
+                  let ranges = pivots.iter().zip(pivots.iter().skip(1));
+                  if &(bbox.0).1 <= pivots.first().unwrap() {
+                    cursors.push((level+1,Arc::clone(xs.first().unwrap())));
+                  }
+                  for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
+                    if intersect_iv(start, end, &(bbox.0).1, &(bbox.1).1) {
+                      cursors.push((level+1,Arc::clone(b)));
+                    }
+                  }
+                  if &(bbox.1).1 >= pivots.last().unwrap() {
+                    cursors.push((level+1,Arc::clone(xs.last().unwrap())));
+                  }
+                }
+              }
+            }
+          },
+          Node2::Data(data) => {
+            queue.extend(data.iter()
+              .filter(|pv| {
+                intersect_coord(&(pv.0).0, &(bbox.0).0, &(bbox.1).0)
+                && intersect_coord(&(pv.0).1, &(bbox.0).1, &(bbox.1).1)
+              })
+              .map(|pv| {
+                let loc: Location = (0,0); // TODO
+                (pv.0.clone(),pv.1.clone(),loc)
+              })
+              .collect::<Vec<_>>()
+            );
+          }
+        }
+      }
     }))))
   }
 }
@@ -428,6 +497,13 @@ fn intersect_pivot<X>(c: &Coord<X>, p: &X) -> bool where X: Scalar {
   match c {
     Coord::Scalar(x) => *x == *p,
     Coord::Interval(min,max) => *min <= *p && *p <= *max,
+  }
+}
+
+fn intersect_coord<X>(c: &Coord<X>, low: &X, high: &X) -> bool where X: Scalar {
+  match c {
+    Coord::Scalar(x) => low <= x && x <= high,
+    Coord::Interval(x,y) => intersect_iv(x,y,low,high),
   }
 }
 

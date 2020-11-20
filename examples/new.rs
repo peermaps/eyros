@@ -18,7 +18,7 @@ async fn main() -> Result<(),E> {
     let ymin = (random::<f32>()*2.0-1.0)*90.0;
     let ymax = ymin + random::<f32>().powf(4.0)*(90.0-xmin);
     let point = (Coord::Interval(xmin,xmax), Coord::Interval(ymin,ymax));
-    let value = random::<u64>();
+    let value = (random::<f32>() * 10_000.0) as u64;
     Row::Insert(point, value)
   }).collect();
   db.batch(&rows).await?;
@@ -27,7 +27,7 @@ async fn main() -> Result<(),E> {
   //eprintln!["tree={:#?}", <Tree2<f32,f32,V>>::from_bytes(&bytes)?];
   eprintln!["{} bytes", bytes.len()];
 
-  let bbox = ((-0.5,-0.8),(0.3,-0.5));
+  let bbox = ((-25.0,-45.0),(5.0,-15.0));
   let mut stream = db.query(&bbox).await?;
   while let Some(result) = stream.next().await {
     println!("{:?}", result?);
