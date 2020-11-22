@@ -1,6 +1,6 @@
 use desert::ToBytes;
-use crate::{Scalar,Point,Value,Coord,Location,Error,query::QStream};
-use async_std::{stream::Stream,sync::{Arc,Mutex}};
+use crate::{Scalar,Point,Value,Coord,Location,query::QStream};
+use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
 
 #[derive(Debug)]
@@ -48,6 +48,7 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
       return Node2::Data(vec![]);
     } else if sorted.0.len() < branch_factor {
       return Node2::Data(sorted.0.iter().map(|i| {
+        matched[*i] = true;
         let pv = &inserts[*i];
         (((pv.0).0.clone(),(pv.0).1.clone()),pv.1.clone())
       }).collect());
@@ -142,8 +143,6 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
       },
       _ => panic!["unexpected level modulo dimension"]
     };
-    //pad_pivots(n, &mut pivots);
-    //eprintln!["n={}, pivots={:?}", n, pivots];
 
     let intersections: Vec<Arc<Node2<X,Y,V>>> = match level % Self::dim() {
       0 => pivots.0.as_ref().unwrap().iter().map(|pivot| {
@@ -154,7 +153,6 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           })
           .collect();
         if indexes.len() == sorted.0.len() {
-          //eprintln!["{} == {}", indexes.len(), sorted.0.len()];
           return Arc::new(Node2::Data(indexes.iter().map(|i| {
             let pv = &inserts[*i];
             matched[*i] = true;
@@ -176,9 +174,6 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           ),
           matched
         );
-        indexes.iter().for_each(|i| {
-          matched[*i] = true;
-        });
         Arc::new(b)
       }).collect(),
       1 => pivots.1.as_ref().unwrap().iter().map(|pivot| {
@@ -189,7 +184,6 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           })
           .collect();
         if indexes.len() == sorted.1.len() {
-          //eprintln!["{} == {}", indexes.len(), sorted.0.len()];
           return Arc::new(Node2::Data(indexes.iter().map(|i| {
             let pv = &inserts[*i];
             matched[*i] = true;
@@ -211,9 +205,6 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           ),
           matched
         );
-        indexes.iter().for_each(|i| {
-          matched[*i] = true;
-        });
         Arc::new(b)
       }).collect(),
       _ => panic!["unexpected level modulo dimension"]
@@ -232,9 +223,6 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
                 == Some(std::cmp::Ordering::Less)
             }).collect()
           );
-          for j in next_sorted.0.iter() {
-            matched[*j] = true;
-          }
           Arc::new(Branch2::from_sorted(
             branch_factor,
             level+1,
@@ -270,9 +258,6 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
                 == Some(std::cmp::Ordering::Less)
             }).collect()
           );
-          for j in next_sorted.1.iter() {
-            matched[*j] = true;
-          }
           Arc::new(Branch2::from_sorted(
             branch_factor,
             level+1,
@@ -306,7 +291,9 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
       }
     });
     if node_count <= 1 {
-      return Node2::Data(inserts.iter().map(|((x,y),v)| {
+      return Node2::Data(sorted.0.iter().map(|i| {
+        let ((x,y),v) = &inserts[*i];
+        matched[*i] = true;
         ((x.clone(),y.clone()),(*v).clone())
       }).collect());
     }
@@ -404,7 +391,7 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
     Self::build(branch_factor, rows.as_slice())
   }
   fn query(&mut self, bbox: &((X,Y),(X,Y))) -> Arc<Mutex<QStream<(Coord<X>,Coord<Y>),V>>> {
-    let mut istate = (
+    let istate = (
       bbox.clone(),
       vec![], // queue
       vec![(0usize,Arc::clone(&self.root))] // cursors

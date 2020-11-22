@@ -10,9 +10,8 @@ mod bytes;
 mod query;
 pub use query::QueryStream;
 mod unfold;
-use unfold::Unfold;
 
-use async_std::{stream::Stream,sync::{Arc,Mutex}};
+use async_std::{sync::{Arc,Mutex}};
 use random_access_storage::RandomAccess;
 use desert::{ToBytes,FromBytes,CountBytes};
 use core::ops::{Add,Div};
@@ -46,11 +45,6 @@ pub trait Point: 'static {
   type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes;
   async fn batch<S,V>(db: &mut DB<S,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized;
-  /*
-  async fn query<S,V>(db: &mut DB<S,Self,V>, bbox: &Self::Bounds)
-    -> Result<query::QStream<Self,V>,Error>
-    where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized;
-  */
 }
 
 #[async_trait::async_trait]
@@ -95,10 +89,6 @@ impl<S,P,V> DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Poi
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     P::batch(self, rows).await
   }
-  /*
-  pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
-    P::query::<S,V>(self, bbox).await
-  */
   pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
     let mut queries = vec![];
     for t in self.trees.iter() {
