@@ -164,13 +164,13 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           level+1,
           inserts,
           (
+            &indexes,
             sorted.1.iter()
               .map(|j| *j)
               .filter(|j| {
                 !matched[*j] && intersect_pivot(&(inserts[*j].0).0, pivot)
               })
-              .collect::<Vec<usize>>().as_slice(),
-            &indexes
+              .collect::<Vec<usize>>().as_slice()
           ),
           matched
         );
@@ -195,7 +195,7 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
           level+1,
           inserts,
           (
-            sorted.1.iter()
+            sorted.0.iter()
               .map(|j| *j)
               .filter(|j| {
                 !matched[*j] && intersect_pivot(&(inserts[*j].0).1, pivot)
@@ -212,7 +212,10 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
 
     let nodes = match level % Self::dim() {
       0 => {
-        let mut nodes: Vec<Arc<Node2<X,Y,V>>> = pivots.0.as_ref().unwrap().iter().map(|pivot| {
+        let pv = pivots.0.as_ref().unwrap();
+        let mut nodes: Vec<Arc<Node2<X,Y,V>>> = Vec::with_capacity(pv.len()+1);
+        nodes.push({
+          let pivot = pv.first().unwrap();
           let next_sorted: (Vec<usize>,Vec<usize>) = (
             sorted.0.iter().map(|j| *j).filter(|j| {
               !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
@@ -230,24 +233,54 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
             matched
           ))
-        }).collect();
-        nodes.push({
+        });
+        let ranges = pv.iter().zip(pv.iter().skip(1));
+        for (start,end) in ranges {
           let next_sorted: (Vec<usize>,Vec<usize>) = (
-            sorted.0.iter().map(|j| *j).filter(|j| !matched[*j]).collect(),
-            sorted.1.iter().map(|j| *j).filter(|j| !matched[*j]).collect()
+            sorted.0.iter().map(|j| *j).filter(|j| {
+              !matched[*j] && intersect_coord(&(inserts[*j].0).0, start, end)
+            }).collect(),
+            sorted.1.iter().map(|j| *j).filter(|j| {
+              !matched[*j] && intersect_coord(&(inserts[*j].0).0, start, end)
+            }).collect()
           );
-          Arc::new(Branch2::from_sorted(
+          nodes.push(Arc::new(Branch2::from_sorted(
             branch_factor,
             level+1,
             inserts,
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
             matched
-          ))
-        });
+          )));
+        }
+        if pv.len() > 1 {
+          nodes.push({
+            let pivot = pv.first().unwrap();
+            let next_sorted: (Vec<usize>,Vec<usize>) = (
+              sorted.0.iter().map(|j| *j).filter(|j| {
+                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
+                  == Some(std::cmp::Ordering::Greater)
+              }).collect(),
+              sorted.1.iter().map(|j| *j).filter(|j| {
+                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
+                  == Some(std::cmp::Ordering::Greater)
+              }).collect()
+            );
+            Arc::new(Branch2::from_sorted(
+              branch_factor,
+              level+1,
+              inserts,
+              (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
+              matched
+            ))
+          });
+        }
         nodes
       },
       1 => {
-        let mut nodes: Vec<Arc<Node2<X,Y,V>>> = pivots.1.as_ref().unwrap().iter().map(|pivot| {
+        let pv = pivots.1.as_ref().unwrap();
+        let mut nodes: Vec<Arc<Node2<X,Y,V>>> = Vec::with_capacity(pv.len()+1);
+        nodes.push({
+          let pivot = pv.first().unwrap();
           let next_sorted: (Vec<usize>,Vec<usize>) = (
             sorted.0.iter().map(|j| *j).filter(|j| {
               !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
@@ -265,20 +298,47 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
             matched
           ))
-        }).collect();
-        nodes.push({
+        });
+        let ranges = pv.iter().zip(pv.iter().skip(1));
+        for (start,end) in ranges {
           let next_sorted: (Vec<usize>,Vec<usize>) = (
-            sorted.0.iter().map(|j| *j).filter(|j| !matched[*j]).collect(),
-            sorted.1.iter().map(|j| *j).filter(|j| !matched[*j]).collect()
+            sorted.0.iter().map(|j| *j).filter(|j| {
+              !matched[*j] && intersect_coord(&(inserts[*j].0).1, start, end)
+            }).collect(),
+            sorted.1.iter().map(|j| *j).filter(|j| {
+              !matched[*j] && intersect_coord(&(inserts[*j].0).1, start, end)
+            }).collect()
           );
-          Arc::new(Branch2::from_sorted(
+          nodes.push(Arc::new(Branch2::from_sorted(
             branch_factor,
             level+1,
             inserts,
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
             matched
-          ))
-        });
+          )));
+        }
+        if pv.len() > 1 {
+          nodes.push({
+            let pivot = pv.first().unwrap();
+            let next_sorted: (Vec<usize>,Vec<usize>) = (
+              sorted.0.iter().map(|j| *j).filter(|j| {
+                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
+                  == Some(std::cmp::Ordering::Greater)
+              }).collect(),
+              sorted.1.iter().map(|j| *j).filter(|j| {
+                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
+                  == Some(std::cmp::Ordering::Greater)
+              }).collect()
+            );
+            Arc::new(Branch2::from_sorted(
+              branch_factor,
+              level+1,
+              inserts,
+              (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
+              matched
+            ))
+          });
+        }
         nodes
       },
       _ => panic!["unexpected level modulo dimension"]
@@ -413,36 +473,44 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
             match level % 2 {
               0 => {
                 let pivots = branch.pivots.0.as_ref().unwrap();
-                for xs in [&branch.intersections,&branch.nodes].iter() {
-                  let ranges = pivots.iter().zip(pivots.iter().skip(1));
-                  if &(bbox.0).0 <= pivots.first().unwrap() {
-                    cursors.push((level+1,Arc::clone(xs.first().unwrap())));
+                for (pivot,b) in pivots.iter().zip(branch.intersections.iter()) {
+                  if &(bbox.0).0 <= pivot && pivot <= &(bbox.1).0 {
+                    cursors.push((level+1,Arc::clone(b)));
                   }
-                  for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
-                    if intersect_iv(start, end, &(bbox.0).0, &(bbox.1).0) {
-                      cursors.push((level+1,Arc::clone(b)));
-                    }
+                }
+                let xs = &branch.nodes;
+                let ranges = pivots.iter().zip(pivots.iter().skip(1));
+                if &(bbox.0).0 <= pivots.first().unwrap() {
+                  cursors.push((level+1,Arc::clone(xs.first().unwrap())));
+                }
+                for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
+                  if intersect_iv(start, end, &(bbox.0).0, &(bbox.1).0) {
+                    cursors.push((level+1,Arc::clone(b)));
                   }
-                  if &(bbox.1).0 >= pivots.last().unwrap() {
-                    cursors.push((level+1,Arc::clone(xs.last().unwrap())));
-                  }
+                }
+                if &(bbox.1).0 >= pivots.last().unwrap() {
+                  cursors.push((level+1,Arc::clone(xs.last().unwrap())));
                 }
               },
               _ => {
                 let pivots = branch.pivots.1.as_ref().unwrap();
-                for xs in [&branch.intersections,&branch.nodes].iter() {
-                  let ranges = pivots.iter().zip(pivots.iter().skip(1));
-                  if &(bbox.0).1 <= pivots.first().unwrap() {
-                    cursors.push((level+1,Arc::clone(xs.first().unwrap())));
+                for (pivot,b) in pivots.iter().zip(branch.intersections.iter()) {
+                  if &(bbox.0).1 <= pivot && pivot <= &(bbox.1).1 {
+                    cursors.push((level+1,Arc::clone(b)));
                   }
-                  for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
-                    if intersect_iv(start, end, &(bbox.0).1, &(bbox.1).1) {
-                      cursors.push((level+1,Arc::clone(b)));
-                    }
+                }
+                let xs = &branch.nodes;
+                let ranges = pivots.iter().zip(pivots.iter().skip(1));
+                if &(bbox.0).1 <= pivots.first().unwrap() {
+                  cursors.push((level+1,Arc::clone(xs.first().unwrap())));
+                }
+                for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
+                  if intersect_iv(start, end, &(bbox.0).1, &(bbox.1).1) {
+                    cursors.push((level+1,Arc::clone(b)));
                   }
-                  if &(bbox.1).1 >= pivots.last().unwrap() {
-                    cursors.push((level+1,Arc::clone(xs.last().unwrap())));
-                  }
+                }
+                if &(bbox.1).1 >= pivots.last().unwrap() {
+                  cursors.push((level+1,Arc::clone(xs.last().unwrap())));
                 }
               }
             }
@@ -477,7 +545,7 @@ fn find_separation<X>(amin: &X, amax: &X, bmin: &X, bmax: &X, is_min: bool) -> X
 }
 
 fn intersect_iv<X>(a0: &X, a1: &X, b0: &X, b1: &X) -> bool where X: PartialOrd {
-  a0 <= b1 && a1 >= b0
+  (b0 <= a0 && a0 <= b1) || (b0 <= a1 && a1 <= b1)
 }
 
 fn intersect_pivot<X>(c: &Coord<X>, p: &X) -> bool where X: Scalar {
