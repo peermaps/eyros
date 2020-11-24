@@ -545,7 +545,7 @@ fn find_separation<X>(amin: &X, amax: &X, bmin: &X, bmax: &X, is_min: bool) -> X
 }
 
 fn intersect_iv<X>(a0: &X, a1: &X, b0: &X, b1: &X) -> bool where X: PartialOrd {
-  (b0 <= a0 && a0 <= b1) || (b0 <= a1 && a1 <= b1)
+  a1 >= b0 && a0 <= b1
 }
 
 fn intersect_pivot<X>(c: &Coord<X>, p: &X) -> bool where X: Scalar {

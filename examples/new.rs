@@ -17,7 +17,7 @@ async fn main() -> Result<(),E> {
     let xmin = (random::<f32>()*2.0-1.0)*180.0;
     let xmax = xmin + random::<f32>().powf(16.0)*(180.0-xmin);
     let ymin = (random::<f32>()*2.0-1.0)*90.0;
-    let ymax = ymin + random::<f32>().powf(16.0)*(90.0-xmin);
+    let ymax = ymin + random::<f32>().powf(16.0)*(90.0-ymin);
     let point = (Coord::Interval(xmin,xmax), Coord::Interval(ymin,ymax));
     //let value = (random::<f32>() * 10_000.0) as u64;
     Row::Insert(point, i)
