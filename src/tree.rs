@@ -36,14 +36,19 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
         xs
       },
     );
-    Self::from_sorted(
+    let mut max_depth = 0;
+    let root = Self::from_sorted(
       branch_factor, 0, inserts,
       (sorted.0.as_slice(), sorted.1.as_slice()),
-      &mut vec![false;inserts.len()]
-    )
+      &mut vec![false;inserts.len()],
+      &mut max_depth
+    );
+    //eprintln!["max_depth={}", max_depth];
+    root
   }
   fn from_sorted(branch_factor: usize, level: usize, inserts: &[(&(Coord<X>,Coord<Y>),&V)],
-  sorted: (&[usize],&[usize]), matched: &mut [bool]) -> Node2<X,Y,V> {
+  sorted: (&[usize],&[usize]), matched: &mut [bool], max_depth: &mut usize) -> Node2<X,Y,V> {
+    *max_depth = level.max(*max_depth);
     if sorted.0.len() == 0 {
       return Node2::Data(vec![]);
     } else if sorted.0.len() < branch_factor {
@@ -172,7 +177,8 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
               })
               .collect::<Vec<usize>>().as_slice()
           ),
-          matched
+          matched,
+          max_depth
         );
         Arc::new(b)
       }).collect(),
@@ -203,7 +209,8 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
               .collect::<Vec<usize>>().as_slice(),
             &indexes
           ),
-          matched
+          matched,
+          max_depth
         );
         Arc::new(b)
       }).collect(),
@@ -231,7 +238,8 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
             level+1,
             inserts,
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-            matched
+            matched,
+            max_depth
           ))
         });
         let ranges = pv.iter().zip(pv.iter().skip(1));
@@ -249,7 +257,8 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
             level+1,
             inserts,
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-            matched
+            matched,
+            max_depth
           )));
         }
         if pv.len() > 1 {
@@ -270,7 +279,8 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
               level+1,
               inserts,
               (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-              matched
+              matched,
+              max_depth
             ))
           });
         }
@@ -296,7 +306,8 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
             level+1,
             inserts,
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-            matched
+            matched,
+            max_depth
           ))
         });
         let ranges = pv.iter().zip(pv.iter().skip(1));
@@ -314,7 +325,8 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
             level+1,
             inserts,
             (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-            matched
+            matched,
+            max_depth
           )));
         }
         if pv.len() > 1 {
@@ -335,7 +347,8 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
               level+1,
               inserts,
               (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-              matched
+              matched,
+              max_depth
             ))
           });
         }
