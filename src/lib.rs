@@ -60,9 +60,9 @@ impl<X,Y> Point for (Coord<X>,Coord<Y>) where X: Scalar, Y: Scalar {
       .filter(|row| !row.is_none())
       .map(|x| x.unwrap())
       .collect();
-    db.trees.push({
+    db.trees.push(Some(
       Arc::new(Mutex::new(Tree2::build(9, inserts.as_slice())))
-    });
+    ));
     Ok(())
   }
 }
@@ -75,7 +75,7 @@ pub enum Row<P,V> where P: Point, V: Value {
 pub struct DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Point, V: Value {
   pub storage: Box<dyn Storage<S>+Unpin+Send+Sync>,
   pub fields: SetupFields,
-  pub trees: Vec<Arc<Mutex<dyn Tree<P,V>>>>,
+  pub trees: Vec<Option<Arc<Mutex<dyn Tree<P,V>>>>>,
 }
 
 impl<S,P,V> DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Point, V: Value {
@@ -91,8 +91,10 @@ impl<S,P,V> DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Poi
   }
   pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
     let mut queries = vec![];
-    for t in self.trees.iter() {
-      queries.push(t.lock().await.query(bbox));
+    for tree in self.trees.iter() {
+      if let Some(t) = tree {
+        queries.push(t.lock().await.query(bbox));
+      }
     }
     <QueryStream<P,V>>::from_queries(queries)
   }
