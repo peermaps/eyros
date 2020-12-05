@@ -61,14 +61,12 @@ impl<X,Y> Point for (Coord<X>,Coord<Y>) where X: Scalar, Y: Scalar {
       .map(|x| x.unwrap())
       .collect();
 
-    let mut merge_trees = vec![Arc::new(Mutex::new(T::build(9, inserts.as_slice())))];
-    merge_trees.extend(db.trees.iter()
+    let merge_trees = db.trees.iter()
       .take_while(|t| { t.is_some() })
       .map(|t| { Arc::clone(&t.as_ref().unwrap()) })
-      .collect::<Vec<Arc<Mutex<T>>>>()
-    );
-    db.trees.insert(merge_trees.len()-1, Some(Arc::new(Mutex::new(
-      tree::merge(9, merge_trees.as_slice()).await
+      .collect::<Vec<Arc<Mutex<T>>>>();
+    db.trees.insert(merge_trees.len(), Some(Arc::new(Mutex::new(
+      tree::merge(9, inserts.as_slice(), merge_trees.as_slice()).await
     ))));
     Ok(())
   }

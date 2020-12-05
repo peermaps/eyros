@@ -393,13 +393,14 @@ pub struct Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
   pub count: usize,
 }
 
-pub async fn merge<T,P,V>(branch_factor: usize, trees: &[Arc<Mutex<T>>]) -> T
+pub async fn merge<T,P,V>(branch_factor: usize, inserts: &[(&P,&V)], trees: &[Arc<Mutex<T>>]) -> T
 where P: Point, V: Value, T: Tree<P,V> {
-  let mut rows = vec![];
   let mut lists = vec![];
   for tree in trees.iter() {
     lists.push(tree.lock().await.list());
   }
+  let mut rows = vec![];
+  rows.extend_from_slice(inserts);
   for list in lists.iter_mut() {
     rows.extend(list.iter().map(|pv| {
       (&pv.0,&pv.1)
