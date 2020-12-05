@@ -43,15 +43,15 @@ pub enum Coord<X> where X: Scalar {
 #[async_trait::async_trait]
 pub trait Point: 'static {
   type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes;
-  async fn batch<S,V>(db: &mut DB<S,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
-    where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized;
+  async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
+    where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized, T: Tree<Self,V>;
 }
 
 #[async_trait::async_trait]
 impl<X,Y> Point for (Coord<X>,Coord<Y>) where X: Scalar, Y: Scalar {
   type Bounds = ((X,Y),(X,Y));
-  async fn batch<S,V>(db: &mut DB<S,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
-  where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value {
+  async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
+  where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, T: Tree<(Coord<X>,Coord<Y>),V> {
     let inserts: Vec<(&(Coord<X>,Coord<Y>),&V)> = rows.iter()
       .map(|row| match row {
         Row::Insert(p,v) => Some((p,v)),
@@ -60,9 +60,16 @@ impl<X,Y> Point for (Coord<X>,Coord<Y>) where X: Scalar, Y: Scalar {
       .filter(|row| !row.is_none())
       .map(|x| x.unwrap())
       .collect();
-    db.trees.push(Some(
-      Arc::new(Mutex::new(Tree2::build(9, inserts.as_slice())))
-    ));
+
+    let mut merge_trees = vec![Arc::new(Mutex::new(T::build(9, inserts.as_slice())))];
+    merge_trees.extend(db.trees.iter()
+      .take_while(|t| { t.is_some() })
+      .map(|t| { Arc::clone(&t.as_ref().unwrap()) })
+      .collect::<Vec<Arc<Mutex<T>>>>()
+    );
+    db.trees.insert(merge_trees.len()-1, Some(Arc::new(Mutex::new(
+      tree::merge(9, merge_trees.as_slice()).await
+    ))));
     Ok(())
   }
 }
@@ -72,18 +79,24 @@ pub enum Row<P,V> where P: Point, V: Value {
   Delete(Location)
 }
 
-pub struct DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Point, V: Value {
+pub struct DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync,
+P: Point, V: Value, T: Tree<P,V> {
   pub storage: Box<dyn Storage<S>+Unpin+Send+Sync>,
   pub fields: SetupFields,
-  pub trees: Vec<Option<Arc<Mutex<dyn Tree<P,V>>>>>,
+  pub trees: Vec<Option<Arc<Mutex<T>>>>,
+  _point: std::marker::PhantomData<P>,
+  _value: std::marker::PhantomData<V>,
 }
 
-impl<S,P,V> DB<S,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync, P: Point, V: Value {
+impl<S,T,P,V> DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync,
+P: Point, V: Value, T: Tree<P,V> {
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
     Ok(Self {
       storage: setup.storage.into(),
       fields: setup.fields,
       trees: vec![],
+      _point: std::marker::PhantomData,
+      _value: std::marker::PhantomData,
     })
   }
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {

@@ -383,7 +383,6 @@ impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
 pub trait Tree<P,V>: Send+Sync+ToBytes where P: Point, V: Value {
   fn build(branch_factor: usize, rows: &[(&P,&V)]) -> Self where Self: Sized;
   fn list(&mut self) -> Vec<(P,V)>;
-  fn merge(branch_factor: usize, trees: &mut [&mut Self]) -> Self where Self: Sized;
   fn query(&mut self, bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>;
 }
 
@@ -394,6 +393,23 @@ pub struct Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
   pub count: usize,
 }
 
+pub async fn merge<T,P,V>(branch_factor: usize, trees: &[Arc<Mutex<T>>]) -> T
+where P: Point, V: Value, T: Tree<P,V> {
+  let mut rows = vec![];
+  let mut lists = vec![];
+  for tree in trees.iter() {
+    lists.push(tree.lock().await.list());
+  }
+  for list in lists.iter_mut() {
+    rows.extend(list.iter().map(|pv| {
+      (&pv.0,&pv.1)
+    }).collect::<Vec<_>>());
+  }
+  // todo: split large intersecting buckets
+  T::build(branch_factor, rows.as_slice())
+}
+
+#[async_trait::async_trait]
 impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
   fn build(branch_factor: usize, rows: &[(&(Coord<X>,Coord<Y>),&V)]) -> Self {
     let ibounds = (
@@ -448,20 +464,6 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
       }
     }
     rows
-  }
-  fn merge(branch_factor: usize, trees: &mut [&mut Self]) -> Self {
-    let mut rows = vec![];
-    let mut lists = vec![];
-    for tree in trees.iter_mut() {
-      lists.push(tree.list());
-    }
-    for list in lists.iter_mut() {
-      rows.extend(list.iter().map(|pv| {
-        (&pv.0,&pv.1)
-      }).collect::<Vec<_>>());
-    }
-    // todo: split large intersecting buckets
-    Self::build(branch_factor, rows.as_slice())
   }
   fn query(&mut self, bbox: &((X,Y),(X,Y))) -> Arc<Mutex<QStream<(Coord<X>,Coord<Y>),V>>> {
     let istate = (

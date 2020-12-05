@@ -1,5 +1,5 @@
 #[cfg(not(feature="wasm"))]
-use crate::{DB,Point,Value,Error,Setup,SetupFields};
+use crate::{DB,Tree,Point,Value,Error,Setup,SetupFields};
 #[cfg(not(feature="wasm"))]
 use std::path::{Path,PathBuf};
 #[cfg(not(feature="wasm"))]
@@ -42,7 +42,7 @@ impl Storage<S> for FileStore {
 }
 
 #[cfg(not(feature="wasm"))]
-impl<P,V> DB<S,P,V> where P: Point+'static, V: Value+'static {
+impl<T,P,V> DB<S,T,P,V> where P: Point+'static, V: Value+'static, T: Tree<P,V> {
   pub async fn open_from_path(path: &Path) -> Result<Self,Error> {
     Ok(Setup::from_path(path).build().await?)
   }

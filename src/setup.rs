@@ -1,4 +1,4 @@
-use crate::{DB,Storage,Point,Value,Error};
+use crate::{DB,Tree,Storage,Point,Value,Error};
 use random_access_storage::RandomAccess;
 
 /// Struct for reading database properties.
@@ -84,7 +84,7 @@ impl<S> Setup<S> where S: RandomAccess<Error=Error>+'static+Unpin+Send+Sync {
     self
   }
   */
-  pub async fn build<P,V> (self) -> Result<DB<S,P,V>,Error> where P: Point, V: Value {
+  pub async fn build<T,P,V> (self) -> Result<DB<S,T,P,V>,Error> where P: Point, V: Value, T: Tree<P,V> {
     DB::open_from_setup(self).await
   }
 }

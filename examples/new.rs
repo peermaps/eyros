@@ -1,4 +1,4 @@
-use eyros::{DB,Row,Coord};
+use eyros::{DB,Tree2,Row,Coord};
 //use eyros::Tree2;
 use rand::random;
 //use desert::FromBytes;
@@ -10,7 +10,7 @@ type E = Box<dyn std::error::Error+Sync+Send>;
 
 #[async_std::main]
 async fn main() -> Result<(),E> {
-  let mut db: DB<_,P,V> = DB::open_from_path(
+  let mut db: DB<_,Tree2<f32,f32,V>,P,V> = DB::open_from_path(
     &std::path::PathBuf::from("/tmp/eyros.db")
   ).await?;
   let rows: Vec<Row<P,V>> = (0..100_000).map(|i| {
