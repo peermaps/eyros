@@ -3,385 +3,268 @@ use crate::{Scalar,Point,Value,Coord,Location,query::QStream};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
 
-#[derive(Debug)]
-pub enum Node2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
-  Branch(Branch2<X,Y,V>),
-  Data(Vec<((Coord<X>,Coord<Y>),V)>),
-  //Ref(u64)
-}
-
-#[derive(Debug)]
-pub struct Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
-  pub pivots: (Option<Vec<X>>,Option<Vec<Y>>),
-  pub intersections: Vec<Arc<Node2<X,Y,V>>>,
-  pub nodes: Vec<Arc<Node2<X,Y,V>>>,
-}
-
-impl<X,Y,V> Branch2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
-  fn dim() -> usize { 2 }
-  pub fn build(branch_factor: usize, inserts: &[(&(Coord<X>,Coord<Y>),&V)]) -> Node2<X,Y,V> {
-    let sorted = (
-      {
-        let mut xs: Vec<usize> = (0..inserts.len()).collect();
-        xs.sort_unstable_by(|a,b| {
-          coord_cmp(&(inserts[*a].0).0,&(inserts[*b].0).0).unwrap()
-        });
-        xs
-      },
-      {
-        let mut xs: Vec<usize> = (0..inserts.len()).collect();
-        xs.sort_unstable_by(|a,b| {
-          coord_cmp(&(inserts[*a].0).1,&(inserts[*b].0).1).unwrap()
-        });
-        xs
-      },
-    );
-    let mut max_depth = 0;
-    let root = Self::from_sorted(
-      branch_factor, 0, inserts,
-      (sorted.0.as_slice(), sorted.1.as_slice()),
-      &mut vec![false;inserts.len()],
-      &mut max_depth
-    );
-    //eprintln!["max_depth={}", max_depth];
-    root
-  }
-  fn from_sorted(branch_factor: usize, level: usize, inserts: &[(&(Coord<X>,Coord<Y>),&V)],
-  sorted: (&[usize],&[usize]), matched: &mut [bool], max_depth: &mut usize) -> Node2<X,Y,V> {
-    *max_depth = level.max(*max_depth);
-    if sorted.0.len() == 0 {
-      return Node2::Data(vec![]);
-    } else if sorted.0.len() < branch_factor {
-      return Node2::Data(sorted.0.iter().map(|i| {
-        matched[*i] = true;
-        let pv = &inserts[*i];
-        (((pv.0).0.clone(),(pv.0).1.clone()),pv.1.clone())
-      }).collect());
+macro_rules! impl_branch {
+  ($B:ident,$N:ident,($($T:tt),+),($($i:tt),+),($($u:ty),+),($($n:tt),+),$dim:expr) => {
+    #[derive(Debug)]
+    pub enum $N<$($T),+,V> where $($T: Scalar),+, V: Value {
+      Branch($B<$($T),+,V>),
+      Data(Vec<(($(Coord<$T>),+),V)>),
+      //Ref(u64)
     }
-    let n = (branch_factor-1).min(sorted.0.len()-1); // number of pivots
-    let is_min = (level / Self::dim()) % 2 != 0;
-    let mut pivots = (None,None);
-    match level % Self::dim() {
-      0 => {
-        let mut ps = match sorted.0.len() {
-          0 => panic!["not enough data to create a branch"],
-          1 => match &(inserts[sorted.0[0]].0).0 {
-            Coord::Scalar(x) => {
-              vec![find_separation(x,x,x,x,is_min)]
-            },
-            Coord::Interval(min,max) => {
-              vec![find_separation(min,max,min,max,is_min)]
-            }
-          },
-          2 => {
-            let a = match &(inserts[sorted.0[0]].0).0 {
-              Coord::Scalar(x) => (x,x),
-              Coord::Interval(min,max) => (min,max),
-            };
-            let b = match &(inserts[sorted.0[1]].0).0 {
-              Coord::Scalar(x) => (x,x),
-              Coord::Interval(min,max) => (min,max),
-            };
-            vec![find_separation(a.0,a.1,b.0,b.1,is_min)]
-          },
-          _ => {
-            (0..n).map(|k| {
-              let m = k * sorted.0.len() / (n+1);
-              let a = match &(inserts[sorted.0[m+0]].0).0 {
-                Coord::Scalar(x) => (x,x),
-                Coord::Interval(min,max) => (min,max),
-              };
-              let b = match &(inserts[sorted.0[m+1]].0).0 {
-                Coord::Scalar(x) => (x,x),
-                Coord::Interval(min,max) => (min,max),
-              };
-              find_separation(a.0,a.1,b.0,b.1,is_min)
-            }).collect()
+    #[derive(Debug)]
+    pub struct $B<$($T),+,V> where $($T: Scalar),+, V: Value {
+      pub pivots: ($(Option<Vec<$T>>),+),
+      pub intersections: Vec<Arc<$N<$($T),+,V>>>,
+      pub nodes: Vec<Arc<$N<$($T),+,V>>>,
+    }
+
+    impl<$($T),+,V> $B<$($T),+,V> where $($T: Scalar),+, V: Value {
+      fn dim() -> usize { 2 }
+      pub fn build(branch_factor: usize, inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>)
+      -> $N<$($T),+,V> {
+        let sorted = ($(
+          {
+            let mut xs: Vec<usize> = (0..inserts.len()).collect();
+            xs.sort_unstable_by(|a,b| {
+              coord_cmp(&(inserts[*a].0).$i,&(inserts[*b].0).$i).unwrap()
+            });
+            xs
           }
-        };
-        ps.sort_unstable_by(|a,b| {
-          a.partial_cmp(b).unwrap()
-        });
-        pivots.0 = Some(ps);
-      },
-      1 => {
-        let mut ps = match sorted.1.len() {
-          0 => panic!["not enough data to create a branch"],
-          1 => match &(inserts[sorted.1[0]].0).1 {
-            Coord::Scalar(x) => {
-              vec![find_separation(x,x,x,x,is_min)]
-            },
-            Coord::Interval(min,max) => {
-              vec![find_separation(min,max,min,max,is_min)]
-            }
-          },
-          2 => {
-            let a = match &(inserts[sorted.1[0]].0).1 {
-              Coord::Scalar(x) => (x,x),
-              Coord::Interval(min,max) => (min,max),
-            };
-            let b = match &(inserts[sorted.1[1]].0).1 {
-              Coord::Scalar(x) => (x,x),
-              Coord::Interval(min,max) => (min,max),
-            };
-            vec![find_separation(a.0,a.1,b.0,b.1,is_min)]
-          },
-          _ => {
-            (0..n).map(|k| {
-              let m = k * sorted.1.len() / (n+1);
-              let a = match &(inserts[sorted.1[m+0]].0).1 {
-                Coord::Scalar(x) => (x,x),
-                Coord::Interval(min,max) => (min,max),
-              };
-              let b = match &(inserts[sorted.1[m+1]].0).1 {
-                Coord::Scalar(x) => (x,x),
-                Coord::Interval(min,max) => (min,max),
-              };
-              find_separation(a.0,a.1,b.0,b.1,is_min)
-            }).collect()
-          }
-        };
-        ps.sort_unstable_by(|a,b| {
-          a.partial_cmp(b).unwrap()
-        });
-        pivots.1 = Some(ps);
-      },
-      _ => panic!["unexpected level modulo dimension"]
-    };
-
-    let intersections: Vec<Arc<Node2<X,Y,V>>> = match level % Self::dim() {
-      0 => pivots.0.as_ref().unwrap().iter().map(|pivot| {
-        let indexes: Vec<usize> = sorted.0.iter()
-          .map(|j| *j)
-          .filter(|j| {
-            !matched[*j] && intersect_pivot(&(inserts[*j].0).0, pivot)
-          })
-          .collect();
-        if indexes.len() == sorted.0.len() {
-          return Arc::new(Node2::Data(indexes.iter().map(|i| {
-            let pv = &inserts[*i];
-            matched[*i] = true;
-            (((pv.0).0.clone(),(pv.0).1.clone()),pv.1.clone())
-          }).collect()));
-        }
-        let b = Branch2::from_sorted(
-          branch_factor,
-          level+1,
-          inserts,
-          (
-            &indexes,
-            sorted.1.iter()
-              .map(|j| *j)
-              .filter(|j| {
-                !matched[*j] && intersect_pivot(&(inserts[*j].0).0, pivot)
-              })
-              .collect::<Vec<usize>>().as_slice()
-          ),
-          matched,
-          max_depth
+        ),+);
+        let mut max_depth = 0;
+        let root = Self::from_sorted(
+          branch_factor, 0, Arc::clone(&inserts),
+          ($(sorted.$i),+),
+          &mut vec![false;inserts.len()],
+          &mut max_depth
         );
-        Arc::new(b)
-      }).collect(),
-      1 => pivots.1.as_ref().unwrap().iter().map(|pivot| {
-        let indexes: Vec<usize> = sorted.1.iter()
-          .map(|j| *j)
-          .filter(|j| {
-            !matched[*j] && intersect_pivot(&(inserts[*j].0).1, pivot)
-          })
-          .collect();
-        if indexes.len() == sorted.1.len() {
-          return Arc::new(Node2::Data(indexes.iter().map(|i| {
-            let pv = &inserts[*i];
-            matched[*i] = true;
-            (((pv.0).0.clone(),(pv.0).1.clone()),pv.1.clone())
-          }).collect()));
-        }
-        let b = Branch2::from_sorted(
-          branch_factor,
-          level+1,
-          inserts,
-          (
-            sorted.0.iter()
-              .map(|j| *j)
-              .filter(|j| {
-                !matched[*j] && intersect_pivot(&(inserts[*j].0).1, pivot)
-              })
-              .collect::<Vec<usize>>().as_slice(),
-            &indexes
-          ),
-          matched,
-          max_depth
-        );
-        Arc::new(b)
-      }).collect(),
-      _ => panic!["unexpected level modulo dimension"]
-    };
-
-    let nodes = match level % Self::dim() {
-      0 => {
-        let pv = pivots.0.as_ref().unwrap();
-        let mut nodes: Vec<Arc<Node2<X,Y,V>>> = Vec::with_capacity(pv.len()+1);
-        nodes.push({
-          let pivot = pv.first().unwrap();
-          let next_sorted: (Vec<usize>,Vec<usize>) = (
-            sorted.0.iter().map(|j| *j).filter(|j| {
-              !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
-                == Some(std::cmp::Ordering::Less)
-            }).collect(),
-            sorted.1.iter().map(|j| *j).filter(|j| {
-              !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
-                == Some(std::cmp::Ordering::Less)
-            }).collect()
-          );
-          Arc::new(Branch2::from_sorted(
-            branch_factor,
-            level+1,
-            inserts,
-            (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-            matched,
-            max_depth
-          ))
-        });
-        let ranges = pv.iter().zip(pv.iter().skip(1));
-        for (start,end) in ranges {
-          let next_sorted: (Vec<usize>,Vec<usize>) = (
-            sorted.0.iter().map(|j| *j).filter(|j| {
-              !matched[*j] && intersect_coord(&(inserts[*j].0).0, start, end)
-            }).collect(),
-            sorted.1.iter().map(|j| *j).filter(|j| {
-              !matched[*j] && intersect_coord(&(inserts[*j].0).0, start, end)
-            }).collect()
-          );
-          nodes.push(Arc::new(Branch2::from_sorted(
-            branch_factor,
-            level+1,
-            inserts,
-            (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-            matched,
-            max_depth
-          )));
-        }
-        if pv.len() > 1 {
-          nodes.push({
-            let pivot = pv.first().unwrap();
-            let next_sorted: (Vec<usize>,Vec<usize>) = (
-              sorted.0.iter().map(|j| *j).filter(|j| {
-                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
-                  == Some(std::cmp::Ordering::Greater)
-              }).collect(),
-              sorted.1.iter().map(|j| *j).filter(|j| {
-                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).0, pivot)
-                  == Some(std::cmp::Ordering::Greater)
-              }).collect()
-            );
-            Arc::new(Branch2::from_sorted(
-              branch_factor,
-              level+1,
-              inserts,
-              (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-              matched,
-              max_depth
-            ))
-          });
-        }
-        nodes
-      },
-      1 => {
-        let pv = pivots.1.as_ref().unwrap();
-        let mut nodes: Vec<Arc<Node2<X,Y,V>>> = Vec::with_capacity(pv.len()+1);
-        nodes.push({
-          let pivot = pv.first().unwrap();
-          let next_sorted: (Vec<usize>,Vec<usize>) = (
-            sorted.0.iter().map(|j| *j).filter(|j| {
-              !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
-                == Some(std::cmp::Ordering::Less)
-            }).collect(),
-            sorted.1.iter().map(|j| *j).filter(|j| {
-              !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
-                == Some(std::cmp::Ordering::Less)
-            }).collect()
-          );
-          Arc::new(Branch2::from_sorted(
-            branch_factor,
-            level+1,
-            inserts,
-            (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-            matched,
-            max_depth
-          ))
-        });
-        let ranges = pv.iter().zip(pv.iter().skip(1));
-        for (start,end) in ranges {
-          let next_sorted: (Vec<usize>,Vec<usize>) = (
-            sorted.0.iter().map(|j| *j).filter(|j| {
-              !matched[*j] && intersect_coord(&(inserts[*j].0).1, start, end)
-            }).collect(),
-            sorted.1.iter().map(|j| *j).filter(|j| {
-              !matched[*j] && intersect_coord(&(inserts[*j].0).1, start, end)
-            }).collect()
-          );
-          nodes.push(Arc::new(Branch2::from_sorted(
-            branch_factor,
-            level+1,
-            inserts,
-            (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-            matched,
-            max_depth
-          )));
-        }
-        if pv.len() > 1 {
-          nodes.push({
-            let pivot = pv.first().unwrap();
-            let next_sorted: (Vec<usize>,Vec<usize>) = (
-              sorted.0.iter().map(|j| *j).filter(|j| {
-                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
-                  == Some(std::cmp::Ordering::Greater)
-              }).collect(),
-              sorted.1.iter().map(|j| *j).filter(|j| {
-                !matched[*j] && coord_cmp_pivot(&(inserts[*j].0).1, pivot)
-                  == Some(std::cmp::Ordering::Greater)
-              }).collect()
-            );
-            Arc::new(Branch2::from_sorted(
-              branch_factor,
-              level+1,
-              inserts,
-              (next_sorted.0.as_slice(), next_sorted.1.as_slice()),
-              matched,
-              max_depth
-            ))
-          });
-        }
-        nodes
-      },
-      _ => panic!["unexpected level modulo dimension"]
-    };
-
-    let node_count = nodes.iter().fold(0usize, |count,node| {
-      count + match node.as_ref() {
-        Node2::Data(bs) => if bs.is_empty() { 0 } else { 1 },
-        Node2::Branch(_) => 1,
+        //eprintln!["max_depth={}", max_depth];
+        root
       }
-    });
-    if node_count <= 1 {
-      return Node2::Data(sorted.0.iter().map(|i| {
-        let ((x,y),v) = &inserts[*i];
-        matched[*i] = true;
-        ((x.clone(),y.clone()),(*v).clone())
-      }).collect());
-    }
+      fn from_sorted(branch_factor: usize, level: usize,
+      inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>, sorted: ($(Vec<$u>),+),
+      matched: &mut [bool], max_depth: &mut usize) -> $N<$($T),+,V> {
+        *max_depth = level.max(*max_depth);
+        if sorted.0.len() == 0 {
+          return $N::Data(vec![]);
+        } else if sorted.0.len() < branch_factor {
+          return $N::Data(sorted.0.iter().map(|i| {
+            matched[*i] = true;
+            let pv = &inserts[*i];
+            (($((pv.0).$i.clone()),+),pv.1.clone())
+          }).collect());
+        }
+        let n = (branch_factor-1).min(sorted.0.len()-1); // number of pivots
+        let is_min = (level / Self::dim()) % 2 != 0;
+        let mut pivots = ($($n),+);
+        match level % Self::dim() {
+          $($i => {
+            let mut ps = match sorted.$i.len() {
+              0 => panic!["not enough data to create a branch"],
+              1 => match &(inserts[sorted.$i[0]].0).$i {
+                Coord::Scalar(x) => {
+                  vec![find_separation(x,x,x,x,is_min)]
+                },
+                Coord::Interval(min,max) => {
+                  vec![find_separation(min,max,min,max,is_min)]
+                }
+              },
+              2 => {
+                let a = match &(inserts[sorted.$i[0]].0).$i {
+                  Coord::Scalar(x) => (x,x),
+                  Coord::Interval(min,max) => (min,max),
+                };
+                let b = match &(inserts[sorted.$i[1]].0).$i {
+                  Coord::Scalar(x) => (x,x),
+                  Coord::Interval(min,max) => (min,max),
+                };
+                vec![find_separation(a.0,a.1,b.0,b.1,is_min)]
+              },
+              _ => {
+                (0..n).map(|k| {
+                  let m = k * sorted.$i.len() / (n+1);
+                  let a = match &(inserts[sorted.$i[m+0]].0).$i {
+                    Coord::Scalar(x) => (x,x),
+                    Coord::Interval(min,max) => (min,max),
+                  };
+                  let b = match &(inserts[sorted.$i[m+1]].0).$i {
+                    Coord::Scalar(x) => (x,x),
+                    Coord::Interval(min,max) => (min,max),
+                  };
+                  find_separation(a.0,a.1,b.0,b.1,is_min)
+                }).collect()
+              }
+            };
+            ps.sort_unstable_by(|a,b| {
+              a.partial_cmp(b).unwrap()
+            });
+            pivots.$i = Some(ps);
+          }),+,
+          _ => panic!["unexpected level modulo dimension"]
+        };
 
-    Node2::Branch(Self {
-      pivots,
-      intersections,
-      nodes,
-    })
+        let intersections: Vec<Arc<$N<$($T),+,V>>> = match level % Self::dim() {
+          $($i => pivots.$i.as_ref().unwrap().iter().map(|pivot| {
+            let new_sorted = Self::filter_sorted(
+              pivot,
+              &sorted,
+              matched,
+              Arc::clone(&inserts),
+              Box::new(|pivot, inserts, j: &usize| {
+                intersect_pivot(&(inserts[*j].0).$i, pivot)
+              })
+            );
+            if new_sorted.0.len() == sorted.0.len() {
+              return Arc::new($N::Data(new_sorted.0.iter().map(|i| {
+                let pv = &inserts[*i];
+                matched[*i] = true;
+                (pv.0.clone(),pv.1.clone())
+              }).collect()));
+            }
+            let b = $B::from_sorted(
+              branch_factor,
+              level+1,
+              Arc::clone(&inserts),
+              new_sorted,
+              matched,
+              max_depth
+            );
+            Arc::new(b)
+          }).collect()),+,
+          _ => panic!["unexpected level modulo dimension"]
+        };
+
+        let nodes = match level % Self::dim() {
+          $($i => {
+            let pv = pivots.$i.as_ref().unwrap();
+            let mut nodes = Vec::with_capacity(pv.len()+1);
+            nodes.push({
+              let pivot = pv.first().unwrap();
+              let next_sorted = Self::filter_sorted(
+                pivot,
+                &sorted,
+                matched,
+                Arc::clone(&inserts),
+                Box::new(|pivot, inserts, j: &usize| {
+                  coord_cmp_pivot(&(inserts[*j].0).$i, pivot)
+                    == Some(std::cmp::Ordering::Less)
+                })
+              );
+              Arc::new($B::from_sorted(
+                branch_factor,
+                level+1,
+                Arc::clone(&inserts),
+                next_sorted,
+                matched,
+                max_depth
+              ))
+            });
+            let ranges = pv.iter().zip(pv.iter().skip(1));
+            for (start,end) in ranges {
+              let next_sorted = Self::filter_sorted_range(
+                (start,end),
+                &sorted,
+                matched,
+                Arc::clone(&inserts),
+                Box::new(|(start,end), inserts, j: &usize| {
+                  intersect_coord(&(inserts[*j].0).$i, start, end)
+                })
+              );
+              nodes.push(Arc::new($B::from_sorted(
+                branch_factor,
+                level+1,
+                Arc::clone(&inserts),
+                next_sorted,
+                matched,
+                max_depth
+              )));
+            }
+            if pv.len() > 1 {
+              nodes.push({
+                let pivot = pv.first().unwrap();
+                let next_sorted = Self::filter_sorted(
+                  pivot,
+                  &sorted,
+                  matched,
+                  Arc::clone(&inserts),
+                  Box::new(|pivot, inserts, j: &usize| {
+                    coord_cmp_pivot(&(inserts[*j].0).$i, pivot)
+                      == Some(std::cmp::Ordering::Greater)
+                  })
+                );
+                Arc::new($B::from_sorted(
+                  branch_factor,
+                  level+1,
+                  Arc::clone(&inserts),
+                  next_sorted,
+                  matched,
+                  max_depth
+                ))
+              });
+            }
+            nodes
+          }),+,
+          _ => panic!["unexpected level modulo dimension"]
+        };
+
+        let node_count = nodes.iter().fold(0usize, |count,node| {
+          count + match node.as_ref() {
+            $N::Data(bs) => if bs.is_empty() { 0 } else { 1 },
+            $N::Branch(_) => 1,
+          }
+        });
+        if node_count <= 1 {
+          return $N::Data(sorted.0.iter().map(|i| {
+            let (p,v) = &inserts[*i];
+            matched[*i] = true;
+            ((*p).clone(),(*v).clone())
+          }).collect());
+        }
+
+        $N::Branch(Self {
+          pivots,
+          intersections,
+          nodes,
+        })
+      }
+      fn filter_sorted<X>(pivot: &X, sorted: &($(Vec<$u>),+),
+      matched: &[bool], inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>,
+      f: Box<dyn Fn (&X,Arc<Vec<(&($(Coord<$T>),+),&V)>>, &usize) -> bool>)
+      -> ($(Vec<$u>),+) where X: Scalar {
+        ($({
+          sorted.$i.iter()
+            .map(|j| *j)
+            .filter(|j| !matched[*j])
+            .fold((&inserts,vec![]), |(inserts, mut res), j| {
+              if f(pivot, Arc::clone(inserts), &j) { res.push(j) }
+              (inserts,res)
+            }).1
+        }),+)
+      }
+      fn filter_sorted_range<X>(range: (&X,&X), sorted: &($(Vec<$u>),+),
+      matched: &[bool], inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>,
+      f: Box<dyn Fn ((&X,&X),Arc<Vec<(&($(Coord<$T>),+),&V)>>, &usize) -> bool>)
+      -> ($(Vec<$u>),+) where X: Scalar, $($T: Scalar),+ {
+        ($({
+          sorted.$i.iter()
+            .map(|j| *j)
+            .filter(|j| !matched[*j])
+            .fold((&inserts,vec![]), |(inserts, mut res), j| {
+              if f(range, Arc::clone(inserts), &j) { res.push(j) }
+              (inserts,res)
+            }).1
+        }),+)
+      }
+    }
   }
 }
+
+impl_branch![Branch2,Node2,(P0,P1),(0,1),(usize,usize),(None,None),2];
+//impl_branch![Branch3,Node3,(P0,P1,P2),(0,1,2),(usize,usize,usize),(None,None,None),3];
 
 #[async_trait::async_trait]
 pub trait Tree<P,V>: Send+Sync+ToBytes where P: Point, V: Value {
-  fn build(branch_factor: usize, rows: &[(&P,&V)]) -> Self where Self: Sized;
+  fn build(branch_factor: usize, rows: Arc<Vec<(&P,&V)>>) -> Self where Self: Sized;
   fn list(&mut self) -> Vec<(P,V)>;
   fn query(&mut self, bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>;
 }
@@ -407,12 +290,12 @@ where P: Point, V: Value, T: Tree<P,V> {
     }).collect::<Vec<_>>());
   }
   // todo: split large intersecting buckets
-  T::build(branch_factor, rows.as_slice())
+  T::build(branch_factor, Arc::new(rows))
 }
 
 #[async_trait::async_trait]
 impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
-  fn build(branch_factor: usize, rows: &[(&(Coord<X>,Coord<Y>),&V)]) -> Self {
+  fn build(branch_factor: usize, rows: Arc<Vec<(&(Coord<X>,Coord<Y>),&V)>>) -> Self {
     let ibounds = (
       match (rows[0].0).0.clone() {
         Coord::Scalar(x) => x,
@@ -432,7 +315,7 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
       }
     );
     Self {
-      root: Arc::new(Branch2::build(branch_factor, rows)),
+      root: Arc::new(Branch2::build(branch_factor, Arc::clone(&rows))),
       count: rows.len(),
       bounds: rows[1..].iter().fold(ibounds, |bounds,row| {
         (

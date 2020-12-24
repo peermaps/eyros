@@ -52,7 +52,7 @@ impl<X,Y> Point for (Coord<X>,Coord<Y>) where X: Scalar, Y: Scalar {
   type Bounds = ((X,Y),(X,Y));
   async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
   where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, T: Tree<(Coord<X>,Coord<Y>),V> {
-    let inserts: Vec<(&(Coord<X>,Coord<Y>),&V)> = rows.iter()
+    let inserts: Vec<(&Self,&V)> = rows.iter()
       .map(|row| match row {
         Row::Insert(p,v) => Some((p,v)),
         _ => None
