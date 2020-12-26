@@ -467,7 +467,7 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
 impl<X,Y,V> Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
   async fn load<S>(storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
   r: TreeRef) -> Result<Self,Error> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
-    let mut s = storage.lock().await.open(&r.to_string()).await?;
+    let mut s = storage.lock().await.open(&format!["tree/{}",r.to_string()]).await?;
     let bytes = s.read(0, s.len().await?).await?;
     Ok(Self::from_bytes(&bytes)?.1)
   }
