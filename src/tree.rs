@@ -1,7 +1,10 @@
-use desert::ToBytes;
-use crate::{Scalar,Point,Value,Coord,Location,query::QStream};
+use desert::{ToBytes,FromBytes};
+use crate::{Scalar,Point,Value,Coord,Location,query::QStream,Error,Storage};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
+use random_access_storage::RandomAccess;
+
+pub type TreeRef = u64;
 
 macro_rules! impl_branch {
   ($B:ident,$N:ident,($($T:tt),+),($($i:tt),+),($($u:ty),+),($($n:tt),+),$dim:expr) => {
@@ -9,7 +12,7 @@ macro_rules! impl_branch {
     pub enum $N<$($T),+,V> where $($T: Scalar),+, V: Value {
       Branch($B<$($T),+,V>),
       Data(Vec<(($(Coord<$T>),+),V)>),
-      //Ref(u64)
+      Ref(TreeRef)
     }
     #[derive(Debug)]
     pub struct $B<$($T),+,V> where $($T: Scalar),+, V: Value {
@@ -211,6 +214,7 @@ macro_rules! impl_branch {
           count + match node.as_ref() {
             $N::Data(bs) => if bs.is_empty() { 0 } else { 1 },
             $N::Branch(_) => 1,
+            $N::Ref(_) => 1,
           }
         });
         if node_count <= 1 {
@@ -265,8 +269,10 @@ impl_branch![Branch2,Node2,(P0,P1),(0,1),(usize,usize),(None,None),2];
 #[async_trait::async_trait]
 pub trait Tree<P,V>: Send+Sync+ToBytes where P: Point, V: Value {
   fn build(branch_factor: usize, rows: Arc<Vec<(&P,&V)>>) -> Self where Self: Sized;
-  fn list(&mut self) -> Vec<(P,V)>;
-  fn query(&mut self, bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>;
+  fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef>);
+  fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
+    bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
+    where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static;
 }
 
 #[derive(Debug)]
@@ -279,8 +285,11 @@ pub struct Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
 pub async fn merge<T,P,V>(branch_factor: usize, inserts: &[(&P,&V)], trees: &[Arc<Mutex<T>>]) -> T
 where P: Point, V: Value, T: Tree<P,V> {
   let mut lists = vec![];
+  let mut refs = vec![];
   for tree in trees.iter() {
-    lists.push(tree.lock().await.list());
+    let (list,xrefs) = tree.lock().await.list();
+    lists.push(list);
+    refs.extend(xrefs);
   }
   let mut rows = vec![];
   rows.extend_from_slice(inserts);
@@ -289,7 +298,9 @@ where P: Point, V: Value, T: Tree<P,V> {
       (&pv.0,&pv.1)
     }).collect::<Vec<_>>());
   }
-  // todo: split large intersecting buckets
+  // TODO: merge overlapping refs
+  // TODO: split large intersecting buckets
+  // TODO: include refs into build()
   T::build(branch_factor, Arc::new(rows))
 }
 
@@ -327,9 +338,10 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
       })
     }
   }
-  fn list(&mut self) -> Vec<((Coord<X>,Coord<Y>),V)> {
+  fn list(&mut self) -> (Vec<((Coord<X>,Coord<Y>),V)>,Vec<TreeRef>) {
     let mut cursors = vec![Arc::clone(&self.root)];
     let mut rows = vec![];
+    let mut refs = vec![];
     while let Some(c) = cursors.pop() {
       match c.as_ref() {
         Node2::Branch(branch) => {
@@ -344,26 +356,42 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
           rows.extend(data.iter().map(|pv| {
             (pv.0.clone(),pv.1.clone())
           }).collect::<Vec<_>>());
-        }
+        },
+        Node2::Ref(r) => {
+          refs.push(*r);
+        },
       }
     }
-    rows
+    (rows,refs)
   }
-  fn query(&mut self, bbox: &((X,Y),(X,Y))) -> Arc<Mutex<QStream<(Coord<X>,Coord<Y>),V>>> {
+  fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
+  bbox: &((X,Y),(X,Y))) -> Arc<Mutex<QStream<(Coord<X>,Coord<Y>),V>>>
+  where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {
     let istate = (
       bbox.clone(),
       vec![], // queue
-      vec![(0usize,Arc::clone(&self.root))] // cursors
+      vec![(0usize,Arc::clone(&self.root))], // cursors
+      vec![], // refs
+      Arc::clone(&storage), // storage
     );
     Arc::new(Mutex::new(Box::new(unfold(istate, async move |mut state| {
       let bbox = &state.0;
       let queue = &mut state.1;
       let cursors = &mut state.2;
+      let refs = &mut state.3;
+      let storage = &mut state.4;
       loop {
         if let Some(q) = queue.pop() {
           return Some((Ok(q),state));
         }
-        if cursors.is_empty() {
+        if cursors.is_empty() && !refs.is_empty() {
+          // TODO: use a tree LRU
+          match Self::load(Arc::clone(storage), refs.pop().unwrap()).await {
+            Err(e) => return Some((Err(e.into()),state)),
+            Ok(tree) => cursors.push((0usize,tree.root)),
+          };
+          continue;
+        } else if cursors.is_empty() {
           return None;
         }
         let (level,c) = cursors.pop().unwrap();
@@ -426,10 +454,22 @@ impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Sca
               })
               .collect::<Vec<_>>()
             );
+          },
+          Node2::Ref(r) => {
+            refs.push(*r);
           }
         }
       }
     }))))
+  }
+}
+
+impl<X,Y,V> Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
+  async fn load<S>(storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
+  r: TreeRef) -> Result<Self,Error> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
+    let mut s = storage.lock().await.open(&r.to_string()).await?;
+    let bytes = s.read(0, s.len().await?).await?;
+    Ok(Self::from_bytes(&bytes)?.1)
   }
 }
 

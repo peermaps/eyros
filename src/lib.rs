@@ -79,18 +79,18 @@ pub enum Row<P,V> where P: Point, V: Value {
 
 pub struct DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync,
 P: Point, V: Value, T: Tree<P,V> {
-  pub storage: Box<dyn Storage<S>+Unpin+Send+Sync>,
+  pub storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
   pub fields: SetupFields,
   pub trees: Vec<Option<Arc<Mutex<T>>>>,
   _point: std::marker::PhantomData<P>,
   _value: std::marker::PhantomData<V>,
 }
 
-impl<S,T,P,V> DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync,
+impl<S,T,P,V> DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static,
 P: Point, V: Value, T: Tree<P,V> {
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
     Ok(Self {
-      storage: setup.storage.into(),
+      storage: Arc::clone(&setup.storage),
       fields: setup.fields,
       trees: vec![],
       _point: std::marker::PhantomData,
@@ -104,7 +104,7 @@ P: Point, V: Value, T: Tree<P,V> {
     let mut queries = vec![];
     for tree in self.trees.iter() {
       if let Some(t) = tree {
-        queries.push(t.lock().await.query(bbox));
+        queries.push(t.lock().await.query(Arc::clone(&self.storage), bbox));
       }
     }
     <QueryStream<P,V>>::from_queries(queries)

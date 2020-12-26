@@ -6,6 +6,7 @@ use std::path::{Path,PathBuf};
 type S = RandomAccessDisk;
 #[cfg(not(feature="wasm"))]
 use random_access_disk::RandomAccessDisk;
+use async_std::sync::{Arc,Mutex};
 
 #[cfg(feature="wasm")]
 use crate::Error;
@@ -53,7 +54,7 @@ impl Setup<S> {
   /// Create a new `Setup` builder from a string file path.
   pub fn from_path (path: &Path) -> Self {
     Self {
-      storage: Box::new(FileStore::open(Path::new(path))),
+      storage: Arc::new(Mutex::new(Box::new(FileStore::open(Path::new(path))))),
       fields: SetupFields::default()
     }
   }

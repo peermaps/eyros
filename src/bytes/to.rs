@@ -1,5 +1,5 @@
 use desert::{ToBytes,CountBytes};
-use crate::{Coord,Scalar,Value,tree::{Tree2,Branch2,Node2},bytes::varint};
+use crate::{Coord,Scalar,Value,tree::{Tree2,Branch2,Node2,TreeRef},bytes::varint};
 use failure::Error;
 use std::collections::HashMap;
 
@@ -26,7 +26,10 @@ impl<X,Y,V> ToBytes for Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
         offset += ((hsize*3+0) as u32).write_bytes(&mut buf[offset..])?;
         //assert_eq![offset, hsize, "offset ({}) != hsize ({})", offset, hsize];
         write_branch_bytes(branch, &alloc, offset, &mut buf)?;
-      }
+      },
+      Node2::Ref(r) => {
+        write_ref_bytes(*r, &mut buf[offset..])?;
+      },
     }
     Ok(buf)
   }
@@ -56,7 +59,8 @@ where X: Scalar, Y: Scalar, V: Value {
           }
         }
         index += 1;
-      }
+      },
+      Node2::Ref(_r) => {}
     }
   }
   (alloc,offset)
@@ -85,6 +89,9 @@ i_offset: usize, buf: &mut [u8]) -> Result<usize,Error> where X: Scalar, Y: Scal
           },
           Node2::Data(data) => {
             offset += write_data_bytes(data, &mut buf[offset..])?;
+          },
+          Node2::Ref(r) => {
+            offset += write_ref_bytes(*r, &mut buf[offset..])?;
           }
         }
       }
@@ -134,4 +141,8 @@ where X: Scalar, Y: Scalar, V: Value {
     offset += row.1.write_bytes(&mut buf[offset..])?;
   }
   Ok(offset)
+}
+
+fn write_ref_bytes(r: TreeRef, buf: &mut [u8]) -> Result<usize,Error> {
+  ((r*3+2) as u32).write_bytes(buf)
 }

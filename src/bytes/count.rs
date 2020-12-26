@@ -32,6 +32,7 @@ impl<X,Y,V> CountBytes for Node2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
         + rows.iter().fold(0usize, |sum,row| {
           sum + count_point_bytes(&row.0) + row.1.count_bytes()
         }),
+      Node2::Ref(_r) => 4,
     }
   }
   fn count_from_bytes(_src: &[u8]) -> Result<usize,Error> {
