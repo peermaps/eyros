@@ -1,10 +1,11 @@
 use desert::FromBytes;
-use crate::{Scalar,Coord,Value,bytes::varint};
+use crate::{Scalar,Coord,Value,bytes::varint,tree::TreeRef};
 use failure::Error;
 use async_std::sync::Arc;
 
 macro_rules! impl_from_bytes {
-  ($Tree:ident, $Branch:ident, $Node:ident, $parse_branch:ident, $parse_data:ident,
+  ($Tree:ident, $Branch:ident, $Node:ident,
+  $parse_branch:ident, $parse_data:ident,
   ($($i:tt,$T:tt),+),($($n:tt),+),$dim:expr) => {
     use crate::tree::{$Tree,$Branch,$Node};
     impl<$($T),+,V> FromBytes for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
@@ -39,7 +40,10 @@ macro_rules! impl_from_bytes {
             offset += s;
             data
           },
-          _ => panic!["tree pointer not implemented at root"]
+          2 => {
+            $Node::Ref((n/3) as TreeRef)
+          },
+          _ => panic!["unexpected value for n%3: {}", n%3]
         };
         Ok((offset, $Tree {
           root: Arc::new(root),
@@ -76,9 +80,10 @@ macro_rules! impl_from_bytes {
             offset += s;
             intersections.push(Arc::new(data));
           },
-          _ => {
-            panic!["external trees not implemented"]
-          }
+          2 => {
+            intersections.push(Arc::new($Node::Ref((n/3) as TreeRef)));
+          },
+          _ => panic!["unexpected value for n%3: {}", n%3]
         }
       }
       let mut nodes = vec![];
@@ -94,9 +99,10 @@ macro_rules! impl_from_bytes {
             offset += s;
             nodes.push(Arc::new(data));
           },
-          _ => {
-            panic!["external trees not implemented"]
-          }
+          2 => {
+            intersections.push(Arc::new($Node::Ref((n/3) as TreeRef)));
+          },
+          _ => panic!["unexpected value for n%3: {}", n%3]
         }
       }
       Ok($Node::Branch($Branch {
