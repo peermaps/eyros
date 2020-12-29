@@ -146,13 +146,38 @@ fn write_ref_bytes(r: TreeRef, buf: &mut [u8]) -> Result<usize,Error> {
   ((r*3+2) as u32).write_bytes(buf)
 }
 
-impl_to_bytes![
+#[cfg(feature="2d")] impl_to_bytes![
   Tree2, Branch2, Node2,
   allocate2, write_branch_bytes2, write_point_bytes2, write_data_bytes2,
   (0,1), (P0,P1)
 ];
-impl_to_bytes![
+#[cfg(feature="3d")] impl_to_bytes![
   Tree3, Branch3, Node3,
   allocate3, write_branch_bytes3, write_point_bytes3, write_data_bytes3,
   (0,1,2), (P0,P1,P2)
+];
+#[cfg(feature="4d")] impl_to_bytes![
+  Tree4, Branch4, Node4,
+  allocate4, write_branch_bytes4, write_point_bytes4, write_data_bytes4,
+  (0,1,2,3), (P0,P1,P2,P3)
+];
+#[cfg(feature="5d")] impl_to_bytes![
+  Tree5, Branch5, Node5,
+  allocate5, write_branch_bytes5, write_point_bytes5, write_data_bytes5,
+  (0,1,2,3,4), (P0,P1,P2,P3,P4)
+];
+#[cfg(feature="6d")] impl_to_bytes![
+  Tree6, Branch6, Node6,
+  allocate6, write_branch_bytes6, write_point_bytes6, write_data_bytes6,
+  (0,1,2,3,4,5), (P0,P1,P2,P3,P4,P5)
+];
+#[cfg(feature="7d")] impl_to_bytes![
+  Tree7, Branch7, Node7,
+  allocate7, write_branch_bytes7, write_point_bytes7, write_data_bytes7,
+  (0,1,2,3,4,5,6), (P0,P1,P2,P3,P4,P5,P6)
+];
+#[cfg(feature="8d")] impl_to_bytes![
+  Tree8, Branch8, Node8,
+  allocate8, write_branch_bytes8, write_point_bytes8, write_data_bytes8,
+  (0,1,2,3,4,5,6,7), (P0,P1,P2,P3,P4,P5,P6,P7)
 ];

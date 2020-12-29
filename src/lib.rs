@@ -76,8 +76,13 @@ macro_rules! impl_point {
   }
 }
 
-impl_point![P0,P1];
-impl_point![P0,P1,P2];
+#[cfg(feature="2d")] impl_point![P0,P1];
+#[cfg(feature="3d")] impl_point![P0,P1,P2];
+#[cfg(feature="4d")] impl_point![P0,P1,P2,P3];
+#[cfg(feature="5d")] impl_point![P0,P1,P2,P3,P4];
+#[cfg(feature="6d")] impl_point![P0,P1,P2,P3,P4,P5];
+#[cfg(feature="7d")] impl_point![P0,P1,P2,P3,P4,P5,P6];
+#[cfg(feature="8d")] impl_point![P0,P1,P2,P3,P4,P5,P6,P7];
 
 pub enum Row<P,V> where P: Point, V: Value {
   Insert(P,V),

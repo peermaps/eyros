@@ -143,5 +143,28 @@ macro_rules! impl_from_bytes {
   }
 }
 
-impl_from_bytes![Tree2,Branch2,Node2,parse_branch2,parse_data2,(0,P0,1,P1),(None,None),2];
-impl_from_bytes![Tree3,Branch3,Node3,parse_branch3,parse_data3,(0,P0,1,P1,2,P2),(None,None,None),3];
+#[cfg(feature="2d")] impl_from_bytes![
+  Tree2,Branch2,Node2,parse_branch2,parse_data2,(0,P0,1,P1),(None,None),2
+];
+#[cfg(feature="3d")] impl_from_bytes![
+  Tree3,Branch3,Node3,parse_branch3,parse_data3,(0,P0,1,P1,2,P2),(None,None,None),3
+];
+#[cfg(feature="4d")] impl_from_bytes![
+  Tree4,Branch4,Node4,parse_branch4,parse_data4,(0,P0,1,P1,2,P2,3,P3),(None,None,None,None),4
+];
+#[cfg(feature="5d")] impl_from_bytes![
+  Tree5,Branch5,Node5,parse_branch5,parse_data5,
+  (0,P0,1,P1,2,P2,3,P3,4,P4),(None,None,None,None,None),5
+];
+#[cfg(feature="6d")] impl_from_bytes![
+  Tree6,Branch6,Node6,parse_branch6,parse_data6,
+  (0,P0,1,P1,2,P2,3,P3,4,P4,5,P5),(None,None,None,None,None,None),6
+];
+#[cfg(feature="7d")] impl_from_bytes![
+  Tree7,Branch7,Node7,parse_branch7,parse_data7,
+  (0,P0,1,P1,2,P2,3,P3,4,P4,5,P5,6,P6),(None,None,None,None,None,None,None),7
+];
+#[cfg(feature="8d")] impl_from_bytes![
+  Tree8,Branch8,Node8,parse_branch8,parse_data8,
+  (0,P0,1,P1,2,P2,3,P3,4,P4,5,P5,6,P6,7,P7),(None,None,None,None,None,None,None,None),8
+];

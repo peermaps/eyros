@@ -6,7 +6,7 @@ use random_access_storage::RandomAccess;
 
 pub type TreeRef = u64;
 
-macro_rules! impl_branch {
+macro_rules! impl_tree {
   ($Tree:ident,$Branch:ident,$Node:ident,($($T:tt),+),($($i:tt),+),
   ($($j:tt),+),($($k:tt),+),($($cf:tt),+),
   ($($u:ty),+),($($n:tt),+),$dim:expr) => {
@@ -404,13 +404,42 @@ macro_rules! impl_branch {
   }
 }
 
-impl_branch![Tree2,Branch2,Node2,(P0,P1),(0,1),
+#[cfg(feature="2d")] impl_tree![Tree2,Branch2,Node2,(P0,P1),(0,1),
   (0,1,2,3),(0,1,0,1),(coord_min,coord_min,coord_max,coord_max),
   (usize,usize),(None,None),2
 ];
-impl_branch![Tree3,Branch3,Node3,(P0,P1,P2),(0,1,2),
+#[cfg(feature="3d")] impl_tree![Tree3,Branch3,Node3,(P0,P1,P2),(0,1,2),
   (0,1,2,3,4,5),(0,1,2,0,1,2),(coord_min,coord_min,coord_min,coord_max,coord_max,coord_max),
   (usize,usize,usize),(None,None,None),3
+];
+#[cfg(feature="4d")] impl_tree![Tree4,Branch4,Node4,(P0,P1,P2,P3),(0,1,2,3),
+  (0,1,2,3,4,5,6,7),(0,1,2,3,0,1,2,3),
+  (coord_min,coord_min,coord_min,coord_min,coord_max,coord_max,coord_max,coord_max),
+  (usize,usize,usize,usize),(None,None,None,None),4
+];
+#[cfg(feature="5d")] impl_tree![Tree5,Branch5,Node5,(P0,P1,P2,P3,P4),(0,1,2,3,4),
+  (0,1,2,3,4,5,6,7,8,9),(0,1,2,3,4,0,1,2,3,4),
+  (coord_min,coord_min,coord_min,coord_min,coord_min,
+    coord_max,coord_max,coord_max,coord_max,coord_max),
+  (usize,usize,usize,usize,usize),(None,None,None,None,None),5
+];
+#[cfg(feature="6d")] impl_tree![Tree6,Branch6,Node6,(P0,P1,P2,P3,P4,P5),(0,1,2,3,4,5),
+  (0,1,2,3,4,5,6,7,8,9,10,11),(0,1,2,3,4,5,0,1,2,3,4,5),
+  (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
+    coord_max,coord_max,coord_max,coord_max,coord_max,coord_max),
+  (usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None),6
+];
+#[cfg(feature="7d")] impl_tree![Tree7,Branch7,Node7,(P0,P1,P2,P3,P4,P5,P6),(0,1,2,3,4,5,6),
+  (0,1,2,3,4,5,6,7,8,9,10,11,12,13),(0,1,2,3,4,5,6,0,1,2,3,4,5,6),
+  (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
+    coord_max,coord_max,coord_max,coord_max,coord_max,coord_max,coord_max),
+  (usize,usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None,None),7
+];
+#[cfg(feature="8d")] impl_tree![Tree8,Branch8,Node8,(P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7),
+  (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15),(0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7),
+  (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
+    coord_max,coord_max,coord_max,coord_max,coord_max,coord_max,coord_max,coord_max),
+  (usize,usize,usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None,None,None),8
 ];
 
 #[async_trait::async_trait]

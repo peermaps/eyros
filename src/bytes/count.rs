@@ -56,5 +56,24 @@ macro_rules! impl_count_bytes {
   }
 }
 
-impl_count_bytes![Branch2,Node2,count_point_bytes2,(0,1),(P0,P1)];
-impl_count_bytes![Branch3,Node3,count_point_bytes3,(0,1,2),(P0,P1,P2)];
+#[cfg(feature="2d")] impl_count_bytes![
+  Branch2,Node2,count_point_bytes2,(0,1),(P0,P1)
+];
+#[cfg(feature="3d")] impl_count_bytes![
+  Branch3,Node3,count_point_bytes3,(0,1,2),(P0,P1,P2)
+];
+#[cfg(feature="4d")] impl_count_bytes![
+  Branch4,Node4,count_point_bytes4,(0,1,2,3),(P0,P1,P2,P3)
+];
+#[cfg(feature="5d")] impl_count_bytes![
+  Branch5,Node5,count_point_bytes5,(0,1,2,3,4),(P0,P1,P2,P3,P4)
+];
+#[cfg(feature="6d")] impl_count_bytes![
+  Branch6,Node6,count_point_bytes6,(0,1,2,3,4,5),(P0,P1,P2,P3,P4,P5)
+];
+#[cfg(feature="7d")] impl_count_bytes![
+  Branch7,Node7,count_point_bytes7,(0,1,2,3,4,5,6),(P0,P1,P2,P3,P4,P5,P6)
+];
+#[cfg(feature="8d")] impl_count_bytes![
+  Branch8,Node8,count_point_bytes8,(0,1,2,3,4,5,6,7),(P0,P1,P2,P3,P4,P5,P6,P7)
+];
