@@ -7,24 +7,26 @@ use random_access_storage::RandomAccess;
 pub type TreeRef = u64;
 
 macro_rules! impl_branch {
-  ($B:ident,$N:ident,($($T:tt),+),($($i:tt),+),($($u:ty),+),($($n:tt),+),$dim:expr) => {
+  ($Tree:ident,$Branch:ident,$Node:ident,($($T:tt),+),($($i:tt),+),
+  ($($j:tt),+),($($k:tt),+),($($cf:tt),+),
+  ($($u:ty),+),($($n:tt),+),$dim:expr) => {
     #[derive(Debug)]
-    pub enum $N<$($T),+,V> where $($T: Scalar),+, V: Value {
-      Branch($B<$($T),+,V>),
+    pub enum $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
+      Branch($Branch<$($T),+,V>),
       Data(Vec<(($(Coord<$T>),+),V)>),
       Ref(TreeRef)
     }
     #[derive(Debug)]
-    pub struct $B<$($T),+,V> where $($T: Scalar),+, V: Value {
+    pub struct $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub pivots: ($(Option<Vec<$T>>),+),
-      pub intersections: Vec<Arc<$N<$($T),+,V>>>,
-      pub nodes: Vec<Arc<$N<$($T),+,V>>>,
+      pub intersections: Vec<Arc<$Node<$($T),+,V>>>,
+      pub nodes: Vec<Arc<$Node<$($T),+,V>>>,
     }
 
-    impl<$($T),+,V> $B<$($T),+,V> where $($T: Scalar),+, V: Value {
+    impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn dim() -> usize { 2 }
       pub fn build(branch_factor: usize, inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>)
-      -> $N<$($T),+,V> {
+      -> $Node<$($T),+,V> {
         let sorted = ($(
           {
             let mut xs: Vec<usize> = (0..inserts.len()).collect();
@@ -46,12 +48,12 @@ macro_rules! impl_branch {
       }
       fn from_sorted(branch_factor: usize, level: usize,
       inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>, sorted: ($(Vec<$u>),+),
-      matched: &mut [bool], max_depth: &mut usize) -> $N<$($T),+,V> {
+      matched: &mut [bool], max_depth: &mut usize) -> $Node<$($T),+,V> {
         *max_depth = level.max(*max_depth);
         if sorted.0.len() == 0 {
-          return $N::Data(vec![]);
+          return $Node::Data(vec![]);
         } else if sorted.0.len() < branch_factor {
-          return $N::Data(sorted.0.iter().map(|i| {
+          return $Node::Data(sorted.0.iter().map(|i| {
             matched[*i] = true;
             let pv = &inserts[*i];
             (($((pv.0).$i.clone()),+),pv.1.clone())
@@ -106,7 +108,7 @@ macro_rules! impl_branch {
           _ => panic!["unexpected level modulo dimension"]
         };
 
-        let intersections: Vec<Arc<$N<$($T),+,V>>> = match level % Self::dim() {
+        let intersections: Vec<Arc<$Node<$($T),+,V>>> = match level % Self::dim() {
           $($i => pivots.$i.as_ref().unwrap().iter().map(|pivot| {
             let new_sorted = Self::filter_sorted(
               pivot,
@@ -118,13 +120,13 @@ macro_rules! impl_branch {
               })
             );
             if new_sorted.0.len() == sorted.0.len() {
-              return Arc::new($N::Data(new_sorted.0.iter().map(|i| {
+              return Arc::new($Node::Data(new_sorted.0.iter().map(|i| {
                 let pv = &inserts[*i];
                 matched[*i] = true;
                 (pv.0.clone(),pv.1.clone())
               }).collect()));
             }
-            let b = $B::from_sorted(
+            let b = $Branch::from_sorted(
               branch_factor,
               level+1,
               Arc::clone(&inserts),
@@ -153,7 +155,7 @@ macro_rules! impl_branch {
                     == Some(std::cmp::Ordering::Less)
                 })
               );
-              Arc::new($B::from_sorted(
+              Arc::new($Branch::from_sorted(
                 branch_factor,
                 level+1,
                 Arc::clone(&inserts),
@@ -173,7 +175,7 @@ macro_rules! impl_branch {
                   intersect_coord(&(inserts[*j].0).$i, start, end)
                 })
               );
-              nodes.push(Arc::new($B::from_sorted(
+              nodes.push(Arc::new($Branch::from_sorted(
                 branch_factor,
                 level+1,
                 Arc::clone(&inserts),
@@ -195,7 +197,7 @@ macro_rules! impl_branch {
                       == Some(std::cmp::Ordering::Greater)
                   })
                 );
-                Arc::new($B::from_sorted(
+                Arc::new($Branch::from_sorted(
                   branch_factor,
                   level+1,
                   Arc::clone(&inserts),
@@ -212,20 +214,20 @@ macro_rules! impl_branch {
 
         let node_count = nodes.iter().fold(0usize, |count,node| {
           count + match node.as_ref() {
-            $N::Data(bs) => if bs.is_empty() { 0 } else { 1 },
-            $N::Branch(_) => 1,
-            $N::Ref(_) => 1,
+            $Node::Data(bs) => if bs.is_empty() { 0 } else { 1 },
+            $Node::Branch(_) => 1,
+            $Node::Ref(_) => 1,
           }
         });
         if node_count <= 1 {
-          return $N::Data(sorted.0.iter().map(|i| {
+          return $Node::Data(sorted.0.iter().map(|i| {
             let (p,v) = &inserts[*i];
             matched[*i] = true;
             ((*p).clone(),(*v).clone())
           }).collect());
         }
 
-        $N::Branch(Self {
+        $Node::Branch(Self {
           pivots,
           intersections,
           nodes,
@@ -260,11 +262,156 @@ macro_rules! impl_branch {
         }),+)
       }
     }
+
+    #[derive(Debug)]
+    pub struct $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
+      pub root: Arc<$Node<$($T),+,V>>,
+      pub bounds: ($($T),+,$($T),+),
+      pub count: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl<$($T),+,V> Tree<($(Coord<$T>),+),V> for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
+      fn build(branch_factor: usize, rows: Arc<Vec<(&($(Coord<$T>),+),&V)>>) -> Self {
+        let ibounds = ($(
+          match (rows[0].0).$k.clone() {
+            Coord::Scalar(x) => x,
+            Coord::Interval(x,_) => x,
+          }
+        ),+);
+        Self {
+          root: Arc::new($Branch::build(branch_factor, Arc::clone(&rows))),
+          count: rows.len(),
+          bounds: rows[1..].iter().fold(ibounds, |bounds,row| {
+            ($($cf(&(row.0).$k, &bounds.$j)),+)
+          })
+        }
+      }
+      fn list(&mut self) -> (Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef>) {
+        let mut cursors = vec![Arc::clone(&self.root)];
+        let mut rows = vec![];
+        let mut refs = vec![];
+        while let Some(c) = cursors.pop() {
+          match c.as_ref() {
+            $Node::Branch(branch) => {
+              for b in branch.intersections.iter() {
+                cursors.push(Arc::clone(b));
+              }
+              for b in branch.nodes.iter() {
+                cursors.push(Arc::clone(b));
+              }
+            },
+            $Node::Data(data) => {
+              rows.extend(data.iter().map(|pv| {
+                (pv.0.clone(),pv.1.clone())
+              }).collect::<Vec<_>>());
+            },
+            $Node::Ref(r) => {
+              refs.push(*r);
+            },
+          }
+        }
+        (rows,refs)
+      }
+      fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
+      bbox: &(($($T),+),($($T),+))) -> Arc<Mutex<QStream<($(Coord<$T>),+),V>>>
+      where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {
+        let istate = (
+          bbox.clone(),
+          vec![], // queue
+          vec![(0usize,Arc::clone(&self.root))], // cursors
+          vec![], // refs
+          Arc::clone(&storage), // storage
+        );
+        Arc::new(Mutex::new(Box::new(unfold(istate, async move |mut state| {
+          let bbox = &state.0;
+          let queue = &mut state.1;
+          let cursors = &mut state.2;
+          let refs = &mut state.3;
+          let storage = &mut state.4;
+          loop {
+            if let Some(q) = queue.pop() {
+              return Some((Ok(q),state));
+            }
+            if cursors.is_empty() && !refs.is_empty() {
+              // TODO: use a tree LRU
+              match Self::load(Arc::clone(storage), refs.pop().unwrap()).await {
+                Err(e) => return Some((Err(e.into()),state)),
+                Ok(tree) => cursors.push((0usize,tree.root)),
+              };
+              continue;
+            } else if cursors.is_empty() {
+              return None;
+            }
+            let (level,c) = cursors.pop().unwrap();
+            match c.as_ref() {
+              $Node::Branch(branch) => {
+                match level % $dim {
+                  $($i => {
+                    let pivots = branch.pivots.$i.as_ref().unwrap();
+                    for (pivot,b) in pivots.iter().zip(branch.intersections.iter()) {
+                      if &(bbox.0).$i <= pivot && pivot <= &(bbox.1).$i {
+                        cursors.push((level+1,Arc::clone(b)));
+                      }
+                    }
+                    let xs = &branch.nodes;
+                    let ranges = pivots.iter().zip(pivots.iter().skip(1));
+                    if &(bbox.0).$i <= pivots.first().unwrap() {
+                      cursors.push((level+1,Arc::clone(xs.first().unwrap())));
+                    }
+                    for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
+                      if intersect_iv(start, end, &(bbox.0).$i, &(bbox.1).$i) {
+                        cursors.push((level+1,Arc::clone(b)));
+                      }
+                    }
+                    if &(bbox.1).$i >= pivots.last().unwrap() {
+                      cursors.push((level+1,Arc::clone(xs.last().unwrap())));
+                    }
+                  }),+
+                  _ => panic!["unexpected level modulo dimension"]
+                }
+              },
+              $Node::Data(data) => {
+                queue.extend(data.iter()
+                  .filter(|pv| {
+                    intersect_coord(&(pv.0).0, &(bbox.0).0, &(bbox.1).0)
+                    && intersect_coord(&(pv.0).1, &(bbox.0).1, &(bbox.1).1)
+                  })
+                  .map(|pv| {
+                    let loc: Location = (0,0); // TODO
+                    (pv.0.clone(),pv.1.clone(),loc)
+                  })
+                  .collect::<Vec<_>>()
+                );
+              },
+              $Node::Ref(r) => {
+                refs.push(*r);
+              }
+            }
+          }
+        }))))
+      }
+    }
+
+    impl<$($T),+,V> $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
+      async fn load<S>(storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
+      r: TreeRef) -> Result<Self,Error> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
+        let mut s = storage.lock().await.open(&format!["tree/{}",r.to_string()]).await?;
+        let bytes = s.read(0, s.len().await?).await?;
+        Ok(Self::from_bytes(&bytes)?.1)
+      }
+    }
   }
 }
 
-impl_branch![Branch2,Node2,(P0,P1),(0,1),(usize,usize),(None,None),2];
-//impl_branch![Branch3,Node3,(P0,P1,P2),(0,1,2),(usize,usize,usize),(None,None,None),3];
+impl_branch![Tree2,Branch2,Node2,(P0,P1),(0,1),
+  (0,1,2,3),(0,1,0,1),(coord_min,coord_min,coord_max,coord_max),
+  (usize,usize),(None,None),2
+];
+impl_branch![Tree3,Branch3,Node3,(P0,P1,P2),(0,1,2),
+  (0,1,2,3,4,5),(0,1,2,0,1,2),(coord_min,coord_min,coord_min,coord_max,coord_max,coord_max),
+  (usize,usize,usize),(None,None,None),3
+];
 
 #[async_trait::async_trait]
 pub trait Tree<P,V>: Send+Sync+ToBytes where P: Point, V: Value {
@@ -273,13 +420,6 @@ pub trait Tree<P,V>: Send+Sync+ToBytes where P: Point, V: Value {
   fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static;
-}
-
-#[derive(Debug)]
-pub struct Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
-  pub root: Arc<Node2<X,Y,V>>,
-  pub bounds: (X,Y,X,Y),
-  pub count: usize,
 }
 
 pub async fn merge<T,P,V>(branch_factor: usize, inserts: &[(&P,&V)], trees: &[Arc<Mutex<T>>]) -> T
@@ -302,175 +442,6 @@ where P: Point, V: Value, T: Tree<P,V> {
   // TODO: split large intersecting buckets
   // TODO: include refs into build()
   T::build(branch_factor, Arc::new(rows))
-}
-
-#[async_trait::async_trait]
-impl<X,Y,V> Tree<(Coord<X>,Coord<Y>),V> for Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
-  fn build(branch_factor: usize, rows: Arc<Vec<(&(Coord<X>,Coord<Y>),&V)>>) -> Self {
-    let ibounds = (
-      match (rows[0].0).0.clone() {
-        Coord::Scalar(x) => x,
-        Coord::Interval(x,_) => x,
-      },
-      match (rows[0].0).1.clone() {
-        Coord::Scalar(x) => x,
-        Coord::Interval(x,_) => x,
-      },
-      match (rows[0].0).0.clone() {
-        Coord::Scalar(x) => x,
-        Coord::Interval(_,x) => x,
-      },
-      match (rows[0].0).1.clone() {
-        Coord::Scalar(x) => x,
-        Coord::Interval(_,x) => x,
-      }
-    );
-    Self {
-      root: Arc::new(Branch2::build(branch_factor, Arc::clone(&rows))),
-      count: rows.len(),
-      bounds: rows[1..].iter().fold(ibounds, |bounds,row| {
-        (
-          coord_min_x(&(row.0).0, &bounds.0),
-          coord_min_x(&(row.0).1, &bounds.1),
-          coord_max_x(&(row.0).0, &bounds.2),
-          coord_max_x(&(row.0).1, &bounds.3)
-        )
-      })
-    }
-  }
-  fn list(&mut self) -> (Vec<((Coord<X>,Coord<Y>),V)>,Vec<TreeRef>) {
-    let mut cursors = vec![Arc::clone(&self.root)];
-    let mut rows = vec![];
-    let mut refs = vec![];
-    while let Some(c) = cursors.pop() {
-      match c.as_ref() {
-        Node2::Branch(branch) => {
-          for b in branch.intersections.iter() {
-            cursors.push(Arc::clone(b));
-          }
-          for b in branch.nodes.iter() {
-            cursors.push(Arc::clone(b));
-          }
-        },
-        Node2::Data(data) => {
-          rows.extend(data.iter().map(|pv| {
-            (pv.0.clone(),pv.1.clone())
-          }).collect::<Vec<_>>());
-        },
-        Node2::Ref(r) => {
-          refs.push(*r);
-        },
-      }
-    }
-    (rows,refs)
-  }
-  fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
-  bbox: &((X,Y),(X,Y))) -> Arc<Mutex<QStream<(Coord<X>,Coord<Y>),V>>>
-  where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {
-    let istate = (
-      bbox.clone(),
-      vec![], // queue
-      vec![(0usize,Arc::clone(&self.root))], // cursors
-      vec![], // refs
-      Arc::clone(&storage), // storage
-    );
-    Arc::new(Mutex::new(Box::new(unfold(istate, async move |mut state| {
-      let bbox = &state.0;
-      let queue = &mut state.1;
-      let cursors = &mut state.2;
-      let refs = &mut state.3;
-      let storage = &mut state.4;
-      loop {
-        if let Some(q) = queue.pop() {
-          return Some((Ok(q),state));
-        }
-        if cursors.is_empty() && !refs.is_empty() {
-          // TODO: use a tree LRU
-          match Self::load(Arc::clone(storage), refs.pop().unwrap()).await {
-            Err(e) => return Some((Err(e.into()),state)),
-            Ok(tree) => cursors.push((0usize,tree.root)),
-          };
-          continue;
-        } else if cursors.is_empty() {
-          return None;
-        }
-        let (level,c) = cursors.pop().unwrap();
-        match c.as_ref() {
-          Node2::Branch(branch) => {
-            match level % 2 {
-              0 => {
-                let pivots = branch.pivots.0.as_ref().unwrap();
-                for (pivot,b) in pivots.iter().zip(branch.intersections.iter()) {
-                  if &(bbox.0).0 <= pivot && pivot <= &(bbox.1).0 {
-                    cursors.push((level+1,Arc::clone(b)));
-                  }
-                }
-                let xs = &branch.nodes;
-                let ranges = pivots.iter().zip(pivots.iter().skip(1));
-                if &(bbox.0).0 <= pivots.first().unwrap() {
-                  cursors.push((level+1,Arc::clone(xs.first().unwrap())));
-                }
-                for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
-                  if intersect_iv(start, end, &(bbox.0).0, &(bbox.1).0) {
-                    cursors.push((level+1,Arc::clone(b)));
-                  }
-                }
-                if &(bbox.1).0 >= pivots.last().unwrap() {
-                  cursors.push((level+1,Arc::clone(xs.last().unwrap())));
-                }
-              },
-              _ => {
-                let pivots = branch.pivots.1.as_ref().unwrap();
-                for (pivot,b) in pivots.iter().zip(branch.intersections.iter()) {
-                  if &(bbox.0).1 <= pivot && pivot <= &(bbox.1).1 {
-                    cursors.push((level+1,Arc::clone(b)));
-                  }
-                }
-                let xs = &branch.nodes;
-                let ranges = pivots.iter().zip(pivots.iter().skip(1));
-                if &(bbox.0).1 <= pivots.first().unwrap() {
-                  cursors.push((level+1,Arc::clone(xs.first().unwrap())));
-                }
-                for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
-                  if intersect_iv(start, end, &(bbox.0).1, &(bbox.1).1) {
-                    cursors.push((level+1,Arc::clone(b)));
-                  }
-                }
-                if &(bbox.1).1 >= pivots.last().unwrap() {
-                  cursors.push((level+1,Arc::clone(xs.last().unwrap())));
-                }
-              }
-            }
-          },
-          Node2::Data(data) => {
-            queue.extend(data.iter()
-              .filter(|pv| {
-                intersect_coord(&(pv.0).0, &(bbox.0).0, &(bbox.1).0)
-                && intersect_coord(&(pv.0).1, &(bbox.0).1, &(bbox.1).1)
-              })
-              .map(|pv| {
-                let loc: Location = (0,0); // TODO
-                (pv.0.clone(),pv.1.clone(),loc)
-              })
-              .collect::<Vec<_>>()
-            );
-          },
-          Node2::Ref(r) => {
-            refs.push(*r);
-          }
-        }
-      }
-    }))))
-  }
-}
-
-impl<X,Y,V> Tree2<X,Y,V> where X: Scalar, Y: Scalar, V: Value {
-  async fn load<S>(storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
-  r: TreeRef) -> Result<Self,Error> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
-    let mut s = storage.lock().await.open(&format!["tree/{}",r.to_string()]).await?;
-    let bytes = s.read(0, s.len().await?).await?;
-    Ok(Self::from_bytes(&bytes)?.1)
-  }
 }
 
 fn find_separation<X>(amin: &X, amax: &X, bmin: &X, bmax: &X, is_min: bool) -> X where X: Scalar {
@@ -510,7 +481,7 @@ fn coord_cmp<X>(x: &Coord<X>, y: &Coord<X>) -> Option<std::cmp::Ordering> where 
   }
 }
 
-fn coord_min_x<X>(x: &Coord<X>, r: &X) -> X where X: Scalar {
+fn coord_min<X>(x: &Coord<X>, r: &X) -> X where X: Scalar {
   let l = match x {
     Coord::Scalar(a) => a,
     Coord::Interval(a,_) => a,
@@ -523,7 +494,7 @@ fn coord_min_x<X>(x: &Coord<X>, r: &X) -> X where X: Scalar {
   }
 }
 
-fn coord_max_x<X>(x: &Coord<X>, r: &X) -> X where X: Scalar {
+fn coord_max<X>(x: &Coord<X>, r: &X) -> X where X: Scalar {
   let l = match x {
     Coord::Scalar(a) => a,
     Coord::Interval(a,_) => a,

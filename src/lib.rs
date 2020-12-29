@@ -47,30 +47,37 @@ pub trait Point: 'static {
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized, T: Tree<Self,V>;
 }
 
-#[async_trait::async_trait]
-impl<X,Y> Point for (Coord<X>,Coord<Y>) where X: Scalar, Y: Scalar {
-  type Bounds = ((X,Y),(X,Y));
-  async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
-  where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, T: Tree<(Coord<X>,Coord<Y>),V> {
-    let inserts: Vec<(&Self,&V)> = rows.iter()
-      .map(|row| match row {
-        Row::Insert(p,v) => Some((p,v)),
-        _ => None
-      })
-      .filter(|row| !row.is_none())
-      .map(|x| x.unwrap())
-      .collect();
+macro_rules! impl_point {
+  ($($T:tt),+) => {
+    #[async_trait::async_trait]
+    impl<$($T),+> Point for ($(Coord<$T>),+) where $($T: Scalar),+ {
+      type Bounds = (($($T),+),($($T),+));
+      async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
+      where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, T: Tree<($(Coord<$T>),+),V> {
+        let inserts: Vec<(&Self,&V)> = rows.iter()
+          .map(|row| match row {
+            Row::Insert(p,v) => Some((p,v)),
+            _ => None
+          })
+          .filter(|row| !row.is_none())
+          .map(|x| x.unwrap())
+          .collect();
 
-    let merge_trees = db.trees.iter()
-      .take_while(|t| { t.is_some() })
-      .map(|t| { Arc::clone(&t.as_ref().unwrap()) })
-      .collect::<Vec<Arc<Mutex<T>>>>();
-    db.trees.insert(merge_trees.len(), Some(Arc::new(Mutex::new(
-      tree::merge(9, inserts.as_slice(), merge_trees.as_slice()).await
-    ))));
-    Ok(())
+        let merge_trees = db.trees.iter()
+          .take_while(|t| { t.is_some() })
+          .map(|t| { Arc::clone(&t.as_ref().unwrap()) })
+          .collect::<Vec<Arc<Mutex<T>>>>();
+        db.trees.insert(merge_trees.len(), Some(Arc::new(Mutex::new(
+          tree::merge(9, inserts.as_slice(), merge_trees.as_slice()).await
+        ))));
+        Ok(())
+      }
+    }
   }
 }
+
+impl_point![P0,P1];
+impl_point![P0,P1,P2];
 
 pub enum Row<P,V> where P: Point, V: Value {
   Insert(P,V),
