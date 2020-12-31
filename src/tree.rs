@@ -24,25 +24,22 @@ macro_rules! impl_tree {
       pub nodes: Vec<Arc<$Node<$($T),+,V>>>,
     }
 
-    pub struct $Build<$($T),+,V> where $($T: Scalar),+, V: Value {
+    pub struct $Build<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
       pub branch_factor: usize,
       pub level: usize,
-      pub inserts: Arc<Vec<(($(Coord<$T>),+),V)>>,
+      pub inserts: Arc<Vec<(&'a ($(Coord<$T>),+),&'a V)>>,
       pub sorted: ($(Vec<$u>),+),
-      pub matched: Arc<Mutex<Vec<bool>>>,
-      pub next_tree: Arc<Mutex<TreeRef>>,
+      pub next_tree: TreeRef,
     }
 
-    impl<$($T),+,V> $Build<$($T),+,V> where $($T: Scalar),+, V: Value {
-      async fn next<X>(&self, x: Arc<X>,
-      f: Box<dyn Fn (Arc<X>,Arc<Vec<(($(Coord<$T>),+),V)>>, &usize) -> bool>) -> Self {
-        let matched = self.matched.lock().await;
+    impl<'a,$($T),+,V> $Build<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
+      fn next<X>(&self, x: Arc<X>, matched: &[bool],
+      f: Box<dyn Fn (Arc<X>,Arc<Vec<(&'a ($(Coord<$T>),+),&'a V)>>, &usize) -> bool>) -> Self {
         Self {
           branch_factor: self.branch_factor,
           level: self.level + 1,
           inserts: Arc::clone(&self.inserts),
-          matched: Arc::clone(&self.matched),
-          next_tree: Arc::clone(&self.next_tree),
+          next_tree: self.next_tree,
           sorted: ($({
             self.sorted.$i.iter()
               .map(|j| *j)
@@ -54,48 +51,24 @@ macro_rules! impl_tree {
           }),+),
         }
       }
-    }
-
-    impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
-      fn dim() -> usize { 2 }
-      pub fn build(branch_factor: usize, inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>,
-      next_tree: &mut TreeRef) -> $Node<$($T),+,V> {
-        let sorted = ($(
-          {
-            let mut xs: Vec<usize> = (0..inserts.len()).collect();
-            xs.sort_unstable_by(|a,b| {
-              coord_cmp(&(inserts[*a].0).$i,&(inserts[*b].0).$i).unwrap()
-            });
-            xs
-          }
-        ),+);
-        Self::from_sorted(
-          branch_factor, 0, Arc::clone(&inserts),
-          ($(sorted.$i),+),
-          &mut vec![false;inserts.len()],
-          next_tree
-        )
-      }
-      fn from_sorted(branch_factor: usize, level: usize,
-      inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>, sorted: ($(Vec<$u>),+),
-      matched: &mut [bool], next_tree: &mut TreeRef) -> $Node<$($T),+,V> {
-        if sorted.0.len() == 0 {
+      fn build(&mut self, matched: &mut [bool]) -> $Node<$($T),+,V> {
+        if self.sorted.0.len() == 0 {
           return $Node::Data(vec![]);
-        } else if sorted.0.len() < branch_factor {
-          return $Node::Data(sorted.0.iter().map(|i| {
+        } else if self.sorted.0.len() < self.branch_factor {
+          return $Node::Data(self.sorted.0.iter().map(|i| {
             matched[*i] = true;
-            let pv = &inserts[*i];
+            let pv = &self.inserts[*i];
             (($((pv.0).$i.clone()),+),pv.1.clone())
           }).collect());
         }
-        let n = (branch_factor-1).min(sorted.0.len()-1); // number of pivots
-        let is_min = (level / Self::dim()) % 2 != 0;
+        let n = (self.branch_factor-1).min(self.sorted.0.len()-1); // number of pivots
+        let is_min = (self.level / $dim) % 2 != 0;
         let mut pivots = ($($n),+);
-        match level % Self::dim() {
+        match self.level % $dim {
           $($i => {
-            let mut ps = match sorted.$i.len() {
+            let mut ps = match self.sorted.$i.len() {
               0 => panic!["not enough data to create a branch"],
-              1 => match &(inserts[sorted.$i[0]].0).$i {
+              1 => match &(self.inserts[self.sorted.$i[0]].0).$i {
                 Coord::Scalar(x) => {
                   vec![find_separation(x,x,x,x,is_min)]
                 },
@@ -104,11 +77,11 @@ macro_rules! impl_tree {
                 }
               },
               2 => {
-                let a = match &(inserts[sorted.$i[0]].0).$i {
+                let a = match &(self.inserts[self.sorted.$i[0]].0).$i {
                   Coord::Scalar(x) => (x,x),
                   Coord::Interval(min,max) => (min,max),
                 };
-                let b = match &(inserts[sorted.$i[1]].0).$i {
+                let b = match &(self.inserts[self.sorted.$i[1]].0).$i {
                   Coord::Scalar(x) => (x,x),
                   Coord::Interval(min,max) => (min,max),
                 };
@@ -116,12 +89,12 @@ macro_rules! impl_tree {
               },
               _ => {
                 (0..n).map(|k| {
-                  let m = k * sorted.$i.len() / (n+1);
-                  let a = match &(inserts[sorted.$i[m+0]].0).$i {
+                  let m = k * self.sorted.$i.len() / (n+1);
+                  let a = match &(self.inserts[self.sorted.$i[m+0]].0).$i {
                     Coord::Scalar(x) => (x,x),
                     Coord::Interval(min,max) => (min,max),
                   };
-                  let b = match &(inserts[sorted.$i[m+1]].0).$i {
+                  let b = match &(self.inserts[self.sorted.$i[m+1]].0).$i {
                     Coord::Scalar(x) => (x,x),
                     Coord::Interval(min,max) => (min,max),
                   };
@@ -137,103 +110,71 @@ macro_rules! impl_tree {
           _ => panic!["unexpected level modulo dimension"]
         };
 
-        let intersections: Vec<Arc<$Node<$($T),+,V>>> = match level % Self::dim() {
-          $($i => pivots.$i.as_ref().unwrap().iter().map(|pivot| {
-            let new_sorted = Self::filter_sorted(
-              pivot,
-              &sorted,
-              matched,
-              Arc::clone(&inserts),
-              Box::new(|pivot, inserts, j: &usize| {
-                intersect_pivot(&(inserts[*j].0).$i, pivot)
-              })
-            );
-            if new_sorted.0.len() == sorted.0.len() {
-              return Arc::new($Node::Data(new_sorted.0.iter().map(|i| {
-                let pv = &inserts[*i];
-                matched[*i] = true;
-                (pv.0.clone(),pv.1.clone())
-              }).collect()));
+        let intersections: Vec<Arc<$Node<$($T),+,V>>> = match self.level % $dim {
+          $($i => {
+            let mut res = vec![];
+            for pivot in pivots.$i.as_ref().unwrap().iter() {
+              let mut next = self.next(
+                Arc::new(pivot),
+                matched,
+                Box::new(|pivot, inserts, j: &usize| {
+                  intersect_pivot(&(inserts[*j].0).$i, &pivot)
+                })
+              );
+              if next.sorted.0.len() == self.sorted.0.len() {
+                res.push(Arc::new($Node::Data(next.sorted.0.iter().map(|i| {
+                  let pv = &self.inserts[*i];
+                  matched[*i] = true;
+                  (pv.0.clone(),pv.1.clone())
+                }).collect())));
+              } else {
+                res.push(Arc::new(next.build(matched)));
+              }
             }
-            let b = $Branch::from_sorted(
-              branch_factor,
-              level+1,
-              Arc::clone(&inserts),
-              new_sorted,
-              matched,
-              next_tree
-            );
-            Arc::new(b)
-          }).collect()),+,
+            res
+          }),+,
           _ => panic!["unexpected level modulo dimension"]
         };
 
-        let nodes = match level % Self::dim() {
+        let nodes = match self.level % $dim {
           $($i => {
             let pv = pivots.$i.as_ref().unwrap();
             let mut nodes = Vec::with_capacity(pv.len()+1);
             nodes.push({
               let pivot = pv.first().unwrap();
-              let next_sorted = Self::filter_sorted(
-                pivot,
-                &sorted,
+              let mut next = self.next(
+                Arc::new(pivot),
                 matched,
-                Arc::clone(&inserts),
                 Box::new(|pivot, inserts, j: &usize| {
-                  coord_cmp_pivot(&(inserts[*j].0).$i, pivot)
+                  coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
                     == Some(std::cmp::Ordering::Less)
                 })
               );
-              Arc::new($Branch::from_sorted(
-                branch_factor,
-                level+1,
-                Arc::clone(&inserts),
-                next_sorted,
-                matched,
-                next_tree
-              ))
+              Arc::new(next.build(matched))
             });
             let ranges = pv.iter().zip(pv.iter().skip(1));
             for (start,end) in ranges {
-              let next_sorted = Self::filter_sorted_range(
-                (start,end),
-                &sorted,
+              let mut next = self.next(
+                Arc::new((start,end)),
                 matched,
-                Arc::clone(&inserts),
-                Box::new(|(start,end), inserts, j: &usize| {
-                  intersect_coord(&(inserts[*j].0).$i, start, end)
+                Box::new(|range, inserts, j: &usize| {
+                  intersect_coord(&(inserts[*j].0).$i, range.0, range.1)
                 })
               );
-              nodes.push(Arc::new($Branch::from_sorted(
-                branch_factor,
-                level+1,
-                Arc::clone(&inserts),
-                next_sorted,
-                matched,
-                next_tree
-              )));
+              nodes.push(Arc::new(next.build(matched)));
             }
             if pv.len() > 1 {
               nodes.push({
                 let pivot = pv.first().unwrap();
-                let next_sorted = Self::filter_sorted(
-                  pivot,
-                  &sorted,
+                let mut next = self.next(
+                  Arc::new(pivot),
                   matched,
-                  Arc::clone(&inserts),
                   Box::new(|pivot, inserts, j: &usize| {
-                    coord_cmp_pivot(&(inserts[*j].0).$i, pivot)
+                    coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
                       == Some(std::cmp::Ordering::Greater)
                   })
                 );
-                Arc::new($Branch::from_sorted(
-                  branch_factor,
-                  level+1,
-                  Arc::clone(&inserts),
-                  next_sorted,
-                  matched,
-                  next_tree
-                ))
+                Arc::new(next.build(matched))
               });
             }
             nodes
@@ -249,46 +190,40 @@ macro_rules! impl_tree {
           }
         });
         if node_count <= 1 {
-          return $Node::Data(sorted.0.iter().map(|i| {
-            let (p,v) = &inserts[*i];
+          return $Node::Data(self.sorted.0.iter().map(|i| {
+            let (p,v) = &self.inserts[*i];
             matched[*i] = true;
             ((*p).clone(),(*v).clone())
           }).collect());
         }
 
-        $Node::Branch(Self {
+        $Node::Branch($Branch {
           pivots,
           intersections,
           nodes,
         })
       }
-      fn filter_sorted<X>(pivot: &X, sorted: &($(Vec<$u>),+),
-      matched: &[bool], inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>,
-      f: Box<dyn Fn (&X,Arc<Vec<(&($(Coord<$T>),+),&V)>>, &usize) -> bool>)
-      -> ($(Vec<$u>),+) where X: Scalar {
-        ($({
-          sorted.$i.iter()
-            .map(|j| *j)
-            .filter(|j| !matched[*j])
-            .fold((&inserts,vec![]), |(inserts, mut res), j| {
-              if f(pivot, Arc::clone(inserts), &j) { res.push(j) }
-              (inserts,res)
-            }).1
-        }),+)
-      }
-      fn filter_sorted_range<X>(range: (&X,&X), sorted: &($(Vec<$u>),+),
-      matched: &[bool], inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>,
-      f: Box<dyn Fn ((&X,&X),Arc<Vec<(&($(Coord<$T>),+),&V)>>, &usize) -> bool>)
-      -> ($(Vec<$u>),+) where X: Scalar, $($T: Scalar),+ {
-        ($({
-          sorted.$i.iter()
-            .map(|j| *j)
-            .filter(|j| !matched[*j])
-            .fold((&inserts,vec![]), |(inserts, mut res), j| {
-              if f(range, Arc::clone(inserts), &j) { res.push(j) }
-              (inserts,res)
-            }).1
-        }),+)
+    }
+
+    impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
+      pub fn build(branch_factor: usize, inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>,
+      next_tree: TreeRef) -> $Node<$($T),+,V> {
+        let mut matched = vec![false;inserts.len()];
+        $Build {
+          sorted: ($(
+            {
+              let mut xs: Vec<usize> = (0..inserts.len()).collect();
+              xs.sort_unstable_by(|a,b| {
+                coord_cmp(&(inserts[*a].0).$i,&(inserts[*b].0).$i).unwrap()
+              });
+              xs
+            }
+          ),+),
+          branch_factor,
+          level: 0,
+          inserts: Arc::clone(&inserts),
+          next_tree,
+        }.build(&mut matched)
       }
     }
 
@@ -302,7 +237,7 @@ macro_rules! impl_tree {
     #[async_trait::async_trait]
     impl<$($T),+,V> Tree<($(Coord<$T>),+),V> for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn build(branch_factor: usize, rows: Arc<Vec<(&($(Coord<$T>),+),&V)>>,
-      next_tree: &mut TreeRef) -> Self {
+      next_tree: TreeRef) -> Self {
         let ibounds = ($(
           match (rows[0].0).$k.clone() {
             Coord::Scalar(x) => x,
@@ -310,7 +245,11 @@ macro_rules! impl_tree {
           }
         ),+);
         Self {
-          root: Arc::new($Branch::build(branch_factor, Arc::clone(&rows), next_tree)),
+          root: Arc::new($Branch::build(
+            branch_factor,
+            Arc::clone(&rows),
+            next_tree
+          )),
           count: rows.len(),
           bounds: rows[1..].iter().fold(ibounds, |bounds,row| {
             ($($cf(&(row.0).$k, &bounds.$j)),+)
@@ -474,7 +413,7 @@ macro_rules! impl_tree {
 
 #[async_trait::async_trait]
 pub trait Tree<P,V>: Send+Sync+ToBytes where P: Point, V: Value {
-  fn build(branch_factor: usize, rows: Arc<Vec<(&P,&V)>>, next_tree: &mut TreeRef)
+  fn build(branch_factor: usize, rows: Arc<Vec<(&P,&V)>>, next_tree: TreeRef)
     -> Self where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef>);
   fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
@@ -483,7 +422,7 @@ pub trait Tree<P,V>: Send+Sync+ToBytes where P: Point, V: Value {
 }
 
 pub async fn merge<T,P,V>(branch_factor: usize, inserts: &[(&P,&V)], trees: &[Arc<Mutex<T>>],
-next_tree: &mut TreeRef) -> T
+next_tree: TreeRef) -> T
 where P: Point, V: Value, T: Tree<P,V> {
   let mut lists = vec![];
   let mut refs = vec![];
