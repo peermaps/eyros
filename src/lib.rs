@@ -63,12 +63,13 @@ macro_rules! impl_point {
           .map(|x| x.unwrap())
           .collect();
 
+        let mut next_tree = 1; // TODO: load/store value from meta file
         let merge_trees = db.trees.iter()
           .take_while(|t| { t.is_some() })
           .map(|t| { Arc::clone(&t.as_ref().unwrap()) })
           .collect::<Vec<Arc<Mutex<T>>>>();
         db.trees.insert(merge_trees.len(), Some(Arc::new(Mutex::new(
-          tree::merge(9, inserts.as_slice(), merge_trees.as_slice()).await
+          tree::merge(9, inserts.as_slice(), merge_trees.as_slice(), &mut next_tree).await
         ))));
         Ok(())
       }
