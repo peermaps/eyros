@@ -3,13 +3,13 @@ use crate::{Scalar,Point,Value,Coord,Location,query::QStream,Error,Storage};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
 use random_access_storage::RandomAccess;
-//use std::collections::HashMap;
+use std::collections::HashMap;
 
 pub type TreeRef = u64;
 
 macro_rules! impl_tree {
-  ($Tree:ident,$Branch:ident,$Node:ident,$Build:ident,($($T:tt),+),($($i:tt),+),
-  ($($j:tt),+),($($k:tt),+),($($cf:tt),+),
+  ($Tree:ident,$Branch:ident,$Node:ident,$Build:ident,$MState:ident,
+  ($($T:tt),+),($($i:tt),+),($($j:tt),+),($($k:tt),+),($($cf:tt),+),
   ($($u:ty),+),($($n:tt),+),$dim:expr) => {
     #[derive(Debug)]
     pub enum $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
@@ -32,8 +32,13 @@ macro_rules! impl_tree {
       pub next_tree: TreeRef,
     }
 
+    pub struct $MState<$($T),+,V> where $($T: Scalar),+, V: Value {
+      pub matched: Vec<bool>,
+      pub ext_trees: HashMap<TreeRef,$Node<$($T),+,V>>,
+    }
+
     impl<'a,$($T),+,V> $Build<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
-      fn next<X>(&self, x: Arc<X>, matched: &[bool],
+      fn next<X>(&self, x: Arc<X>, mstate: &$MState<$($T),+,V>,
       f: Box<dyn Fn (Arc<X>,Arc<Vec<(&'a ($(Coord<$T>),+),&'a V)>>, &usize) -> bool>) -> Self {
         Self {
           branch_factor: self.branch_factor,
@@ -43,7 +48,7 @@ macro_rules! impl_tree {
           sorted: ($({
             self.sorted.$i.iter()
               .map(|j| *j)
-              .filter(|j| !matched[*j])
+              .filter(|j| !mstate.matched[*j])
               .fold((&self.inserts,vec![]), |(inserts, mut res), j| {
                 if f(Arc::clone(&x), Arc::clone(inserts), &j) { res.push(j) }
                 (inserts,res)
@@ -51,12 +56,12 @@ macro_rules! impl_tree {
           }),+),
         }
       }
-      fn build(&mut self, matched: &mut [bool]) -> $Node<$($T),+,V> {
+      fn build(&mut self, mstate: &mut $MState<$($T),+,V>) -> $Node<$($T),+,V> {
         if self.sorted.0.len() == 0 {
           return $Node::Data(vec![]);
         } else if self.sorted.0.len() < self.branch_factor {
           return $Node::Data(self.sorted.0.iter().map(|i| {
-            matched[*i] = true;
+            mstate.matched[*i] = true;
             let pv = &self.inserts[*i];
             (($((pv.0).$i.clone()),+),pv.1.clone())
           }).collect());
@@ -116,7 +121,7 @@ macro_rules! impl_tree {
             for pivot in pivots.$i.as_ref().unwrap().iter() {
               let mut next = self.next(
                 Arc::new(pivot),
-                matched,
+                mstate,
                 Box::new(|pivot, inserts, j: &usize| {
                   intersect_pivot(&(inserts[*j].0).$i, &pivot)
                 })
@@ -124,11 +129,11 @@ macro_rules! impl_tree {
               if next.sorted.0.len() == self.sorted.0.len() {
                 res.push(Arc::new($Node::Data(next.sorted.0.iter().map(|i| {
                   let pv = &self.inserts[*i];
-                  matched[*i] = true;
+                  mstate.matched[*i] = true;
                   (pv.0.clone(),pv.1.clone())
                 }).collect())));
               } else {
-                res.push(Arc::new(next.build(matched)));
+                res.push(Arc::new(next.build(mstate)));
               }
             }
             res
@@ -144,37 +149,37 @@ macro_rules! impl_tree {
               let pivot = pv.first().unwrap();
               let mut next = self.next(
                 Arc::new(pivot),
-                matched,
+                mstate,
                 Box::new(|pivot, inserts, j: &usize| {
                   coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
                     == Some(std::cmp::Ordering::Less)
                 })
               );
-              Arc::new(next.build(matched))
+              Arc::new(next.build(mstate))
             });
             let ranges = pv.iter().zip(pv.iter().skip(1));
             for (start,end) in ranges {
               let mut next = self.next(
                 Arc::new((start,end)),
-                matched,
+                mstate,
                 Box::new(|range, inserts, j: &usize| {
                   intersect_coord(&(inserts[*j].0).$i, range.0, range.1)
                 })
               );
-              nodes.push(Arc::new(next.build(matched)));
+              nodes.push(Arc::new(next.build(mstate)));
             }
             if pv.len() > 1 {
               nodes.push({
                 let pivot = pv.first().unwrap();
                 let mut next = self.next(
                   Arc::new(pivot),
-                  matched,
+                  mstate,
                   Box::new(|pivot, inserts, j: &usize| {
                     coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
                       == Some(std::cmp::Ordering::Greater)
                   })
                 );
-                Arc::new(next.build(matched))
+                Arc::new(next.build(mstate))
               });
             }
             nodes
@@ -192,7 +197,7 @@ macro_rules! impl_tree {
         if node_count <= 1 {
           return $Node::Data(self.sorted.0.iter().map(|i| {
             let (p,v) = &self.inserts[*i];
-            matched[*i] = true;
+            mstate.matched[*i] = true;
             ((*p).clone(),(*v).clone())
           }).collect());
         }
@@ -208,7 +213,10 @@ macro_rules! impl_tree {
     impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub fn build(branch_factor: usize, inserts: Arc<Vec<(&($(Coord<$T>),+),&V)>>,
       next_tree: TreeRef) -> $Node<$($T),+,V> {
-        let mut matched = vec![false;inserts.len()];
+        let mut mstate = $MState {
+          matched: vec![false;inserts.len()],
+          ext_trees: HashMap::new(),
+        };
         $Build {
           sorted: ($(
             {
@@ -223,7 +231,7 @@ macro_rules! impl_tree {
           level: 0,
           inserts: Arc::clone(&inserts),
           next_tree,
-        }.build(&mut matched)
+        }.build(&mut mstate)
       }
     }
 
@@ -373,38 +381,41 @@ macro_rules! impl_tree {
   }
 }
 
-#[cfg(feature="2d")] impl_tree![Tree2,Branch2,Node2,Build2,(P0,P1),(0,1),
-  (0,1,2,3),(0,1,0,1),(coord_min,coord_min,coord_max,coord_max),
+#[cfg(feature="2d")] impl_tree![Tree2,Branch2,Node2,Build2,MState2,
+  (P0,P1),(0,1),(0,1,2,3),(0,1,0,1),(coord_min,coord_min,coord_max,coord_max),
   (usize,usize),(None,None),2
 ];
-#[cfg(feature="3d")] impl_tree![Tree3,Branch3,Node3,Build3,(P0,P1,P2),(0,1,2),
-  (0,1,2,3,4,5),(0,1,2,0,1,2),(coord_min,coord_min,coord_min,coord_max,coord_max,coord_max),
+#[cfg(feature="3d")] impl_tree![Tree3,Branch3,Node3,Build3,MState3,
+  (P0,P1,P2),(0,1,2),(0,1,2,3,4,5),(0,1,2,0,1,2),
+  (coord_min,coord_min,coord_min,coord_max,coord_max,coord_max),
   (usize,usize,usize),(None,None,None),3
 ];
-#[cfg(feature="4d")] impl_tree![Tree4,Branch4,Node4,Build4,(P0,P1,P2,P3),(0,1,2,3),
-  (0,1,2,3,4,5,6,7),(0,1,2,3,0,1,2,3),
+#[cfg(feature="4d")] impl_tree![Tree4,Branch4,Node4,Build4,Mstate4,
+  (P0,P1,P2,P3),(0,1,2,3),(0,1,2,3,4,5,6,7),(0,1,2,3,0,1,2,3),
   (coord_min,coord_min,coord_min,coord_min,coord_max,coord_max,coord_max,coord_max),
   (usize,usize,usize,usize),(None,None,None,None),4
 ];
-#[cfg(feature="5d")] impl_tree![Tree5,Branch5,Node5,Build5,(P0,P1,P2,P3,P4),(0,1,2,3,4),
-  (0,1,2,3,4,5,6,7,8,9),(0,1,2,3,4,0,1,2,3,4),
+#[cfg(feature="5d")] impl_tree![Tree5,Branch5,Node5,Build5,MState5,
+  (P0,P1,P2,P3,P4),(0,1,2,3,4),(0,1,2,3,4,5,6,7,8,9),(0,1,2,3,4,0,1,2,3,4),
   (coord_min,coord_min,coord_min,coord_min,coord_min,
     coord_max,coord_max,coord_max,coord_max,coord_max),
   (usize,usize,usize,usize,usize),(None,None,None,None,None),5
 ];
-#[cfg(feature="6d")] impl_tree![Tree6,Branch6,Node6,Build6,(P0,P1,P2,P3,P4,P5),(0,1,2,3,4,5),
-  (0,1,2,3,4,5,6,7,8,9,10,11),(0,1,2,3,4,5,0,1,2,3,4,5),
+#[cfg(feature="6d")] impl_tree![Tree6,Branch6,Node6,Build6,MState6,
+  (P0,P1,P2,P3,P4,P5),(0,1,2,3,4,5),(0,1,2,3,4,5,6,7,8,9,10,11),(0,1,2,3,4,5,0,1,2,3,4,5),
   (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
     coord_max,coord_max,coord_max,coord_max,coord_max,coord_max),
   (usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None),6
 ];
-#[cfg(feature="7d")] impl_tree![Tree7,Branch7,Node7,Build7,(P0,P1,P2,P3,P4,P5,P6),(0,1,2,3,4,5,6),
+#[cfg(feature="7d")] impl_tree![Tree7,Branch7,Node7,Build7,MState7,
+  (P0,P1,P2,P3,P4,P5,P6),(0,1,2,3,4,5,6),
   (0,1,2,3,4,5,6,7,8,9,10,11,12,13),(0,1,2,3,4,5,6,0,1,2,3,4,5,6),
   (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
     coord_max,coord_max,coord_max,coord_max,coord_max,coord_max,coord_max),
   (usize,usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None,None),7
 ];
-#[cfg(feature="8d")] impl_tree![Tree8,Branch8,Node8,Build8,(P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7),
+#[cfg(feature="8d")] impl_tree![Tree8,Branch8,Node8,Build8,MState8,
+  (P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7),
   (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15),(0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7),
   (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
     coord_max,coord_max,coord_max,coord_max,coord_max,coord_max,coord_max,coord_max),
