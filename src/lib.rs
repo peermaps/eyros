@@ -68,9 +68,9 @@ macro_rules! impl_point {
           .take_while(|t| { t.is_some() })
           .map(|t| { Arc::clone(&t.as_ref().unwrap()) })
           .collect::<Vec<Arc<Mutex<T>>>>();
-        db.trees.insert(merge_trees.len(), Some(Arc::new(Mutex::new(
-          tree::merge(9, inserts.as_slice(), merge_trees.as_slice(), next_tree).await
-        ))));
+        let t = tree::merge(9, 6, inserts.as_slice(), merge_trees.as_slice(), next_tree).await;
+        //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
+        db.trees.insert(merge_trees.len(), Some(Arc::new(Mutex::new(t))));
         Ok(())
       }
     }
