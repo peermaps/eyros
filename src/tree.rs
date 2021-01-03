@@ -49,11 +49,10 @@ macro_rules! impl_tree {
           sorted: ($({
             self.sorted.$i.iter()
               .map(|j| *j)
-              .filter(|j| !mstate.matched[*j])
-              .fold((&self.inserts,vec![]), |(inserts, mut res), j| {
-                if f(Arc::clone(&x), Arc::clone(inserts), &j) { res.push(j) }
-                (inserts,res)
-              }).1
+              .filter(|j| {
+                !mstate.matched[*j] && f(Arc::clone(&x), Arc::clone(&self.inserts), &j)
+              })
+              .collect()
           }),+),
         }
       }
