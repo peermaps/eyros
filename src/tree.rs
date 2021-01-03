@@ -39,8 +39,8 @@ macro_rules! impl_tree {
     }
 
     impl<'a,$($T),+,V> $Build<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
-      fn next<X>(&self, x: Arc<X>, mstate: &$MState<$($T),+,V>,
-      f: Box<dyn Fn (Arc<X>,Arc<Vec<(&'a ($(Coord<$T>),+),&'a V)>>, &usize) -> bool>) -> Self {
+      fn next<X>(&self, x: &X, mstate: &$MState<$($T),+,V>,
+      f: Box<dyn Fn (&X,Arc<Vec<(&'a ($(Coord<$T>),+),&'a V)>>, &usize) -> bool>) -> Self {
         Self {
           branch_factor: self.branch_factor,
           max_depth: self.max_depth,
@@ -50,7 +50,7 @@ macro_rules! impl_tree {
             self.sorted.$i.iter()
               .map(|j| *j)
               .filter(|j| {
-                !mstate.matched[*j] && f(Arc::clone(&x), Arc::clone(&self.inserts), &j)
+                !mstate.matched[*j] && f(&x, Arc::clone(&self.inserts), &j)
               })
               .collect()
           }),+),
@@ -145,7 +145,7 @@ macro_rules! impl_tree {
             let mut res = vec![];
             for pivot in pivots.$i.as_ref().unwrap().iter() {
               let mut next = self.next(
-                Arc::new(pivot),
+                &pivot,
                 mstate,
                 Box::new(|pivot, inserts, j: &usize| {
                   intersect_pivot(&(inserts[*j].0).$i, &pivot)
@@ -173,7 +173,7 @@ macro_rules! impl_tree {
             nodes.push({
               let pivot = pv.first().unwrap();
               let mut next = self.next(
-                Arc::new(pivot),
+                pivot,
                 mstate,
                 Box::new(|pivot, inserts, j: &usize| {
                   coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
@@ -183,9 +183,9 @@ macro_rules! impl_tree {
               Arc::new(next.build(mstate))
             });
             let ranges = pv.iter().zip(pv.iter().skip(1));
-            for (start,end) in ranges {
+            for range in ranges {
               let mut next = self.next(
-                Arc::new((start,end)),
+                &range,
                 mstate,
                 Box::new(|range, inserts, j: &usize| {
                   intersect_coord(&(inserts[*j].0).$i, range.0, range.1)
@@ -197,7 +197,7 @@ macro_rules! impl_tree {
               nodes.push({
                 let pivot = pv.first().unwrap();
                 let mut next = self.next(
-                  Arc::new(pivot),
+                  pivot,
                   mstate,
                   Box::new(|pivot, inserts, j: &usize| {
                     coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
