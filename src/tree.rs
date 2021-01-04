@@ -43,7 +43,7 @@ macro_rules! impl_tree {
       pub refs: &'a [TreeRef],
       pub matched: Vec<bool>,
       pub next_tree: TreeRef,
-      pub ext_trees: HashMap<TreeRef,$Tree<$($T),+,V>>,
+      pub ext_trees: HashMap<TreeRef,Arc<Mutex<$Tree<$($T),+,V>>>>,
       pub sorted: Vec<usize>,
     }
 
@@ -95,7 +95,7 @@ macro_rules! impl_tree {
             ),
           };
           //eprintln!["EXT {} bytes", t.count_bytes()];
-          self.ext_trees.insert(r, t);
+          self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
           self.next_tree += 1;
           return $Node::Ref(r);
         }
@@ -249,14 +249,15 @@ macro_rules! impl_tree {
 
     impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub fn build(branch_factor: usize, max_depth: usize, inserts: &[(&($(Coord<$T>),+),&V)],
-      refs: &[TreeRef], next_tree: TreeRef) -> $Node<$($T),+,V> {
+      refs: &[TreeRef], next_tree: &mut TreeRef)
+      -> ($Node<$($T),+,V>,HashMap<TreeRef,Arc<Mutex<$Tree<$($T),+,V>>>>) {
         let mut mstate = $MState {
           branch_factor,
           max_depth,
           inserts,
           refs,
           matched: vec![false;inserts.len()],
-          next_tree,
+          next_tree: *next_tree,
           ext_trees: HashMap::new(),
           sorted: {
             let mut xs: Vec<usize> = (0..inserts.len()).collect();
@@ -266,10 +267,12 @@ macro_rules! impl_tree {
             xs
           }
         };
-        mstate.build(&Build {
+        let root = mstate.build(&Build {
           range: (0, inserts.len()),
           level: 0,
-        })
+        });
+        *next_tree = mstate.next_tree;
+        (root, mstate.ext_trees)
       }
     }
 
@@ -283,18 +286,19 @@ macro_rules! impl_tree {
     #[async_trait::async_trait]
     impl<$($T),+,V> Tree<($(Coord<$T>),+),V> for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn build(branch_factor: usize, max_depth: usize, rows: &[(&($(Coord<$T>),+),&V)],
-      refs: &[TreeRef], next_tree: TreeRef) -> Self {
-        Self {
-          root: Arc::new($Branch::build(
-            branch_factor,
-            max_depth,
-            rows,
-            refs,
-            next_tree
-          )),
+      refs: &[TreeRef], next_tree: &mut TreeRef) -> (Self,HashMap<TreeRef,Arc<Mutex<Self>>>) {
+        let (root,ext_trees) = $Branch::build(
+          branch_factor,
+          max_depth,
+          rows,
+          refs,
+          next_tree
+        );
+        (Self {
+          root: Arc::new(root),
           count: rows.len(),
           bounds: $get_bounds(0..rows.len(), rows),
-        }
+        }, ext_trees)
       }
       fn list(&mut self) -> (Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef>) {
         let mut cursors = vec![Arc::clone(&self.root)];
@@ -470,7 +474,8 @@ macro_rules! impl_tree {
 #[async_trait::async_trait]
 pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug where P: Point, V: Value {
   fn build(branch_factor: usize, max_depth: usize, rows: &[(&P,&V)],
-    refs: &[TreeRef], next_tree: TreeRef) -> Self where Self: Sized;
+    refs: &[TreeRef], next_tree: &mut TreeRef)
+    -> (Self,HashMap<TreeRef,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef>);
   fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
@@ -478,7 +483,7 @@ pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug wher
 }
 
 pub async fn merge<T,P,V>(branch_factor: usize, max_depth: usize, inserts: &[(&P,&V)],
-trees: &[Arc<Mutex<T>>], next_tree: TreeRef) -> T
+trees: &[Arc<Mutex<T>>], next_tree: &mut TreeRef) -> (T,HashMap<TreeRef,Arc<Mutex<T>>>)
 where P: Point, V: Value, T: Tree<P,V> {
   let mut lists = vec![];
   let mut refs = vec![];

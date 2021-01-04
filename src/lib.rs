@@ -5,11 +5,12 @@ pub use store::Storage;
 mod setup;
 pub use setup::{Setup,SetupFields};
 mod tree;
-pub use tree::{Tree,Tree2};
+pub use tree::{Tree,TreeRef};
 mod bytes;
 mod query;
 pub use query::QueryStream;
 mod unfold;
+use std::collections::HashMap;
 
 use async_std::{sync::{Arc,Mutex}};
 use random_access_storage::RandomAccess;
@@ -48,7 +49,8 @@ pub trait Point: 'static {
 }
 
 macro_rules! impl_point {
-  ($($T:tt),+) => {
+  ($Tree:ident,$($T:tt),+) => {
+    pub use tree::$Tree;
     #[async_trait::async_trait]
     impl<$($T),+> Point for ($(Coord<$T>),+) where $($T: Scalar),+ {
       type Bounds = (($($T),+),($($T),+));
@@ -63,27 +65,42 @@ macro_rules! impl_point {
           .map(|x| x.unwrap())
           .collect();
 
-        let next_tree = 1; // TODO: load/store value from meta file
-        let merge_trees = db.trees.iter()
-          .take_while(|t| { t.is_some() })
-          .map(|t| { Arc::clone(&t.as_ref().unwrap()) })
+        let trees = &mut db.trees;
+        let merge_trees = db.roots.iter()
+          .take_while(|r| { r.is_some() })
+          .map(|r| {
+            Arc::clone(trees.get(&r.unwrap()).unwrap())
+          })
           .collect::<Vec<Arc<Mutex<T>>>>();
-        let t = tree::merge(9, 6, inserts.as_slice(), merge_trees.as_slice(), next_tree).await;
+        let (t,ext_trees) = tree::merge(
+          9, 6, inserts.as_slice(), merge_trees.as_slice(), &mut db.next_tree
+        ).await;
         //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
-        db.trees.insert(merge_trees.len(), Some(Arc::new(Mutex::new(t))));
+        db.roots.iter().take_while(|r| { r.is_some() }).for_each(|r| {
+          trees.remove(&r.unwrap());
+        });
+        ext_trees.iter().for_each(|(r,t)| {
+          trees.insert(*r,Arc::clone(t));
+        });
+        trees.insert(db.next_tree, Arc::new(Mutex::new(t)));
+        for i in 0..merge_trees.len() {
+          db.roots.insert(i, None);
+        }
+        db.roots.insert(merge_trees.len(), Some(db.next_tree));
+        db.next_tree += 1;
         Ok(())
       }
     }
   }
 }
 
-#[cfg(feature="2d")] impl_point![P0,P1];
-#[cfg(feature="3d")] impl_point![P0,P1,P2];
-#[cfg(feature="4d")] impl_point![P0,P1,P2,P3];
-#[cfg(feature="5d")] impl_point![P0,P1,P2,P3,P4];
-#[cfg(feature="6d")] impl_point![P0,P1,P2,P3,P4,P5];
-#[cfg(feature="7d")] impl_point![P0,P1,P2,P3,P4,P5,P6];
-#[cfg(feature="8d")] impl_point![P0,P1,P2,P3,P4,P5,P6,P7];
+#[cfg(feature="2d")] impl_point![Tree2,P0,P1];
+#[cfg(feature="3d")] impl_point![Tree3,P0,P1,P2];
+#[cfg(feature="4d")] impl_point![Tree4,P0,P1,P2,P3];
+#[cfg(feature="5d")] impl_point![Tree5,P0,P1,P2,P3,P4];
+#[cfg(feature="6d")] impl_point![Tree6,P0,P1,P2,P3,P4,P5];
+#[cfg(feature="7d")] impl_point![Tree7,P0,P1,P2,P3,P4,P5,P6];
+#[cfg(feature="8d")] impl_point![Tree8,P0,P1,P2,P3,P4,P5,P6,P7];
 
 pub enum Row<P,V> where P: Point, V: Value {
   Insert(P,V),
@@ -94,7 +111,9 @@ pub struct DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync,
 P: Point, V: Value, T: Tree<P,V> {
   pub storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
   pub fields: SetupFields,
-  pub trees: Vec<Option<Arc<Mutex<T>>>>,
+  pub roots: Vec<Option<tree::TreeRef>>,
+  pub trees: HashMap<tree::TreeRef,Arc<Mutex<T>>>,
+  pub next_tree: TreeRef,
   _point: std::marker::PhantomData<P>,
   _value: std::marker::PhantomData<V>,
 }
@@ -105,7 +124,9 @@ P: Point, V: Value, T: Tree<P,V> {
     Ok(Self {
       storage: Arc::clone(&setup.storage),
       fields: setup.fields,
-      trees: vec![],
+      roots: vec![],
+      next_tree: 0,
+      trees: HashMap::new(),
       _point: std::marker::PhantomData,
       _value: std::marker::PhantomData,
     })
@@ -115,8 +136,9 @@ P: Point, V: Value, T: Tree<P,V> {
   }
   pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
     let mut queries = vec![];
-    for tree in self.trees.iter() {
-      if let Some(t) = tree {
+    for root in self.roots.iter() {
+      if let Some(r) = root {
+        let t = self.trees.get(&r).unwrap();
         queries.push(t.lock().await.query(Arc::clone(&self.storage), bbox));
       }
     }
