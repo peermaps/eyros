@@ -6,9 +6,21 @@ use random_access_storage::RandomAccess;
 use std::collections::HashMap;
 
 pub type TreeRef = u64;
+pub struct Build {
+  pub level: usize,
+  pub range: (usize,usize), // (start,end) indexes into sorted
+}
+impl Build {
+  fn ext(&self) -> Self {
+    Self {
+      range: self.range.clone(),
+      level: 0,
+    }
+  }
+}
 
 macro_rules! impl_tree {
-  ($Tree:ident,$Branch:ident,$Node:ident,$Build:ident,$MState:ident,$get_bounds:ident,
+  ($Tree:ident,$Branch:ident,$Node:ident,$MState:ident,$get_bounds:ident,
   ($($T:tt),+),($($i:tt),+),($($j:tt),+),($($k:tt),+),($($cf:tt),+),
   ($($u:ty),+),($($n:tt),+),$dim:expr) => {
     #[derive(Debug)]
@@ -24,92 +36,78 @@ macro_rules! impl_tree {
       pub nodes: Vec<Arc<$Node<$($T),+,V>>>,
     }
 
-    pub struct $Build<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
+    pub struct $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
       pub branch_factor: usize,
       pub max_depth: usize,
-      pub level: usize,
       pub inserts: &'a [(&'a ($(Coord<$T>),+),&'a V)],
-      pub range: (usize,usize), // (start,end) indexes into sorted
-    }
-
-    pub struct $MState<$($T),+,V> where $($T: Scalar),+, V: Value {
+      pub refs: &'a [TreeRef],
       pub matched: Vec<bool>,
       pub next_tree: TreeRef,
       pub ext_trees: HashMap<TreeRef,$Tree<$($T),+,V>>,
       pub sorted: Vec<usize>,
     }
 
-    impl<'a,$($T),+,V> $Build<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
-      fn next<X>(&self, x: &X, mstate: &mut $MState<$($T),+,V>, index: &mut usize,
-      f: Box<dyn Fn (&X,&[(&'a ($(Coord<$T>),+),&'a V)], &usize) -> bool>) -> Self {
-        let matched = &mstate.matched;
+    impl<'a,$($T),+,V> $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
+      fn next<X>(&mut self, x: &X, build: &Build, index: &mut usize,
+      f: Box<dyn Fn (&X,&[(&'a ($(Coord<$T>),+),&'a V)], &usize) -> bool>) -> Build {
+        let matched = &self.matched;
+        let inserts = &self.inserts;
         // partition:
-        let n = mstate.sorted[self.range.0+*index..self.range.1]
+        let n = self.sorted[build.range.0+*index..build.range.1]
           .iter_mut().partition_in_place(|j| {
-            !matched[*j] && f(x, self.inserts, j)
+            !matched[*j] && f(x, inserts, j)
           });
-        let range = (self.range.0+*index,self.range.0+*index+n);
+        let range = (build.range.0+*index,build.range.0+*index+n);
         // sort for next dimension:
-        match (self.level+1)%$dim {
-          $($i => mstate.sorted[range.0..range.1].sort_unstable_by(|a,b| {
-            coord_cmp(&(self.inserts[*a].0).$i,&(self.inserts[*b].0).$i).unwrap()
+        match (build.level+1)%$dim {
+          $($i => self.sorted[range.0..range.1].sort_unstable_by(|a,b| {
+            coord_cmp(&(inserts[*a].0).$i,&(inserts[*b].0).$i).unwrap()
           })),+,
           _ => panic!["unexpected level modulo dimension"]
         };
         *index += n;
-        Self {
-          branch_factor: self.branch_factor,
-          max_depth: self.max_depth,
-          level: self.level + 1,
-          inserts: self.inserts,
+        Build {
+          level: build.level + 1,
           range
         }
       }
-      fn ext(&self) -> Self {
-        Self {
-          branch_factor: self.branch_factor,
-          max_depth: self.max_depth,
-          level: 0,
-          inserts: self.inserts,
-          range: self.range.clone(),
-        }
-      }
-      fn build(&mut self, mstate: &mut $MState<$($T),+,V>) -> $Node<$($T),+,V> {
-        let rlen = self.range.1 - self.range.0;
+      fn build(&mut self, build: &Build) -> $Node<$($T),+,V> {
+        let rlen = build.range.1 - build.range.0;
         if rlen == 0 {
           return $Node::Data(vec![]);
         } else if rlen < self.branch_factor {
-          let matched = &mut mstate.matched;
-          return $Node::Data(mstate.sorted[self.range.0..self.range.1].iter().map(|i| {
+          let matched = &mut self.matched;
+          let inserts = &self.inserts;
+          return $Node::Data(self.sorted[build.range.0..build.range.1].iter().map(|i| {
             matched[*i] = true;
-            let pv = &self.inserts[*i];
+            let pv = &inserts[*i];
             (($((pv.0).$i.clone()),+),pv.1.clone())
           }).collect());
         }
-        if self.level >= self.max_depth {
-          let r = mstate.next_tree;
+        if build.level >= self.max_depth {
+          let r = self.next_tree;
           let t = $Tree {
-            root: Arc::new(self.ext().build(mstate)),
+            root: Arc::new(self.build(&build.ext())),
             count: rlen,
             bounds: $get_bounds(
-              mstate.sorted[self.range.0..self.range.1].iter().map(|i| *i),
+              self.sorted[build.range.0..build.range.1].iter().map(|i| *i),
               self.inserts
             ),
           };
           //eprintln!["EXT {} bytes", t.count_bytes()];
-          mstate.ext_trees.insert(r, t);
-          mstate.next_tree += 1;
+          self.ext_trees.insert(r, t);
+          self.next_tree += 1;
           return $Node::Ref(r);
         }
 
         let n = (self.branch_factor-1).min(rlen-1); // number of pivots
-        let is_min = (self.level / $dim) % 2 != 0;
+        let is_min = (build.level / $dim) % 2 != 0;
         let mut pivots = ($($n),+);
-        match self.level % $dim {
+        match build.level % $dim {
           $($i => {
             pivots.$i = Some(match rlen {
               0 => panic!["not enough data to create a branch"],
-              1 => match &(self.inserts[mstate.sorted[self.range.0]].0).$i {
+              1 => match &(self.inserts[self.sorted[build.range.0]].0).$i {
                 Coord::Scalar(x) => {
                   vec![find_separation(x,x,x,x,is_min)]
                 },
@@ -118,11 +116,11 @@ macro_rules! impl_tree {
                 }
               },
               2 => {
-                let a = match &(self.inserts[mstate.sorted[self.range.0]].0).$i {
+                let a = match &(self.inserts[self.sorted[build.range.0]].0).$i {
                   Coord::Scalar(x) => (x,x),
                   Coord::Interval(min,max) => (min,max),
                 };
-                let b = match &(self.inserts[mstate.sorted[self.range.0+1]].0).$i {
+                let b = match &(self.inserts[self.sorted[build.range.0+1]].0).$i {
                   Coord::Scalar(x) => (x,x),
                   Coord::Interval(min,max) => (min,max),
                 };
@@ -131,11 +129,11 @@ macro_rules! impl_tree {
               _ => {
                 (0..n).map(|k| {
                   let m = k * rlen / (n+1);
-                  let a = match &(self.inserts[mstate.sorted[self.range.0+m+0]].0).$i {
+                  let a = match &(self.inserts[self.sorted[build.range.0+m+0]].0).$i {
                     Coord::Scalar(x) => (x,x),
                     Coord::Interval(min,max) => (min,max),
                   };
-                  let b = match &(self.inserts[mstate.sorted[self.range.0+m+1]].0).$i {
+                  let b = match &(self.inserts[self.sorted[build.range.0+m+1]].0).$i {
                     Coord::Scalar(x) => (x,x),
                     Coord::Interval(min,max) => (min,max),
                   };
@@ -148,74 +146,75 @@ macro_rules! impl_tree {
         };
 
         let mut index = 0;
-        let intersections: Vec<Arc<$Node<$($T),+,V>>> = match self.level % $dim {
+        let intersections: Vec<Arc<$Node<$($T),+,V>>> = match build.level % $dim {
           $($i => {
             pivots.$i.as_ref().unwrap().iter().map(|pivot| {
-              let mut next = self.next(
+              let next = self.next(
                 &pivot,
-                mstate,
+                build,
                 &mut index,
                 Box::new(|pivot, inserts, j: &usize| {
                   intersect_pivot(&(inserts[*j].0).$i, pivot)
                 })
               );
               if next.range.1 - next.range.0 == rlen {
-                let matched = &mut mstate.matched;
-                Arc::new($Node::Data(mstate.sorted[next.range.0..next.range.1].iter().map(|i| {
-                  let pv = &self.inserts[*i];
+                let matched = &mut self.matched;
+                let inserts = &self.inserts;
+                Arc::new($Node::Data(self.sorted[next.range.0..next.range.1].iter().map(|i| {
+                  let pv = &inserts[*i];
                   matched[*i] = true;
                   (pv.0.clone(),pv.1.clone())
                 }).collect()))
               } else {
-                Arc::new(next.build(mstate))
+                Arc::new(self.build(&next))
               }
             }).collect()
           }),+,
           _ => panic!["unexpected level modulo dimension"]
         };
 
-        let nodes = match self.level % $dim {
+        let nodes = match build.level % $dim {
           $($i => {
             let pv = pivots.$i.as_ref().unwrap();
             let mut nodes = Vec::with_capacity(pv.len()+1);
             nodes.push({
               let pivot = pv.first().unwrap();
-              let mut next = self.next(
+              let next = self.next(
                 pivot,
-                mstate,
+                build,
                 &mut index,
                 Box::new(|pivot, inserts, j: &usize| {
                   coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
                     == Some(std::cmp::Ordering::Less)
                 })
               );
-              Arc::new(next.build(mstate))
+              Arc::new(self.build(&next))
             });
             let ranges = pv.iter().zip(pv.iter().skip(1));
             for range in ranges {
-              let mut next = self.next(
+              let next = self.next(
                 &range,
-                mstate,
+                build,
                 &mut index,
                 Box::new(|range, inserts, j: &usize| {
                   intersect_coord(&(inserts[*j].0).$i, range.0, range.1)
                 })
               );
-              nodes.push(Arc::new(next.build(mstate)));
+              nodes.push(Arc::new(self.build(&next)));
             }
             if pv.len() > 1 {
               nodes.push({
                 let pivot = pv.first().unwrap();
-                let mut next = self.next(
+                let next = self.next(
                   pivot,
-                  mstate,
+                  build,
                   &mut index,
                   Box::new(|pivot, inserts, j: &usize| {
                     coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
                       == Some(std::cmp::Ordering::Greater)
                   })
                 );
-                Arc::new(next.build(mstate))
+                Arc::new(self.build(&next))
               });
             }
             nodes
@@ -231,9 +230,10 @@ macro_rules! impl_tree {
           }
         });
         if node_count <= 1 {
-          let matched = &mut mstate.matched;
-          return $Node::Data(mstate.sorted[self.range.0..self.range.1].iter().map(|i| {
-            let (p,v) = &self.inserts[*i];
+          let matched = &mut self.matched;
+          let inserts = &self.inserts;
+          return $Node::Data(self.sorted[build.range.0..build.range.1].iter().map(|i| {
+            let (p,v) = &inserts[*i];
             matched[*i] = true;
             ((*p).clone(),(*v).clone())
           }).collect());
@@ -251,6 +251,10 @@ macro_rules! impl_tree {
       pub fn build(branch_factor: usize, max_depth: usize, inserts: &[(&($(Coord<$T>),+),&V)],
       refs: &[TreeRef], next_tree: TreeRef) -> $Node<$($T),+,V> {
         let mut mstate = $MState {
+          branch_factor,
+          max_depth,
+          inserts,
+          refs,
           matched: vec![false;inserts.len()],
           next_tree,
           ext_trees: HashMap::new(),
@@ -262,13 +266,10 @@ macro_rules! impl_tree {
             xs
           }
         };
-        $Build {
+        mstate.build(&Build {
           range: (0, inserts.len()),
-          branch_factor,
-          max_depth,
           level: 0,
-          inserts,
-        }.build(&mut mstate)
+        })
       }
     }
 
@@ -425,40 +426,40 @@ macro_rules! impl_tree {
   }
 }
 
-#[cfg(feature="2d")] impl_tree![Tree2,Branch2,Node2,Build2,MState2,get_bounds2,
+#[cfg(feature="2d")] impl_tree![Tree2,Branch2,Node2,MState2,get_bounds2,
   (P0,P1),(0,1),(0,1,2,3),(0,1,0,1),(coord_min,coord_min,coord_max,coord_max),
   (usize,usize),(None,None),2
 ];
-#[cfg(feature="3d")] impl_tree![Tree3,Branch3,Node3,Build3,MState3,get_bounds3,
+#[cfg(feature="3d")] impl_tree![Tree3,Branch3,Node3,MState3,get_bounds3,
   (P0,P1,P2),(0,1,2),(0,1,2,3,4,5),(0,1,2,0,1,2),
   (coord_min,coord_min,coord_min,coord_max,coord_max,coord_max),
   (usize,usize,usize),(None,None,None),3
 ];
-#[cfg(feature="4d")] impl_tree![Tree4,Branch4,Node4,Build4,Mstate4,get_bounds4,
+#[cfg(feature="4d")] impl_tree![Tree4,Branch4,Node4,Mstate4,get_bounds4,
   (P0,P1,P2,P3),(0,1,2,3),(0,1,2,3,4,5,6,7),(0,1,2,3,0,1,2,3),
   (coord_min,coord_min,coord_min,coord_min,coord_max,coord_max,coord_max,coord_max),
   (usize,usize,usize,usize),(None,None,None,None),4
 ];
-#[cfg(feature="5d")] impl_tree![Tree5,Branch5,Node5,Build5,MState5,get_bounds5,
+#[cfg(feature="5d")] impl_tree![Tree5,Branch5,Node5,MState5,get_bounds5,
   (P0,P1,P2,P3,P4),(0,1,2,3,4),(0,1,2,3,4,5,6,7,8,9),(0,1,2,3,4,0,1,2,3,4),
   (coord_min,coord_min,coord_min,coord_min,coord_min,
     coord_max,coord_max,coord_max,coord_max,coord_max),
   (usize,usize,usize,usize,usize),(None,None,None,None,None),5
 ];
-#[cfg(feature="6d")] impl_tree![Tree6,Branch6,Node6,Build6,MState6,get_bounds6,
+#[cfg(feature="6d")] impl_tree![Tree6,Branch6,Node6,MState6,get_bounds6,
   (P0,P1,P2,P3,P4,P5),(0,1,2,3,4,5),(0,1,2,3,4,5,6,7,8,9,10,11),(0,1,2,3,4,5,0,1,2,3,4,5),
   (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
     coord_max,coord_max,coord_max,coord_max,coord_max,coord_max),
   (usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None),6
 ];
-#[cfg(feature="7d")] impl_tree![Tree7,Branch7,Node7,Build7,MState7,get_bounds7,
+#[cfg(feature="7d")] impl_tree![Tree7,Branch7,Node7,MState7,get_bounds7,
   (P0,P1,P2,P3,P4,P5,P6),(0,1,2,3,4,5,6),
   (0,1,2,3,4,5,6,7,8,9,10,11,12,13),(0,1,2,3,4,5,6,0,1,2,3,4,5,6),
   (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
     coord_max,coord_max,coord_max,coord_max,coord_max,coord_max,coord_max),
   (usize,usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None,None),7
 ];
-#[cfg(feature="8d")] impl_tree![Tree8,Branch8,Node8,Build8,MState8,get_bounds8,
+#[cfg(feature="8d")] impl_tree![Tree8,Branch8,Node8,MState8,get_bounds8,
   (P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7),
   (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15),(0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7),
   (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
