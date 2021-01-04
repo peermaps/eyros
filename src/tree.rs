@@ -28,7 +28,7 @@ macro_rules! impl_tree {
       pub branch_factor: usize,
       pub max_depth: usize,
       pub level: usize,
-      pub inserts: &'a Vec<(&'a ($(Coord<$T>),+),&'a V)>,
+      pub inserts: &'a [(&'a ($(Coord<$T>),+),&'a V)],
       pub range: (usize,usize), // (start,end) indexes into sorted
     }
 
@@ -41,7 +41,7 @@ macro_rules! impl_tree {
 
     impl<'a,$($T),+,V> $Build<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
       fn next<X>(&self, x: &X, mstate: &mut $MState<$($T),+,V>, index: &mut usize,
-      f: Box<dyn Fn (&X,&Vec<(&'a ($(Coord<$T>),+),&'a V)>, &usize) -> bool>) -> Self {
+      f: Box<dyn Fn (&X,&[(&'a ($(Coord<$T>),+),&'a V)], &usize) -> bool>) -> Self {
         let matched = &mstate.matched;
         // partition:
         let n = mstate.sorted[self.range.0+*index..self.range.1]
@@ -248,8 +248,8 @@ macro_rules! impl_tree {
     }
 
     impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
-      pub fn build(branch_factor: usize, max_depth: usize,
-      inserts: &Vec<(&($(Coord<$T>),+),&V)>, next_tree: TreeRef) -> $Node<$($T),+,V> {
+      pub fn build(branch_factor: usize, max_depth: usize, inserts: &[(&($(Coord<$T>),+),&V)],
+      refs: &[TreeRef], next_tree: TreeRef) -> $Node<$($T),+,V> {
         let mut mstate = $MState {
           matched: vec![false;inserts.len()],
           next_tree,
@@ -281,13 +281,14 @@ macro_rules! impl_tree {
 
     #[async_trait::async_trait]
     impl<$($T),+,V> Tree<($(Coord<$T>),+),V> for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
-      fn build(branch_factor: usize, max_depth: usize,
-      rows: &Vec<(&($(Coord<$T>),+),&V)>, next_tree: TreeRef) -> Self {
+      fn build(branch_factor: usize, max_depth: usize, rows: &[(&($(Coord<$T>),+),&V)],
+      refs: &[TreeRef], next_tree: TreeRef) -> Self {
         Self {
           root: Arc::new($Branch::build(
             branch_factor,
             max_depth,
             rows,
+            refs,
             next_tree
           )),
           count: rows.len(),
@@ -409,8 +410,7 @@ macro_rules! impl_tree {
       }
     }
 
-    fn $get_bounds<$($T),+,V,I>(mut indexes: I,
-    rows: &Vec<(&($(Coord<$T>),+),&V)>) -> ($($T),+,$($T),+)
+    fn $get_bounds<$($T),+,V,I>(mut indexes: I, rows: &[(&($(Coord<$T>),+),&V)]) -> ($($T),+,$($T),+)
     where $($T: Scalar),+, V: Value, I: Iterator<Item=usize> {
       let ibounds = ($(
         match (rows[indexes.next().unwrap()].0).$k.clone() {
@@ -468,8 +468,8 @@ macro_rules! impl_tree {
 
 #[async_trait::async_trait]
 pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug where P: Point, V: Value {
-  fn build(branch_factor: usize, max_depth: usize, rows: &Vec<(&P,&V)>, next_tree: TreeRef)
-    -> Self where Self: Sized;
+  fn build(branch_factor: usize, max_depth: usize, rows: &[(&P,&V)],
+    refs: &[TreeRef], next_tree: TreeRef) -> Self where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef>);
   fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
@@ -496,7 +496,7 @@ where P: Point, V: Value, T: Tree<P,V> {
   // TODO: merge overlapping refs
   // TODO: split large intersecting buckets
   // TODO: include refs into build()
-  T::build(branch_factor, max_depth, &rows, next_tree)
+  T::build(branch_factor, max_depth, &rows, &refs, next_tree)
 }
 
 fn find_separation<X>(amin: &X, amax: &X, bmin: &X, bmax: &X, is_min: bool) -> X where X: Scalar {
