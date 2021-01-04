@@ -11,7 +11,7 @@ async fn main() -> Result<(),E> {
   let mut db: DB<_,Tree2<f32,f32,V>,P,V> = DB::open_from_path(
     &std::path::PathBuf::from("/tmp/eyros.db")
   ).await?;
-  let rows: Vec<Row<P,V>> = (0..100_000).map(|i| {
+  let rows: Vec<Row<P,V>> = (0..1_000_000).map(|i| {
     let xmin = (random::<f32>()*2.0-1.0)*180.0;
     let xmax = xmin + random::<f32>().powf(16.0)*(180.0-xmin);
     let ymin = (random::<f32>()*2.0-1.0)*90.0;

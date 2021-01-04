@@ -1,4 +1,4 @@
-#![feature(async_closure)]
+#![feature(async_closure,iter_partition_in_place)]
 mod store;
 pub use store::Storage;
 #[doc(hidden)] pub use store::FileStore;

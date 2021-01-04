@@ -48,3 +48,6 @@ no-debug = []
 6d = []
 7d = []
 8d = []
+
+[profile.release]
+debug = true

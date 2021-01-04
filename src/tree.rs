@@ -29,29 +29,40 @@ macro_rules! impl_tree {
       pub max_depth: usize,
       pub level: usize,
       pub inserts: &'a Vec<(&'a ($(Coord<$T>),+),&'a V)>,
-      pub sorted: ($(Vec<$u>),+),
+      pub range: (usize,usize), // (start,end) indexes into sorted
     }
 
     pub struct $MState<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub matched: Vec<bool>,
       pub next_tree: TreeRef,
       pub ext_trees: HashMap<TreeRef,$Tree<$($T),+,V>>,
+      pub sorted: Vec<usize>,
     }
 
     impl<'a,$($T),+,V> $Build<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
-      fn next<X>(&self, x: &X, mstate: &$MState<$($T),+,V>,
+      fn next<X>(&self, x: &X, mstate: &mut $MState<$($T),+,V>, index: &mut usize,
       f: Box<dyn Fn (&X,&Vec<(&'a ($(Coord<$T>),+),&'a V)>, &usize) -> bool>) -> Self {
+        let matched = &mstate.matched;
+        // partition:
+        let n = mstate.sorted[self.range.0+*index..self.range.1]
+          .iter_mut().partition_in_place(|j| {
+            !matched[*j] && f(x, self.inserts, j)
+          });
+        let range = (self.range.0+*index,self.range.0+*index+n);
+        // sort for next dimension:
+        match (self.level+1)%$dim {
+          $($i => mstate.sorted[range.0..range.1].sort_unstable_by(|a,b| {
+            coord_cmp(&(self.inserts[*a].0).$i,&(self.inserts[*b].0).$i).unwrap()
+          })),+,
+          _ => panic!["unexpected level modulo dimension"]
+        };
+        *index += n;
         Self {
           branch_factor: self.branch_factor,
           max_depth: self.max_depth,
           level: self.level + 1,
           inserts: self.inserts,
-          sorted: ($({
-            self.sorted.$i.iter()
-              .map(|j| *j)
-              .filter(|j| { !mstate.matched[*j] && f(&x, self.inserts, &j) })
-              .collect()
-          }),+),
+          range
         }
       }
       fn ext(&self) -> Self {
@@ -60,15 +71,17 @@ macro_rules! impl_tree {
           max_depth: self.max_depth,
           level: 0,
           inserts: self.inserts,
-          sorted: self.sorted.clone(),
+          range: self.range.clone(),
         }
       }
       fn build(&mut self, mstate: &mut $MState<$($T),+,V>) -> $Node<$($T),+,V> {
-        if self.sorted.0.len() == 0 {
+        let rlen = self.range.1 - self.range.0;
+        if rlen == 0 {
           return $Node::Data(vec![]);
-        } else if self.sorted.0.len() < self.branch_factor {
-          return $Node::Data(self.sorted.0.iter().map(|i| {
-            mstate.matched[*i] = true;
+        } else if rlen < self.branch_factor {
+          let matched = &mut mstate.matched;
+          return $Node::Data(mstate.sorted[self.range.0..self.range.1].iter().map(|i| {
+            matched[*i] = true;
             let pv = &self.inserts[*i];
             (($((pv.0).$i.clone()),+),pv.1.clone())
           }).collect());
@@ -77,9 +90,9 @@ macro_rules! impl_tree {
           let r = mstate.next_tree;
           let t = $Tree {
             root: Arc::new(self.ext().build(mstate)),
-            count: self.sorted.0.len(),
+            count: rlen,
             bounds: $get_bounds(
-              self.sorted.0.iter().map(|i| *i),
+              mstate.sorted[self.range.0..self.range.1].iter().map(|i| *i),
               self.inserts
             ),
           };
@@ -89,14 +102,14 @@ macro_rules! impl_tree {
           return $Node::Ref(r);
         }
 
-        let n = (self.branch_factor-1).min(self.sorted.0.len()-1); // number of pivots
+        let n = (self.branch_factor-1).min(rlen-1); // number of pivots
         let is_min = (self.level / $dim) % 2 != 0;
         let mut pivots = ($($n),+);
         match self.level % $dim {
           $($i => {
-            let mut ps = match self.sorted.$i.len() {
+            let mut ps = match rlen {
               0 => panic!["not enough data to create a branch"],
-              1 => match &(self.inserts[self.sorted.$i[0]].0).$i {
+              1 => match &(self.inserts[mstate.sorted[self.range.0]].0).$i {
                 Coord::Scalar(x) => {
                   vec![find_separation(x,x,x,x,is_min)]
                 },
@@ -105,11 +118,11 @@ macro_rules! impl_tree {
                 }
               },
               2 => {
-                let a = match &(self.inserts[self.sorted.$i[0]].0).$i {
+                let a = match &(self.inserts[mstate.sorted[self.range.0]].0).$i {
                   Coord::Scalar(x) => (x,x),
                   Coord::Interval(min,max) => (min,max),
                 };
-                let b = match &(self.inserts[self.sorted.$i[1]].0).$i {
+                let b = match &(self.inserts[mstate.sorted[self.range.0+1]].0).$i {
                   Coord::Scalar(x) => (x,x),
                   Coord::Interval(min,max) => (min,max),
                 };
@@ -117,12 +130,12 @@ macro_rules! impl_tree {
               },
               _ => {
                 (0..n).map(|k| {
-                  let m = k * self.sorted.$i.len() / (n+1);
-                  let a = match &(self.inserts[self.sorted.$i[m+0]].0).$i {
+                  let m = k * rlen / (n+1);
+                  let a = match &(self.inserts[mstate.sorted[self.range.0+m+0]].0).$i {
                     Coord::Scalar(x) => (x,x),
                     Coord::Interval(min,max) => (min,max),
                   };
-                  let b = match &(self.inserts[self.sorted.$i[m+1]].0).$i {
+                  let b = match &(self.inserts[mstate.sorted[self.range.0+m+1]].0).$i {
                     Coord::Scalar(x) => (x,x),
                     Coord::Interval(min,max) => (min,max),
                   };
@@ -138,28 +151,29 @@ macro_rules! impl_tree {
           _ => panic!["unexpected level modulo dimension"]
         };
 
+        let mut index = 0;
         let intersections: Vec<Arc<$Node<$($T),+,V>>> = match self.level % $dim {
           $($i => {
-            let mut res = vec![];
-            for pivot in pivots.$i.as_ref().unwrap().iter() {
+            pivots.$i.as_ref().unwrap().iter().map(|pivot| {
               let mut next = self.next(
                 &pivot,
                 mstate,
+                &mut index,
                 Box::new(|pivot, inserts, j: &usize| {
-                  intersect_pivot(&(inserts[*j].0).$i, &pivot)
+                  intersect_pivot(&(inserts[*j].0).$i, pivot)
                 })
               );
-              if next.sorted.0.len() == self.sorted.0.len() {
-                res.push(Arc::new($Node::Data(next.sorted.0.iter().map(|i| {
+              if next.range.1 - next.range.0 == rlen {
+                let matched = &mut mstate.matched;
+                Arc::new($Node::Data(mstate.sorted[next.range.0..next.range.1].iter().map(|i| {
                   let pv = &self.inserts[*i];
-                  mstate.matched[*i] = true;
+                  matched[*i] = true;
                   (pv.0.clone(),pv.1.clone())
-                }).collect())));
+                }).collect()))
               } else {
-                res.push(Arc::new(next.build(mstate)));
+                Arc::new(next.build(mstate))
               }
-            }
-            res
+            }).collect()
           }),+,
           _ => panic!["unexpected level modulo dimension"]
         };
@@ -173,6 +187,7 @@ macro_rules! impl_tree {
               let mut next = self.next(
                 pivot,
                 mstate,
+                &mut index,
                 Box::new(|pivot, inserts, j: &usize| {
                   coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
                     == Some(std::cmp::Ordering::Less)
@@ -185,6 +200,7 @@ macro_rules! impl_tree {
               let mut next = self.next(
                 &range,
                 mstate,
+                &mut index,
                 Box::new(|range, inserts, j: &usize| {
                   intersect_coord(&(inserts[*j].0).$i, range.0, range.1)
                 })
@@ -197,6 +213,7 @@ macro_rules! impl_tree {
                 let mut next = self.next(
                   pivot,
                   mstate,
+                  &mut index,
                   Box::new(|pivot, inserts, j: &usize| {
                     coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
                       == Some(std::cmp::Ordering::Greater)
@@ -218,9 +235,10 @@ macro_rules! impl_tree {
           }
         });
         if node_count <= 1 {
-          return $Node::Data(self.sorted.0.iter().map(|i| {
+          let matched = &mut mstate.matched;
+          return $Node::Data(mstate.sorted[self.range.0..self.range.1].iter().map(|i| {
             let (p,v) = &self.inserts[*i];
-            mstate.matched[*i] = true;
+            matched[*i] = true;
             ((*p).clone(),(*v).clone())
           }).collect());
         }
@@ -240,17 +258,16 @@ macro_rules! impl_tree {
           matched: vec![false;inserts.len()],
           next_tree,
           ext_trees: HashMap::new(),
+          sorted: {
+            let mut xs: Vec<usize> = (0..inserts.len()).collect();
+            xs.sort_unstable_by(|a,b| {
+              coord_cmp(&(inserts[*a].0).0,&(inserts[*b].0).0).unwrap()
+            });
+            xs
+          }
         };
         $Build {
-          sorted: ($(
-            {
-              let mut xs: Vec<usize> = (0..inserts.len()).collect();
-              xs.sort_unstable_by(|a,b| {
-                coord_cmp(&(inserts[*a].0).$i,&(inserts[*b].0).$i).unwrap()
-              });
-              xs
-            }
-          ),+),
+          range: (0, inserts.len()),
           branch_factor,
           max_depth,
           level: 0,
