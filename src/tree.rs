@@ -107,7 +107,7 @@ macro_rules! impl_tree {
         let mut pivots = ($($n),+);
         match self.level % $dim {
           $($i => {
-            let mut ps = match rlen {
+            pivots.$i = Some(match rlen {
               0 => panic!["not enough data to create a branch"],
               1 => match &(self.inserts[mstate.sorted[self.range.0]].0).$i {
                 Coord::Scalar(x) => {
@@ -142,11 +142,7 @@ macro_rules! impl_tree {
                   find_separation(a.0,a.1,b.0,b.1,is_min)
                 }).collect()
               }
-            };
-            ps.sort_unstable_by(|a,b| {
-              a.partial_cmp(b).unwrap()
             });
-            pivots.$i = Some(ps);
           }),+,
           _ => panic!["unexpected level modulo dimension"]
         };
