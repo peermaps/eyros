@@ -489,28 +489,55 @@ pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug wher
 
 // return value: (tree, remove_trees, create_trees)
 pub async fn merge<T,P,V>(branch_factor: usize, max_depth: usize, inserts: &[(&P,&V)],
-roots: &[(TreeRef,Arc<Mutex<T>>)], next_tree: &mut TreeRef)
+roots: &[TreeRef], trees: &HashMap<TreeRef,Arc<Mutex<T>>>, next_tree: &mut TreeRef)
 -> (T,Vec<TreeRef>,HashMap<TreeRef,Arc<Mutex<T>>>)
 where P: Point, V: Value, T: Tree<P,V> {
   let mut lists = vec![];
+  let mut l_refs = vec![];
   let mut refs = vec![];
   let mut rm_trees = vec![];
-  let mut bounds = Vec::with_capacity(roots.len());
-  for (r,t) in roots.iter() {
-    bounds.push(t.lock().await.get_bounds());
-  }
-  let intersecting = calc_overlap::<P::Bounds>(&bounds);
-  // TODO: also check for overlaps in refs... associate bounds with refs
-  for ((r,tree),overlap) in roots.iter().zip(intersecting) {
-    if overlap {
-      let (list,xrefs) = tree.lock().await.list();
-      lists.push(list);
-      refs.extend(xrefs);
-      rm_trees.push(*r);
-    } else {
-      refs.push(*r);
+
+  // TODO: quotas for deconstructed external tree per merge
+  {
+    let mut bounds = Vec::with_capacity(roots.len());
+    for r in roots.iter() {
+      bounds.push(trees[r].lock().await.get_bounds());
+    }
+    let intersecting = calc_overlap::<P::Bounds>(&bounds);
+    // these nearly always intersect each other
+    //eprintln!["TOP {:?}", intersecting];
+    for (r,overlap) in roots.iter().zip(intersecting) {
+      if overlap {
+        let (list,xrefs) = trees[r].lock().await.list();
+        lists.push(list);
+        l_refs.extend(xrefs);
+        rm_trees.push(*r);
+      } else {
+        refs.push(*r);
+      }
     }
   }
+  {
+    // TODO : limits on number of trees to expand?
+    let mut bounds = Vec::with_capacity(l_refs.len());
+    for r in l_refs.iter() {
+      bounds.push(trees[r].lock().await.get_bounds());
+    }
+    let intersecting = calc_overlap::<P::Bounds>(&bounds);
+    //eprintln!["SUB {:?}", intersecting];
+    for (i,(r,overlap)) in l_refs.iter().zip(intersecting).enumerate() {
+      if overlap {
+        let (list,xrefs) = trees[r].lock().await.list();
+        lists.push(list);
+        refs.extend(xrefs);
+        rm_trees.push(*r);
+      } else {
+        refs.push(*r);
+      }
+    }
+  }
+  refs.extend(l_refs);
+
   let mut rows = vec![];
   rows.extend_from_slice(inserts);
   for list in lists.iter_mut() {
@@ -523,7 +550,7 @@ where P: Point, V: Value, T: Tree<P,V> {
 }
 
 fn calc_overlap<X>(bounds: &[X]) -> Vec<bool> where X: Overlap {
-  let mut res = Vec::with_capacity(bounds.len());
+  let mut res = vec![false;bounds.len()];
   for i in 0..bounds.len() {
     for j in i+1..bounds.len() {
       if bounds[i].overlap(&bounds[j]) {

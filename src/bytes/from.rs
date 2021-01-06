@@ -17,16 +17,16 @@ macro_rules! impl_from_bytes {
           x as usize
         };
         let bounds = (
-          $({
+          ($({
             let (s,x) = $T::from_bytes(&src[offset..])?;
             offset += s;
             x
-          },)+
-          $({
+          }),+),
+          ($({
             let (s,x) = $T::from_bytes(&src[offset..])?;
             offset += s;
             x
-          },)+
+          }),+)
         );
         let (s,n) = u32::from_bytes(&src[offset..])?;
         offset += s;

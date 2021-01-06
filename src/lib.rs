@@ -71,14 +71,11 @@ macro_rules! impl_point {
 
         let trees = &mut db.trees;
         let merge_trees = db.roots.iter()
-          .take_while(|r| { r.is_some() })
-          .map(|tr| {
-            let r = tr.unwrap();
-            (r,Arc::clone(trees.get(&r).unwrap()))
-          })
-          .collect::<Vec<(TreeRef,Arc<Mutex<T>>)>>();
+          .take_while(|r| r.is_some())
+          .map(|r| r.unwrap())
+          .collect::<Vec<TreeRef>>();
         let (t,rm_trees,create_trees) = tree::merge(
-          9, 6, inserts.as_slice(), merge_trees.as_slice(), &mut db.next_tree
+          9, 6, inserts.as_slice(), merge_trees.as_slice(), trees, &mut db.next_tree
         ).await;
         //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
         rm_trees.iter().for_each(|r| {
@@ -89,9 +86,17 @@ macro_rules! impl_point {
         });
         trees.insert(db.next_tree, Arc::new(Mutex::new(t)));
         for i in 0..merge_trees.len() {
-          db.roots.insert(i, None);
+          if i < db.roots.len() {
+            db.roots[i] = None;
+          } else {
+            db.roots.push(None);
+          }
         }
-        db.roots.insert(merge_trees.len(), Some(db.next_tree));
+        if merge_trees.len() < db.roots.len() {
+          db.roots[merge_trees.len()] = Some(db.next_tree);
+        } else {
+          db.roots.push(Some(db.next_tree));
+        }
         db.next_tree += 1;
         Ok(())
       }
