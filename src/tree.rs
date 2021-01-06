@@ -1,5 +1,5 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Scalar,Point,Value,Coord,Location,query::QStream,Error,Storage};
+use crate::{Scalar,Point,Value,Coord,Location,query::QStream,Error,Storage,Overlap};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
 use random_access_storage::RandomAccess;
@@ -21,8 +21,7 @@ impl Build {
 
 macro_rules! impl_tree {
   ($Tree:ident,$Branch:ident,$Node:ident,$MState:ident,$get_bounds:ident,
-  ($($T:tt),+),($($i:tt),+),($($j:tt),+),($($k:tt),+),($($cf:tt),+),
-  ($($u:ty),+),($($n:tt),+),$dim:expr) => {
+  ($($T:tt),+),($($i:tt),+),($($u:ty),+),($($n:tt),+),$dim:expr) => {
     #[derive(Debug)]
     pub enum $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
       Branch($Branch<$($T),+,V>),
@@ -279,7 +278,7 @@ macro_rules! impl_tree {
     #[derive(Debug)]
     pub struct $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub root: Arc<$Node<$($T),+,V>>,
-      pub bounds: ($($T),+,$($T),+),
+      pub bounds: (($($T),+),($($T),+)),
       pub count: usize,
     }
 
@@ -404,6 +403,9 @@ macro_rules! impl_tree {
           }
         }))))
       }
+      fn get_bounds(&self) -> <($(Coord<$T>),+) as Point>::Bounds {
+        self.bounds.clone()
+      }
     }
 
     impl<$($T),+,V> $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
@@ -415,59 +417,61 @@ macro_rules! impl_tree {
       }
     }
 
-    fn $get_bounds<$($T),+,V,I>(mut indexes: I, rows: &[(&($(Coord<$T>),+),&V)]) -> ($($T),+,$($T),+)
+    fn $get_bounds<$($T),+,V,I>(mut indexes: I, rows: &[(&($(Coord<$T>),+),&V)]) -> (($($T),+),($($T),+))
     where $($T: Scalar),+, V: Value, I: Iterator<Item=usize> {
-      let ibounds = ($(
-        match (rows[indexes.next().unwrap()].0).$k.clone() {
-          Coord::Scalar(x) => x,
-          Coord::Interval(x,_) => x,
-        }
-      ),+);
+      let ibounds = (
+        ($(
+          match (rows[indexes.next().unwrap()].0).$i.clone() {
+            Coord::Scalar(x) => x,
+            Coord::Interval(x,_) => x,
+          }
+        ),+),
+        ($(
+          match (rows[indexes.next().unwrap()].0).$i.clone() {
+            Coord::Scalar(x) => x,
+            Coord::Interval(x,_) => x,
+          }
+        ),+)
+      );
       indexes.fold(ibounds, |bounds,i| {
-        ($($cf(&(rows[i].0).$k, &bounds.$j)),+)
+        (
+          ($(coord_min(&(rows[i].0).$i,&(bounds.0).$i)),+),
+          ($(coord_max(&(rows[i].0).$i,&(bounds.1).$i)),+)
+        )
       })
+    }
+
+    impl<$($T),+> Overlap for (($($T),+),($($T),+)) where $($T: Scalar),+ {
+      fn overlap(&self, other: &Self) -> bool {
+        true $(&& intersect_iv(&(self.0).$i, &(self.1).$i, &(other.0).$i, &(other.1).$i))+
+      }
     }
   }
 }
 
 #[cfg(feature="2d")] impl_tree![Tree2,Branch2,Node2,MState2,get_bounds2,
-  (P0,P1),(0,1),(0,1,2,3),(0,1,0,1),(coord_min,coord_min,coord_max,coord_max),
-  (usize,usize),(None,None),2
+  (P0,P1),(0,1),(usize,usize),(None,None),2
 ];
 #[cfg(feature="3d")] impl_tree![Tree3,Branch3,Node3,MState3,get_bounds3,
-  (P0,P1,P2),(0,1,2),(0,1,2,3,4,5),(0,1,2,0,1,2),
-  (coord_min,coord_min,coord_min,coord_max,coord_max,coord_max),
-  (usize,usize,usize),(None,None,None),3
+  (P0,P1,P2),(0,1,2),(usize,usize,usize),(None,None,None),3
 ];
 #[cfg(feature="4d")] impl_tree![Tree4,Branch4,Node4,Mstate4,get_bounds4,
-  (P0,P1,P2,P3),(0,1,2,3),(0,1,2,3,4,5,6,7),(0,1,2,3,0,1,2,3),
-  (coord_min,coord_min,coord_min,coord_min,coord_max,coord_max,coord_max,coord_max),
-  (usize,usize,usize,usize),(None,None,None,None),4
+  (P0,P1,P2,P3),(0,1,2,3),(usize,usize,usize,usize),(None,None,None,None),4
 ];
 #[cfg(feature="5d")] impl_tree![Tree5,Branch5,Node5,MState5,get_bounds5,
-  (P0,P1,P2,P3,P4),(0,1,2,3,4),(0,1,2,3,4,5,6,7,8,9),(0,1,2,3,4,0,1,2,3,4),
-  (coord_min,coord_min,coord_min,coord_min,coord_min,
-    coord_max,coord_max,coord_max,coord_max,coord_max),
+  (P0,P1,P2,P3,P4),(0,1,2,3,4),
   (usize,usize,usize,usize,usize),(None,None,None,None,None),5
 ];
 #[cfg(feature="6d")] impl_tree![Tree6,Branch6,Node6,MState6,get_bounds6,
-  (P0,P1,P2,P3,P4,P5),(0,1,2,3,4,5),(0,1,2,3,4,5,6,7,8,9,10,11),(0,1,2,3,4,5,0,1,2,3,4,5),
-  (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
-    coord_max,coord_max,coord_max,coord_max,coord_max,coord_max),
+  (P0,P1,P2,P3,P4,P5),(0,1,2,3,4,5),
   (usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None),6
 ];
 #[cfg(feature="7d")] impl_tree![Tree7,Branch7,Node7,MState7,get_bounds7,
   (P0,P1,P2,P3,P4,P5,P6),(0,1,2,3,4,5,6),
-  (0,1,2,3,4,5,6,7,8,9,10,11,12,13),(0,1,2,3,4,5,6,0,1,2,3,4,5,6),
-  (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
-    coord_max,coord_max,coord_max,coord_max,coord_max,coord_max,coord_max),
   (usize,usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None,None),7
 ];
 #[cfg(feature="8d")] impl_tree![Tree8,Branch8,Node8,MState8,get_bounds8,
   (P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7),
-  (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15),(0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7),
-  (coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,coord_min,
-    coord_max,coord_max,coord_max,coord_max,coord_max,coord_max,coord_max,coord_max),
   (usize,usize,usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None,None,None),8
 ];
 
@@ -480,17 +484,32 @@ pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug wher
   fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static;
+  fn get_bounds(&self) -> P::Bounds;
 }
 
+// return value: (tree, remove_trees, create_trees)
 pub async fn merge<T,P,V>(branch_factor: usize, max_depth: usize, inserts: &[(&P,&V)],
-trees: &[Arc<Mutex<T>>], next_tree: &mut TreeRef) -> (T,HashMap<TreeRef,Arc<Mutex<T>>>)
+roots: &[(TreeRef,Arc<Mutex<T>>)], next_tree: &mut TreeRef)
+-> (T,Vec<TreeRef>,HashMap<TreeRef,Arc<Mutex<T>>>)
 where P: Point, V: Value, T: Tree<P,V> {
   let mut lists = vec![];
   let mut refs = vec![];
-  for tree in trees.iter() {
-    let (list,xrefs) = tree.lock().await.list();
-    lists.push(list);
-    refs.extend(xrefs);
+  let mut rm_trees = vec![];
+  let mut bounds = Vec::with_capacity(roots.len());
+  for (r,t) in roots.iter() {
+    bounds.push(t.lock().await.get_bounds());
+  }
+  let intersecting = calc_overlap::<P::Bounds>(&bounds);
+  // TODO: also check for overlaps in refs... associate bounds with refs
+  for ((r,tree),overlap) in roots.iter().zip(intersecting) {
+    if overlap {
+      let (list,xrefs) = tree.lock().await.list();
+      lists.push(list);
+      refs.extend(xrefs);
+      rm_trees.push(*r);
+    } else {
+      refs.push(*r);
+    }
   }
   let mut rows = vec![];
   rows.extend_from_slice(inserts);
@@ -499,10 +518,21 @@ where P: Point, V: Value, T: Tree<P,V> {
       (&pv.0,&pv.1)
     }).collect::<Vec<_>>());
   }
-  // TODO: merge overlapping refs
-  // TODO: split large intersecting buckets
-  // TODO: include refs into build()
-  T::build(branch_factor, max_depth, &rows, &refs, next_tree)
+  let (t, create_trees) = T::build(branch_factor, max_depth, &rows, &refs, next_tree);
+  (t, rm_trees, create_trees)
+}
+
+fn calc_overlap<X>(bounds: &[X]) -> Vec<bool> where X: Overlap {
+  let mut res = Vec::with_capacity(bounds.len());
+  for i in 0..bounds.len() {
+    for j in i+1..bounds.len() {
+      if bounds[i].overlap(&bounds[j]) {
+        res[i] = true;
+        res[j] = true;
+      }
+    }
+  }
+  res
 }
 
 fn find_separation<X>(amin: &X, amax: &X, bmin: &X, bmax: &X, is_min: bool) -> X where X: Scalar {

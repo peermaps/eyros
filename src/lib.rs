@@ -43,9 +43,13 @@ pub enum Coord<X> where X: Scalar {
 
 #[async_trait::async_trait]
 pub trait Point: 'static {
-  type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes;
+  type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes+Overlap;
   async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized, T: Tree<Self,V>;
+}
+
+pub trait Overlap {
+  fn overlap(&self, other: &Self) -> bool;
 }
 
 macro_rules! impl_point {
@@ -68,18 +72,19 @@ macro_rules! impl_point {
         let trees = &mut db.trees;
         let merge_trees = db.roots.iter()
           .take_while(|r| { r.is_some() })
-          .map(|r| {
-            Arc::clone(trees.get(&r.unwrap()).unwrap())
+          .map(|tr| {
+            let r = tr.unwrap();
+            (r,Arc::clone(trees.get(&r).unwrap()))
           })
-          .collect::<Vec<Arc<Mutex<T>>>>();
-        let (t,ext_trees) = tree::merge(
+          .collect::<Vec<(TreeRef,Arc<Mutex<T>>)>>();
+        let (t,rm_trees,create_trees) = tree::merge(
           9, 6, inserts.as_slice(), merge_trees.as_slice(), &mut db.next_tree
         ).await;
         //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
-        db.roots.iter().take_while(|r| { r.is_some() }).for_each(|r| {
-          trees.remove(&r.unwrap());
+        rm_trees.iter().for_each(|r| {
+          trees.remove(r);
         });
-        ext_trees.iter().for_each(|(r,t)| {
+        create_trees.iter().for_each(|(r,t)| {
           trees.insert(*r,Arc::clone(t));
         });
         trees.insert(db.next_tree, Arc::new(Mutex::new(t)));
