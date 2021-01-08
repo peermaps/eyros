@@ -21,19 +21,16 @@ macro_rules! impl_to_bytes {
         offset += self.bounds.write_bytes(&mut buf[offset..])?;
  
         match self.root.as_ref() {
-          $Node::Data(data) => {
-            $write_data_bytes(data, &mut buf[offset..])?;
+          $Node::Data(data,refs) => {
+            $write_data_bytes(data, refs, &mut buf[offset..])?;
           },
           $Node::Branch(branch) => {
             //let (n,_) = alloc.get(&0).unwrap();
             //assert_eq![*n, hsize, "n ({}) != hsize ({})", *n, hsize];
             //assert_eq![*n, offset+4, "n ({}) != offset ({}+4)", *n, offset];
-            offset += ((hsize*3+0) as u32).write_bytes(&mut buf[offset..])?;
+            offset += ((hsize*2+0) as u32).write_bytes(&mut buf[offset..])?;
             //assert_eq![offset, hsize, "offset ({}) != hsize ({})", offset, hsize];
             $write_branch_bytes(branch, &alloc, offset, &mut buf)?;
-          },
-          $Node::Ref(r) => {
-            write_ref_bytes(*r, &mut buf[offset..])?;
           },
         }
         Ok(buf)
@@ -48,7 +45,7 @@ macro_rules! impl_to_bytes {
       let mut offset = hsize;
       while let Some(node) = cursors.pop() {
         match node {
-          $Node::Data(_data) => {},
+          $Node::Data(_,_) => {},
           $Node::Branch(branch) => {
             let size = branch.count_bytes();
             alloc.insert(index, (offset,size));
@@ -65,7 +62,6 @@ macro_rules! impl_to_bytes {
             }
             index += 1;
           },
-          $Node::Ref(_r) => {}
         }
       }
       (alloc,offset)
@@ -90,16 +86,13 @@ macro_rules! impl_to_bytes {
             match b.as_ref() {
               $Node::Branch(branch) => {
                 let (j,_) = alloc.get(&i).unwrap();
-                offset += (((*j)*3+0) as u32).write_bytes(&mut buf[offset..])?;
+                offset += (((*j)*2+0) as u32).write_bytes(&mut buf[offset..])?;
                 i += 1;
                 cursors.push(branch);
               },
-              $Node::Data(data) => {
-                offset += $write_data_bytes(data, &mut buf[offset..])?;
+              $Node::Data(data, refs) => {
+                offset += $write_data_bytes(data, refs, &mut buf[offset..])?;
               },
-              $Node::Ref(r) => {
-                offset += write_ref_bytes(*r, &mut buf[offset..])?;
-              }
             }
           }
         }
@@ -125,10 +118,11 @@ macro_rules! impl_to_bytes {
       Ok(offset)
     }
 
-    fn $write_data_bytes<$($T),+,V>(rows: &Vec<(($(Coord<$T>),+),V)>, buf: &mut [u8]) -> Result<usize,Error>
+    fn $write_data_bytes<$($T),+,V>(rows: &[(($(Coord<$T>),+),V)],
+    refs: &[TreeRef], buf: &mut [u8]) -> Result<usize,Error>
     where $($T: Scalar),+, V: Value {
       let mut offset = 0;
-      offset += ((rows.len()*3+1) as u32).write_bytes(&mut buf[offset..])?;
+      offset += (((rows.len()<<1) + (refs.len()<<17) + 1) as u32).write_bytes(&mut buf[offset..])?;
       for _j in 0..(rows.len()+7)/8 {
         buf[offset] = 0;
         offset += 1;
@@ -137,13 +131,12 @@ macro_rules! impl_to_bytes {
         offset += $write_point_bytes(&row.0, &mut buf[offset..])?;
         offset += row.1.write_bytes(&mut buf[offset..])?;
       }
+      for r in refs.iter() {
+        offset += r.write_bytes(&mut buf[offset..])?;
+      }
       Ok(offset)
     }
   }
-}
-
-fn write_ref_bytes(r: TreeRef, buf: &mut [u8]) -> Result<usize,Error> {
-  ((r*3+2) as u32).write_bytes(buf)
 }
 
 #[cfg(feature="2d")] impl_to_bytes![

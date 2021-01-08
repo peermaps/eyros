@@ -42,7 +42,7 @@ pub enum Coord<X> where X: Scalar {
 }
 
 #[async_trait::async_trait]
-pub trait Point: 'static {
+pub trait Point: 'static+Clone {
   type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes+Overlap;
   async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized, T: Tree<Self,V>;

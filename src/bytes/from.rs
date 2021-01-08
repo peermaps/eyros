@@ -30,20 +30,17 @@ macro_rules! impl_from_bytes {
         );
         let (s,n) = u32::from_bytes(&src[offset..])?;
         offset += s;
-        let root = match n%3 {
+        let root = match n%2 {
           0 => {
-            let root = $parse_branch(&src, (n/3) as usize, 0)?;
+            let root = $parse_branch(&src, (n/2) as usize, 0)?;
             root
           },
           1 => {
-            let (s,data) = $parse_data(&src[offset..], (n/3) as usize)?;
+            let (s,data) = $parse_data(&src[offset..], n as usize)?;
             offset += s;
             data
           },
-          2 => {
-            $Node::Ref((n/3) as TreeRef)
-          },
-          _ => panic!["unexpected value for n%3: {}", n%3]
+          _ => panic!["unexpected value for n%2: {}", n%2]
         };
         Ok((offset, $Tree {
           root: Arc::new(root),
@@ -71,38 +68,32 @@ macro_rules! impl_from_bytes {
       for _ in 0..pivot_len {
         let (s,n) = u32::from_bytes(&src[offset..])?;
         offset += s;
-        match n%3 {
+        match n%2 {
           0 => {
-            intersections.push(Arc::new($parse_branch(&src, (n/3) as usize, depth+1)?));
+            intersections.push(Arc::new($parse_branch(&src, (n/2) as usize, depth+1)?));
           },
           1 => {
-            let (s,data) = $parse_data(&src[offset..], (n/3) as usize)?;
+            let (s,data) = $parse_data(&src[offset..], n as usize)?;
             offset += s;
             intersections.push(Arc::new(data));
           },
-          2 => {
-            intersections.push(Arc::new($Node::Ref((n/3) as TreeRef)));
-          },
-          _ => panic!["unexpected value for n%3: {}", n%3]
+          _ => panic!["unexpected value for n%2: {}", n%2]
         }
       }
       let mut nodes = vec![];
       for _ in 0..pivot_len+1 {
         let (s,n) = u32::from_bytes(&src[offset..])?;
         offset += s;
-        match n%3 {
+        match n%2 {
           0 => {
-            nodes.push(Arc::new($parse_branch(&src, (n/3) as usize, depth+1)?));
+            nodes.push(Arc::new($parse_branch(&src, (n/2) as usize, depth+1)?));
           },
           1 => {
-            let (s,data) = $parse_data(&src[offset..], (n/3) as usize)?;
+            let (s,data) = $parse_data(&src[offset..], n as usize)?;
             offset += s;
             nodes.push(Arc::new(data));
           },
-          2 => {
-            intersections.push(Arc::new($Node::Ref((n/3) as TreeRef)));
-          },
-          _ => panic!["unexpected value for n%3: {}", n%3]
+          _ => panic!["unexpected value for n%2: {}", n%2]
         }
       }
       Ok($Node::Branch($Branch {
@@ -112,13 +103,15 @@ macro_rules! impl_from_bytes {
       }))
     }
 
-    fn $parse_data<$($T),+,V>(src: &[u8], len: usize) -> Result<(usize,$Node<$($T),+,V>),Error>
+    fn $parse_data<$($T),+,V>(src: &[u8], n: usize) -> Result<(usize,$Node<$($T),+,V>),Error>
     where $($T: Scalar),+, V: Value {
       let mut offset = 0;
-      let mut data: Vec<(($(Coord<$T>),+),V)> = Vec::with_capacity(len);
-      let dbf = &src[offset..offset+(len+7)/8];
-      offset += (len+7)/8;
-      for i in 0..len {
+      let (data_len,ref_len) = ((n>>1)&0xffff,n>>17);
+      let mut data: Vec<(($(Coord<$T>),+),V)> = Vec::with_capacity(data_len);
+      let mut refs: Vec<TreeRef> = vec![];
+      let dbf = &src[offset..offset+(data_len+7)/8];
+      offset += (data_len+7)/8;
+      for i in 0..data_len {
         let bitfield = src[offset];
         offset += 1;
         let point = ($(
@@ -144,7 +137,12 @@ macro_rules! impl_from_bytes {
           data.push((point,value));
         }
       }
-      Ok((offset,$Node::Data(data)))
+      for i in 0..ref_len {
+        let (s,r) = varint::decode(&src[offset..])?;
+        offset += s;
+        refs.push(r);
+      }
+      Ok((offset,$Node::Data(data,refs)))
     }
   }
 }

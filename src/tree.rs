@@ -19,15 +19,33 @@ impl Build {
   }
 }
 
+#[derive(Clone)]
+pub enum InsertValue<'a,V> where V: Value {
+  Value(&'a V),
+  Ref(TreeRef),
+}
+
 macro_rules! impl_tree {
-  ($Tree:ident,$Branch:ident,$Node:ident,$MState:ident,$get_bounds:ident,
+  ($Tree:ident,$Branch:ident,$Node:ident,$MState:ident,$get_bounds:ident,$build_data:ident,
   ($($T:tt),+),($($i:tt),+),($($u:ty),+),($($n:tt),+),$dim:expr) => {
     #[derive(Debug)]
     pub enum $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
       Branch($Branch<$($T),+,V>),
-      Data(Vec<(($(Coord<$T>),+),V)>),
-      Ref(TreeRef)
+      // TODO: store TreeRef with inline bounds
+      Data(Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef>),
     }
+    fn $build_data<'a,$($T),+,V>(rows: &[(($(Coord<$T>),+),InsertValue<'a,V>)]) -> $Node<$($T),+,V>
+    where $($T: Scalar),+, V: Value {
+      let (points, refs) = rows.iter().fold((vec![],vec![]),|(mut points, mut refs), pv| {
+        match pv.1 {
+          InsertValue::Value(v) => points.push((pv.0.clone(),v.clone())),
+          InsertValue::Ref(r) => refs.push(r),
+        }
+        (points,refs)
+      });
+      $Node::Data(points, refs)
+    }
+
     #[derive(Debug)]
     pub struct $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub pivots: ($(Option<Vec<$T>>),+),
@@ -38,8 +56,7 @@ macro_rules! impl_tree {
     pub struct $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
       pub branch_factor: usize,
       pub max_depth: usize,
-      pub inserts: &'a [(&'a ($(Coord<$T>),+),&'a V)],
-      pub refs: &'a [TreeRef],
+      pub inserts: &'a [(($(Coord<$T>),+),InsertValue<'a,V>)],
       pub matched: Vec<bool>,
       pub next_tree: TreeRef,
       pub ext_trees: HashMap<TreeRef,Arc<Mutex<$Tree<$($T),+,V>>>>,
@@ -48,7 +65,7 @@ macro_rules! impl_tree {
 
     impl<'a,$($T),+,V> $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
       fn next<X>(&mut self, x: &X, build: &Build, index: &mut usize,
-      f: Box<dyn Fn (&X,&[(&'a ($(Coord<$T>),+),&'a V)], &usize) -> bool>) -> Build {
+      f: Box<dyn Fn (&X,&[(($(Coord<$T>),+),InsertValue<'a,V>)], &usize) -> bool>) -> Build {
         let matched = &self.matched;
         let inserts = &self.inserts;
         // partition:
@@ -71,17 +88,17 @@ macro_rules! impl_tree {
         }
       }
       fn build(&mut self, build: &Build) -> $Node<$($T),+,V> {
+        // TODO: insert self.refs into the construction
         let rlen = build.range.1 - build.range.0;
         if rlen == 0 {
-          return $Node::Data(vec![]);
+          return $Node::Data(vec![],vec![]);
         } else if rlen < self.branch_factor {
           let matched = &mut self.matched;
           let inserts = &self.inserts;
-          return $Node::Data(self.sorted[build.range.0..build.range.1].iter().map(|i| {
+          return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
             matched[*i] = true;
-            let pv = &inserts[*i];
-            (($((pv.0).$i.clone()),+),pv.1.clone())
-          }).collect());
+            inserts[*i].clone()
+          }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,V>)>>());
         }
         if build.level >= self.max_depth {
           let r = self.next_tree;
@@ -96,7 +113,7 @@ macro_rules! impl_tree {
           //eprintln!["EXT {} bytes", t.count_bytes()];
           self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
           self.next_tree += 1;
-          return $Node::Ref(r);
+          return $Node::Data(vec![],vec![r]);
         }
 
         let n = (self.branch_factor-1).min(rlen-1); // number of pivots
@@ -159,11 +176,10 @@ macro_rules! impl_tree {
               if next.range.1 - next.range.0 == rlen {
                 let matched = &mut self.matched;
                 let inserts = &self.inserts;
-                Arc::new($Node::Data(self.sorted[next.range.0..next.range.1].iter().map(|i| {
-                  let pv = &inserts[*i];
+                Arc::new($build_data(&self.sorted[next.range.0..next.range.1].iter().map(|i| {
                   matched[*i] = true;
-                  (pv.0.clone(),pv.1.clone())
-                }).collect()))
+                  inserts[*i].clone()
+                }).collect::<Vec<(_,InsertValue<'_,V>)>>()))
               } else {
                 Arc::new(self.build(&next))
               }
@@ -223,19 +239,17 @@ macro_rules! impl_tree {
 
         let node_count = nodes.iter().fold(0usize, |count,node| {
           count + match node.as_ref() {
-            $Node::Data(bs) => if bs.is_empty() { 0 } else { 1 },
+            $Node::Data(bs,rs) => if bs.is_empty() && rs.is_empty() { 0 } else { 1 },
             $Node::Branch(_) => 1,
-            $Node::Ref(_) => 1,
           }
         });
         if node_count <= 1 {
           let matched = &mut self.matched;
           let inserts = &self.inserts;
-          return $Node::Data(self.sorted[build.range.0..build.range.1].iter().map(|i| {
-            let (p,v) = &inserts[*i];
+          return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
             matched[*i] = true;
-            ((*p).clone(),(*v).clone())
-          }).collect());
+            inserts[*i].clone()
+          }).collect::<Vec<(_,InsertValue<'_,V>)>>());
         }
 
         $Node::Branch($Branch {
@@ -247,14 +261,13 @@ macro_rules! impl_tree {
     }
 
     impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
-      pub fn build(branch_factor: usize, max_depth: usize, inserts: &[(&($(Coord<$T>),+),&V)],
-      refs: &[TreeRef], next_tree: &mut TreeRef)
-      -> ($Node<$($T),+,V>,HashMap<TreeRef,Arc<Mutex<$Tree<$($T),+,V>>>>) {
+      pub fn build<'a>(branch_factor: usize, max_depth: usize,
+      inserts: &[(($(Coord<$T>),+),InsertValue<'a,V>)],
+      next_tree: &mut TreeRef) -> ($Node<$($T),+,V>,HashMap<TreeRef,Arc<Mutex<$Tree<$($T),+,V>>>>) {
         let mut mstate = $MState {
           branch_factor,
           max_depth,
           inserts,
-          refs,
           matched: vec![false;inserts.len()],
           next_tree: *next_tree,
           ext_trees: HashMap::new(),
@@ -284,13 +297,12 @@ macro_rules! impl_tree {
 
     #[async_trait::async_trait]
     impl<$($T),+,V> Tree<($(Coord<$T>),+),V> for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
-      fn build(branch_factor: usize, max_depth: usize, rows: &[(&($(Coord<$T>),+),&V)],
-      refs: &[TreeRef], next_tree: &mut TreeRef) -> (Self,HashMap<TreeRef,Arc<Mutex<Self>>>) {
+      fn build<'a>(branch_factor: usize, max_depth: usize, rows: &[(($(Coord<$T>),+),InsertValue<'a,V>)],
+      next_tree: &mut TreeRef) -> (Self,HashMap<TreeRef,Arc<Mutex<Self>>>) {
         let (root,ext_trees) = $Branch::build(
           branch_factor,
           max_depth,
           rows,
-          refs,
           next_tree
         );
         (Self {
@@ -313,13 +325,11 @@ macro_rules! impl_tree {
                 cursors.push(Arc::clone(b));
               }
             },
-            $Node::Data(data) => {
+            $Node::Data(data,rs) => {
               rows.extend(data.iter().map(|pv| {
                 (pv.0.clone(),pv.1.clone())
               }).collect::<Vec<_>>());
-            },
-            $Node::Ref(r) => {
-              refs.push(*r);
+              refs.extend_from_slice(&rs);
             },
           }
         }
@@ -383,7 +393,7 @@ macro_rules! impl_tree {
                   _ => panic!["unexpected level modulo dimension"]
                 }
               },
-              $Node::Data(data) => {
+              $Node::Data(data,rs) => {
                 queue.extend(data.iter()
                   .filter(|pv| {
                     intersect_coord(&(pv.0).0, &(bbox.0).0, &(bbox.1).0)
@@ -395,16 +405,20 @@ macro_rules! impl_tree {
                   })
                   .collect::<Vec<_>>()
                 );
+                refs.extend_from_slice(&rs);
               },
-              $Node::Ref(r) => {
-                refs.push(*r);
-              }
             }
           }
         }))))
       }
       fn get_bounds(&self) -> <($(Coord<$T>),+) as Point>::Bounds {
         self.bounds.clone()
+      }
+      fn get_bounds_interval(&self) -> ($(Coord<$T>),+) {
+        ($(Coord::Interval(
+          (self.bounds.0).$i.clone(),
+          (self.bounds.1).$i.clone()
+        )),+)
       }
     }
 
@@ -417,7 +431,8 @@ macro_rules! impl_tree {
       }
     }
 
-    fn $get_bounds<$($T),+,V,I>(mut indexes: I, rows: &[(&($(Coord<$T>),+),&V)]) -> (($($T),+),($($T),+))
+    fn $get_bounds<$($T),+,V,I>(mut indexes: I,
+    rows: &[(($(Coord<$T>),+),InsertValue<'_,V>)]) -> (($($T),+),($($T),+))
     where $($T: Scalar),+, V: Value, I: Iterator<Item=usize> {
       let ibounds = (
         ($(
@@ -449,42 +464,43 @@ macro_rules! impl_tree {
   }
 }
 
-#[cfg(feature="2d")] impl_tree![Tree2,Branch2,Node2,MState2,get_bounds2,
+#[cfg(feature="2d")] impl_tree![Tree2,Branch2,Node2,MState2,get_bounds2,build_data2,
   (P0,P1),(0,1),(usize,usize),(None,None),2
 ];
-#[cfg(feature="3d")] impl_tree![Tree3,Branch3,Node3,MState3,get_bounds3,
+#[cfg(feature="3d")] impl_tree![Tree3,Branch3,Node3,MState3,get_bounds3,build_data3,
   (P0,P1,P2),(0,1,2),(usize,usize,usize),(None,None,None),3
 ];
-#[cfg(feature="4d")] impl_tree![Tree4,Branch4,Node4,Mstate4,get_bounds4,
+#[cfg(feature="4d")] impl_tree![Tree4,Branch4,Node4,Mstate4,get_bounds4,build_data4,
   (P0,P1,P2,P3),(0,1,2,3),(usize,usize,usize,usize),(None,None,None,None),4
 ];
-#[cfg(feature="5d")] impl_tree![Tree5,Branch5,Node5,MState5,get_bounds5,
+#[cfg(feature="5d")] impl_tree![Tree5,Branch5,Node5,MState5,get_bounds5,build_data5,
   (P0,P1,P2,P3,P4),(0,1,2,3,4),
   (usize,usize,usize,usize,usize),(None,None,None,None,None),5
 ];
-#[cfg(feature="6d")] impl_tree![Tree6,Branch6,Node6,MState6,get_bounds6,
+#[cfg(feature="6d")] impl_tree![Tree6,Branch6,Node6,MState6,get_bounds6,build_data6,
   (P0,P1,P2,P3,P4,P5),(0,1,2,3,4,5),
   (usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None),6
 ];
-#[cfg(feature="7d")] impl_tree![Tree7,Branch7,Node7,MState7,get_bounds7,
+#[cfg(feature="7d")] impl_tree![Tree7,Branch7,Node7,MState7,get_bounds7,build_data7,
   (P0,P1,P2,P3,P4,P5,P6),(0,1,2,3,4,5,6),
   (usize,usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None,None),7
 ];
-#[cfg(feature="8d")] impl_tree![Tree8,Branch8,Node8,MState8,get_bounds8,
+#[cfg(feature="8d")] impl_tree![Tree8,Branch8,Node8,MState8,get_bounds8,build_data8,
   (P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7),
   (usize,usize,usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None,None,None),8
 ];
 
 #[async_trait::async_trait]
 pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug where P: Point, V: Value {
-  fn build(branch_factor: usize, max_depth: usize, rows: &[(&P,&V)],
-    refs: &[TreeRef], next_tree: &mut TreeRef)
+  fn build<'a>(branch_factor: usize, max_depth: usize,
+    rows: &[(P,InsertValue<'a,V>)], next_tree: &mut TreeRef)
     -> (Self,HashMap<TreeRef,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef>);
   fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static;
   fn get_bounds(&self) -> P::Bounds;
+  fn get_bounds_interval(&self) -> P;
 }
 
 // return value: (tree, remove_trees, create_trees)
@@ -494,8 +510,8 @@ roots: &[TreeRef], trees: &HashMap<TreeRef,Arc<Mutex<T>>>, next_tree: &mut TreeR
 where P: Point, V: Value, T: Tree<P,V> {
   let mut lists = vec![];
   let mut l_refs = vec![];
-  let mut refs = vec![];
   let mut rm_trees = vec![];
+  let mut rows: Vec<(P,InsertValue<V>)> = vec![];
 
   // TODO: quotas for deconstructed external tree per merge
   {
@@ -513,7 +529,7 @@ where P: Point, V: Value, T: Tree<P,V> {
         l_refs.extend(xrefs);
         rm_trees.push(*r);
       } else {
-        refs.push(*r);
+        rows.push((trees[r].lock().await.get_bounds_interval(),InsertValue::Ref(*r)));
       }
     }
   }
@@ -529,23 +545,25 @@ where P: Point, V: Value, T: Tree<P,V> {
       if overlap {
         let (list,xrefs) = trees[r].lock().await.list();
         lists.push(list);
-        refs.extend(xrefs);
+        for r in xrefs.iter() {
+          rows.push((trees[r].lock().await.get_bounds_interval(),InsertValue::Ref(*r)));
+        }
         rm_trees.push(*r);
       } else {
-        refs.push(*r);
+        rows.push((trees[r].lock().await.get_bounds_interval(),InsertValue::Ref(*r)));
       }
     }
   }
-  refs.extend(l_refs);
 
-  let mut rows = vec![];
-  rows.extend_from_slice(inserts);
+  rows.extend(inserts.iter().map(|pv| {
+    (pv.0.clone(),InsertValue::Value(pv.1))
+  }).collect::<Vec<_>>());
   for list in lists.iter_mut() {
     rows.extend(list.iter().map(|pv| {
-      (&pv.0,&pv.1)
+      (pv.0.clone(),InsertValue::Value(&pv.1))
     }).collect::<Vec<_>>());
   }
-  let (t, create_trees) = T::build(branch_factor, max_depth, &rows, &refs, next_tree);
+  let (t, create_trees) = T::build(branch_factor, max_depth, &rows, next_tree);
   (t, rm_trees, create_trees)
 }
 

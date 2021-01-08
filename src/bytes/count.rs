@@ -27,10 +27,7 @@ macro_rules! impl_count_bytes {
                 }
               }
             },
-            $Node::Data(_data) => {
-              bytes += node.count_bytes();
-            },
-            $Node::Ref(_r) => {
+            $Node::Data(_,_) => {
               bytes += node.count_bytes();
             },
           }
@@ -69,12 +66,14 @@ macro_rules! impl_count_bytes {
       fn count_bytes(&self) -> usize {
         match &self {
           $Node::Branch(_branch) => 4,
-          $Node::Data(rows) => 4
+          $Node::Data(rows,refs) => 4
             + (rows.len()+7)/8 // deleted bitfield
             + rows.iter().fold(0usize, |sum,row| {
               sum + $count_point_bytes(&row.0) + row.1.count_bytes()
+            })
+            + refs.iter().fold(0usize, |sum,r| {
+              sum + varint::length(*r as u64)
             }),
-          $Node::Ref(_r) => 4,
         }
       }
       fn count_from_bytes(_src: &[u8]) -> Result<usize,Error> {

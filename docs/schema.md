@@ -51,17 +51,17 @@ Each tree contains these fields:
 
 * `n` (`u32`) - branch offset, external tree id, or data length (see calculation)
 
-depending on the value of `n % 3`, the node is a:
+depending on the value of `n % 2`, the node is a:
 
-* `0` - branch pointer. `branch_offset = floor(n/3)`.
+* `0` - branch pointer. `branch_offset = n>>1`.
   byte offset to a branch in the current tree file.
   this offset is relative to the beginning of the tree file.
-* `1` - data block. `data_len = floor(n/3)`.
-  the number of inline records to read after the `n` varint.
-  a bitfield of size `floor((n/3+7)/8)` comes before the inline records where a 1 indicates that the
+* `1` - data block. `(data_len, ref_len) = ((n>>1)&0xffff, n>>17)`.
+  the number of inline records and inline refs to read after the `n` u32.
+  a bitfield of size `floor((n/2+7)/8)` comes before the inline records where a 1 indicates that the
   record has been deleted.
-* `2` - tree pointer. `tree_id = floor(n/3)`.
-  external tree file to read
+  `data_len` inline records are followed by `ref_len` inline refs.
+  each inline ref is a varint.
 
 A value of `n=1` indicates a node for an empty set (data block where `data_len=0`).
 
