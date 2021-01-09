@@ -10,15 +10,11 @@ macro_rules! impl_to_bytes {
     use crate::tree::{$Tree,$Branch,$Node};
     impl<$($T),+,V> ToBytes for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn to_bytes(&self) -> Result<Vec<u8>,Error> {
-        let hsize = varint::length(self.count as u64)
-          + self.bounds.count_bytes()
-          + self.root.count_bytes();
+        let hsize = self.root.count_bytes();
         let (alloc,size) = $allocate(&self.root, hsize);
         let mut buf = vec![0u8;size];
 
         let mut offset = 0;
-        offset += varint::encode(self.count as u64, &mut buf[offset..])?;
-        offset += self.bounds.write_bytes(&mut buf[offset..])?;
  
         match self.root.as_ref() {
           $Node::Data(data,refs) => {

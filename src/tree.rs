@@ -110,16 +110,14 @@ macro_rules! impl_tree {
           let r = self.next_tree;
           let t = $Tree {
             root: Arc::new(self.build(&build.ext())),
-            count: rlen,
-            bounds: $get_bounds(
-              self.sorted[build.range.0..build.range.1].iter().map(|i| *i),
-              self.inserts
-            ),
           };
           //eprintln!["EXT {} bytes", t.count_bytes()];
           let tr = TreeRef {
             id: r,
-            bounds: t.get_bounds_interval(),
+            bounds: $get_bounds(
+              self.sorted[build.range.0..build.range.1].iter().map(|i| *i),
+              self.inserts
+            ),
           };
           self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
           self.next_tree += 1;
@@ -273,7 +271,8 @@ macro_rules! impl_tree {
     impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub fn build<'a>(branch_factor: usize, max_depth: usize,
       inserts: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
-      next_tree: &mut TreeId) -> ($Node<$($T),+,V>,HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>) {
+      next_tree: &mut TreeId)
+      -> (TreeRef<($(Coord<$T>),+)>,$Node<$($T),+,V>,HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>) {
         let mut mstate = $MState {
           branch_factor,
           max_depth,
@@ -289,38 +288,41 @@ macro_rules! impl_tree {
             xs
           }
         };
+        let bounds = $get_bounds(
+          mstate.sorted.iter().map(|i| *i),
+          mstate.inserts
+        );
         let root = mstate.build(&Build {
           range: (0, inserts.len()),
           level: 0,
         });
         *next_tree = mstate.next_tree;
-        (root, mstate.ext_trees)
+        let tr = TreeRef {
+          id: *next_tree,
+          bounds,
+        };
+        *next_tree += 1;
+        (tr, root, mstate.ext_trees)
       }
     }
 
     #[derive(Debug)]
     pub struct $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
-      pub root: Arc<$Node<$($T),+,V>>,
-      pub bounds: (($($T),+),($($T),+)),
-      pub count: usize,
+      pub root: Arc<$Node<$($T),+,V>>
     }
 
     #[async_trait::async_trait]
     impl<$($T),+,V> Tree<($(Coord<$T>),+),V> for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn build<'a>(branch_factor: usize, max_depth: usize,
-      rows: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
-      next_tree: &mut TreeId) -> (Self,HashMap<TreeId,Arc<Mutex<Self>>>) {
-        let (root,ext_trees) = $Branch::build(
+      rows: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], next_tree: &mut TreeId)
+      -> (TreeRef<($(Coord<$T>),+)>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) {
+        let (tr,root,ext_trees) = $Branch::build(
           branch_factor,
           max_depth,
           rows,
           next_tree
         );
-        (Self {
-          root: Arc::new(root),
-          count: rows.len(),
-          bounds: $get_bounds(0..rows.len(), rows),
-        }, ext_trees)
+        (tr, Self { root: Arc::new(root) }, ext_trees)
       }
       fn list(&mut self) -> (Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>) {
         let mut cursors = vec![Arc::clone(&self.root)];
@@ -423,15 +425,6 @@ macro_rules! impl_tree {
           }
         }))))
       }
-      fn get_bounds(&self) -> <($(Coord<$T>),+) as Point>::Bounds {
-        self.bounds.clone()
-      }
-      fn get_bounds_interval(&self) -> ($(Coord<$T>),+) {
-        ($(Coord::Interval(
-          (self.bounds.0).$i.clone(),
-          (self.bounds.1).$i.clone()
-        )),+)
-      }
     }
 
     impl<$($T),+,V> $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
@@ -444,7 +437,7 @@ macro_rules! impl_tree {
     }
 
     fn $get_bounds<$($T),+,V,I>(mut indexes: I,
-    rows: &[(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)]) -> (($($T),+),($($T),+))
+    rows: &[(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)]) -> ($(Coord<$T>),+)
     where $($T: Scalar),+, V: Value, I: Iterator<Item=usize> {
       let ibounds = (
         ($(
@@ -460,12 +453,13 @@ macro_rules! impl_tree {
           }
         ),+)
       );
-      indexes.fold(ibounds, |bounds,i| {
+      let bounds = indexes.fold(ibounds, |bounds,i| {
         (
           ($(coord_min(&(rows[i].0).$i,&(bounds.0).$i)),+),
           ($(coord_max(&(rows[i].0).$i,&(bounds.1).$i)),+)
         )
-      })
+      });
+      ($(Coord::Interval((bounds.0).$i,(bounds.1).$i)),+)
     }
 
     impl<$($T),+> Overlap for (($($T),+),($($T),+)) where $($T: Scalar),+ {
@@ -512,19 +506,17 @@ macro_rules! impl_tree {
 pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug where P: Point, V: Value {
   fn build<'a>(branch_factor: usize, max_depth: usize,
     rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
-    -> (Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
+    -> (TreeRef<P>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static;
-  fn get_bounds(&self) -> P::Bounds;
-  fn get_bounds_interval(&self) -> P;
 }
 
 // return value: (tree, remove_trees, create_trees)
 pub async fn merge<T,P,V>(branch_factor: usize, max_depth: usize, inserts: &[(&P,&V)],
 roots: &[TreeRef<P>], trees: &HashMap<TreeId,Arc<Mutex<T>>>, next_tree: &mut TreeId)
--> (T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>)
+-> (TreeRef<P>,T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>)
 where P: Point, V: Value, T: Tree<P,V> {
   let mut lists = vec![];
   let mut l_refs = vec![];
@@ -575,8 +567,8 @@ where P: Point, V: Value, T: Tree<P,V> {
       (pv.0.clone(),InsertValue::Value(&pv.1))
     }).collect::<Vec<_>>());
   }
-  let (t, create_trees) = T::build(branch_factor, max_depth, &rows, next_tree);
-  (t, rm_trees, create_trees)
+  let (tr, t, create_trees) = T::build(branch_factor, max_depth, &rows, next_tree);
+  (tr, t, rm_trees, create_trees)
 }
 
 fn calc_overlap<X>(bounds: &[X]) -> Vec<bool> where X: Overlap {

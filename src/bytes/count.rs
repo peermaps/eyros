@@ -8,9 +8,7 @@ macro_rules! impl_count_bytes {
 
     impl<$($T),+,V> CountBytes for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn count_bytes(&self) -> usize {
-        let mut bytes = varint::length(self.count as u64)
-          + self.bounds.count_bytes()
-          + self.root.count_bytes();
+        let mut bytes = self.root.count_bytes();
         let mut cursors = vec![&*self.root];
         while let Some(node) = cursors.pop() {
           match &*node {

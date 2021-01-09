@@ -74,13 +74,9 @@ macro_rules! impl_point {
           .take_while(|r| r.is_some())
           .map(|r| r.as_ref().unwrap().clone())
           .collect::<Vec<TreeRef<Self>>>();
-        let (t,rm_trees,create_trees) = tree::merge(
+        let (tr,t,rm_trees,create_trees) = tree::merge(
           9, 6, inserts.as_slice(), merge_trees.as_slice(), trees, &mut db.next_tree
         ).await;
-        let tr = TreeRef {
-          id: db.next_tree,
-          bounds: t.get_bounds_interval(),
-        };
         //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
         rm_trees.iter().for_each(|r| {
           trees.remove(r);
@@ -88,7 +84,7 @@ macro_rules! impl_point {
         create_trees.iter().for_each(|(r,t)| {
           trees.insert(*r,Arc::clone(t));
         });
-        trees.insert(db.next_tree, Arc::new(Mutex::new(t)));
+        trees.insert(tr.id, Arc::new(Mutex::new(t)));
         for i in 0..merge_trees.len() {
           if i < db.roots.len() {
             db.roots[i] = None;
@@ -101,7 +97,6 @@ macro_rules! impl_point {
         } else {
           db.roots.push(Some(tr));
         }
-        db.next_tree += 1;
         Ok(())
       }
     }

@@ -33,10 +33,6 @@ tree_id=1099505501429  path=tree/00/00/00/ff/ff/a2/84/f5
 
 Each tree contains these fields:
 
-* `record_count` (`varint`) - number of records in this tree (excludes external trees)
-* `bounds` (`X,Y,...,X,Y,...`) - bounding extents of all records. tuple of minimums for each
-  dimension followed by list of maximums `(minX,minY,...,maxX,maxY,...)`
-// * `start_dim` (`varint`) - dimension that the tree starts at
 * `root` (`node`) - root of the tree
 
 # branch

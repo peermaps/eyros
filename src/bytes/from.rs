@@ -11,23 +11,6 @@ macro_rules! impl_from_bytes {
     impl<$($T),+,V> FromBytes for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn from_bytes(src: &[u8]) -> Result<(usize,Self),Error> {
         let mut offset = 0;
-        let count = {
-          let (s,x) = varint::decode(&src[offset..])?;
-          offset += s;
-          x as usize
-        };
-        let bounds = (
-          ($({
-            let (s,x) = $T::from_bytes(&src[offset..])?;
-            offset += s;
-            x
-          }),+),
-          ($({
-            let (s,x) = $T::from_bytes(&src[offset..])?;
-            offset += s;
-            x
-          }),+)
-        );
         let (s,n) = u32::from_bytes(&src[offset..])?;
         offset += s;
         let root = match n%2 {
@@ -44,8 +27,6 @@ macro_rules! impl_from_bytes {
         };
         Ok((offset, $Tree {
           root: Arc::new(root),
-          bounds,
-          count
         }))
       }
     }
