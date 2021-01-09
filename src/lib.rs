@@ -119,6 +119,7 @@ pub enum Row<P,V> where P: Point, V: Value {
 pub struct DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync,
 P: Point, V: Value, T: Tree<P,V> {
   pub storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
+  pub meta: Arc<Mutex<S>>,
   pub fields: SetupFields,
   pub roots: Vec<Option<tree::TreeRef<P>>>,
   pub trees: HashMap<tree::TreeId,Arc<Mutex<T>>>,
@@ -130,8 +131,10 @@ P: Point, V: Value, T: Tree<P,V> {
 impl<S,T,P,V> DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static,
 P: Point, V: Value, T: Tree<P,V> {
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
+    let meta = setup.storage.lock().await.open("meta").await?;
     Ok(Self {
       storage: Arc::clone(&setup.storage),
+      meta: Arc::new(Mutex::new(meta)),
       fields: setup.fields,
       roots: vec![],
       next_tree: 0,
