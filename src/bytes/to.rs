@@ -119,7 +119,7 @@ macro_rules! impl_to_bytes {
     }
 
     fn $write_data_bytes<$($T),+,V>(rows: &[(($(Coord<$T>),+),V)],
-    refs: &[TreeRef], buf: &mut [u8]) -> Result<usize,Error>
+    refs: &[TreeRef<($(Coord<$T>),+)>], buf: &mut [u8]) -> Result<usize,Error>
     where $($T: Scalar),+, V: Value {
       let mut offset = 0;
       offset += (((rows.len()<<1) + (refs.len()<<17) + 1) as u32).write_bytes(&mut buf[offset..])?;
@@ -132,7 +132,14 @@ macro_rules! impl_to_bytes {
         offset += row.1.write_bytes(&mut buf[offset..])?;
       }
       for r in refs.iter() {
-        offset += r.write_bytes(&mut buf[offset..])?;
+        offset += varint::encode(r.id, &mut buf[offset..])?;
+        $(match &r.bounds.$i {
+          Coord::Interval(x,y) => {
+            offset += x.write_bytes(&mut buf[offset..])?;
+            offset += y.write_bytes(&mut buf[offset..])?;
+          },
+          _ => panic!["unexpected scalar in TreeRef bound"]
+        };)+
       }
       Ok(offset)
     }

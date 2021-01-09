@@ -5,7 +5,7 @@ pub use store::Storage;
 mod setup;
 pub use setup::{Setup,SetupFields};
 mod tree;
-pub use tree::{Tree,TreeRef};
+pub use tree::{Tree,TreeRef,TreeId};
 mod bytes;
 mod query;
 pub use query::QueryStream;
@@ -42,7 +42,7 @@ pub enum Coord<X> where X: Scalar {
 }
 
 #[async_trait::async_trait]
-pub trait Point: 'static+Clone {
+pub trait Point: 'static+Overlap+Clone {
   type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes+Overlap;
   async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized, T: Tree<Self,V>;
@@ -72,11 +72,15 @@ macro_rules! impl_point {
         let trees = &mut db.trees;
         let merge_trees = db.roots.iter()
           .take_while(|r| r.is_some())
-          .map(|r| r.unwrap())
-          .collect::<Vec<TreeRef>>();
+          .map(|r| r.as_ref().unwrap().clone())
+          .collect::<Vec<TreeRef<Self>>>();
         let (t,rm_trees,create_trees) = tree::merge(
           9, 6, inserts.as_slice(), merge_trees.as_slice(), trees, &mut db.next_tree
         ).await;
+        let tr = TreeRef {
+          id: db.next_tree,
+          bounds: t.get_bounds_interval(),
+        };
         //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
         rm_trees.iter().for_each(|r| {
           trees.remove(r);
@@ -93,9 +97,9 @@ macro_rules! impl_point {
           }
         }
         if merge_trees.len() < db.roots.len() {
-          db.roots[merge_trees.len()] = Some(db.next_tree);
+          db.roots[merge_trees.len()] = Some(tr);
         } else {
-          db.roots.push(Some(db.next_tree));
+          db.roots.push(Some(tr));
         }
         db.next_tree += 1;
         Ok(())
@@ -121,9 +125,9 @@ pub struct DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync,
 P: Point, V: Value, T: Tree<P,V> {
   pub storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
   pub fields: SetupFields,
-  pub roots: Vec<Option<tree::TreeRef>>,
-  pub trees: HashMap<tree::TreeRef,Arc<Mutex<T>>>,
-  pub next_tree: TreeRef,
+  pub roots: Vec<Option<tree::TreeRef<P>>>,
+  pub trees: HashMap<tree::TreeId,Arc<Mutex<T>>>,
+  pub next_tree: TreeId,
   _point: std::marker::PhantomData<P>,
   _value: std::marker::PhantomData<V>,
 }
@@ -148,7 +152,7 @@ P: Point, V: Value, T: Tree<P,V> {
     let mut queries = vec![];
     for root in self.roots.iter() {
       if let Some(r) = root {
-        let t = self.trees.get(&r).unwrap();
+        let t = self.trees.get(&r.id).unwrap();
         queries.push(t.lock().await.query(Arc::clone(&self.storage), bbox));
       }
     }

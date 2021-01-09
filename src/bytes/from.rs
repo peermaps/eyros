@@ -108,7 +108,7 @@ macro_rules! impl_from_bytes {
       let mut offset = 0;
       let (data_len,ref_len) = ((n>>1)&0xffff,n>>17);
       let mut data: Vec<(($(Coord<$T>),+),V)> = Vec::with_capacity(data_len);
-      let mut refs: Vec<TreeRef> = vec![];
+      let mut refs: Vec<TreeRef<($(Coord<$T>),+)>> = vec![];
       let dbf = &src[offset..offset+(data_len+7)/8];
       offset += (data_len+7)/8;
       for i in 0..data_len {
@@ -137,10 +137,19 @@ macro_rules! impl_from_bytes {
           data.push((point,value));
         }
       }
-      for i in 0..ref_len {
+      for _i in 0..ref_len {
         let (s,r) = varint::decode(&src[offset..])?;
         offset += s;
-        refs.push(r);
+        refs.push(TreeRef {
+          id: r,
+          bounds: ($({
+            let (s,x) = $T::from_bytes(&src[offset..])?;
+            offset += s;
+            let (s,y) = $T::from_bytes(&src[offset..])?;
+            offset += s;
+            Coord::Interval(x,y)
+          }),+)
+        });
       }
       Ok((offset,$Node::Data(data,refs)))
     }

@@ -72,7 +72,11 @@ macro_rules! impl_count_bytes {
               sum + $count_point_bytes(&row.0) + row.1.count_bytes()
             })
             + refs.iter().fold(0usize, |sum,r| {
-              sum + varint::length(*r as u64)
+              sum + varint::length(r.id as u64)
+                $(+ match &r.bounds.$i {
+                  Coord::Interval(x,y) => x.count_bytes() + y.count_bytes(),
+                  _ => panic!["unexpected scalar in TreeRef bound"],
+                })+
             }),
         }
       }

@@ -5,7 +5,13 @@ use crate::unfold::unfold;
 use random_access_storage::RandomAccess;
 use std::collections::HashMap;
 
-pub type TreeRef = u64;
+pub type TreeId = u64;
+#[derive(Debug,Clone)]
+pub struct TreeRef<P> {
+  pub id: TreeId,
+  pub bounds: P,
+}
+
 pub struct Build {
   pub level: usize,
   pub range: (usize,usize), // (start,end) indexes into sorted
@@ -20,9 +26,9 @@ impl Build {
 }
 
 #[derive(Clone)]
-pub enum InsertValue<'a,V> where V: Value {
+pub enum InsertValue<'a,P,V> where P: Point, V: Value {
   Value(&'a V),
-  Ref(TreeRef),
+  Ref(TreeRef<P>),
 }
 
 macro_rules! impl_tree {
@@ -31,15 +37,15 @@ macro_rules! impl_tree {
     #[derive(Debug)]
     pub enum $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
       Branch($Branch<$($T),+,V>),
-      // TODO: store TreeRef with inline bounds
-      Data(Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef>),
+      Data(Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>),
     }
-    fn $build_data<'a,$($T),+,V>(rows: &[(($(Coord<$T>),+),InsertValue<'a,V>)]) -> $Node<$($T),+,V>
-    where $($T: Scalar),+, V: Value {
+    fn $build_data<'a,$($T),+,V>(rows: &[
+      (($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)
+    ]) -> $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
       let (points, refs) = rows.iter().fold((vec![],vec![]),|(mut points, mut refs), pv| {
-        match pv.1 {
-          InsertValue::Value(v) => points.push((pv.0.clone(),v.clone())),
-          InsertValue::Ref(r) => refs.push(r),
+        match &pv.1 {
+          InsertValue::Value(v) => points.push((pv.0.clone(),(*v).clone())),
+          InsertValue::Ref(r) => refs.push(r.clone()),
         }
         (points,refs)
       });
@@ -56,16 +62,16 @@ macro_rules! impl_tree {
     pub struct $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
       pub branch_factor: usize,
       pub max_depth: usize,
-      pub inserts: &'a [(($(Coord<$T>),+),InsertValue<'a,V>)],
+      pub inserts: &'a [(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
       pub matched: Vec<bool>,
-      pub next_tree: TreeRef,
-      pub ext_trees: HashMap<TreeRef,Arc<Mutex<$Tree<$($T),+,V>>>>,
+      pub next_tree: TreeId,
+      pub ext_trees: HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>,
       pub sorted: Vec<usize>,
     }
 
     impl<'a,$($T),+,V> $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
       fn next<X>(&mut self, x: &X, build: &Build, index: &mut usize,
-      f: Box<dyn Fn (&X,&[(($(Coord<$T>),+),InsertValue<'a,V>)], &usize) -> bool>) -> Build {
+      f: Box<dyn Fn (&X,&[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], &usize) -> bool>) -> Build {
         let matched = &self.matched;
         let inserts = &self.inserts;
         // partition:
@@ -98,7 +104,7 @@ macro_rules! impl_tree {
           return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
             matched[*i] = true;
             inserts[*i].clone()
-          }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,V>)>>());
+          }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)>>());
         }
         if build.level >= self.max_depth {
           let r = self.next_tree;
@@ -111,9 +117,13 @@ macro_rules! impl_tree {
             ),
           };
           //eprintln!["EXT {} bytes", t.count_bytes()];
+          let tr = TreeRef {
+            id: r,
+            bounds: t.get_bounds_interval(),
+          };
           self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
           self.next_tree += 1;
-          return $Node::Data(vec![],vec![r]);
+          return $Node::Data(vec![],vec![tr]);
         }
 
         let n = (self.branch_factor-1).min(rlen-1); // number of pivots
@@ -179,7 +189,7 @@ macro_rules! impl_tree {
                 Arc::new($build_data(&self.sorted[next.range.0..next.range.1].iter().map(|i| {
                   matched[*i] = true;
                   inserts[*i].clone()
-                }).collect::<Vec<(_,InsertValue<'_,V>)>>()))
+                }).collect::<Vec<(_,InsertValue<'_,_,V>)>>()))
               } else {
                 Arc::new(self.build(&next))
               }
@@ -249,7 +259,7 @@ macro_rules! impl_tree {
           return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
             matched[*i] = true;
             inserts[*i].clone()
-          }).collect::<Vec<(_,InsertValue<'_,V>)>>());
+          }).collect::<Vec<(_,InsertValue<'_,($(Coord<$T>),+),V>)>>());
         }
 
         $Node::Branch($Branch {
@@ -262,8 +272,8 @@ macro_rules! impl_tree {
 
     impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub fn build<'a>(branch_factor: usize, max_depth: usize,
-      inserts: &[(($(Coord<$T>),+),InsertValue<'a,V>)],
-      next_tree: &mut TreeRef) -> ($Node<$($T),+,V>,HashMap<TreeRef,Arc<Mutex<$Tree<$($T),+,V>>>>) {
+      inserts: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
+      next_tree: &mut TreeId) -> ($Node<$($T),+,V>,HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>) {
         let mut mstate = $MState {
           branch_factor,
           max_depth,
@@ -297,8 +307,9 @@ macro_rules! impl_tree {
 
     #[async_trait::async_trait]
     impl<$($T),+,V> Tree<($(Coord<$T>),+),V> for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
-      fn build<'a>(branch_factor: usize, max_depth: usize, rows: &[(($(Coord<$T>),+),InsertValue<'a,V>)],
-      next_tree: &mut TreeRef) -> (Self,HashMap<TreeRef,Arc<Mutex<Self>>>) {
+      fn build<'a>(branch_factor: usize, max_depth: usize,
+      rows: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
+      next_tree: &mut TreeId) -> (Self,HashMap<TreeId,Arc<Mutex<Self>>>) {
         let (root,ext_trees) = $Branch::build(
           branch_factor,
           max_depth,
@@ -311,7 +322,7 @@ macro_rules! impl_tree {
           bounds: $get_bounds(0..rows.len(), rows),
         }, ext_trees)
       }
-      fn list(&mut self) -> (Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef>) {
+      fn list(&mut self) -> (Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>) {
         let mut cursors = vec![Arc::clone(&self.root)];
         let mut rows = vec![];
         let mut refs = vec![];
@@ -405,7 +416,8 @@ macro_rules! impl_tree {
                   })
                   .collect::<Vec<_>>()
                 );
-                refs.extend_from_slice(&rs);
+                // TODO: check bbox against ref bounds
+                refs.extend(rs.iter().map(|r| { r.id }).collect::<Vec<TreeId>>());
               },
             }
           }
@@ -424,7 +436,7 @@ macro_rules! impl_tree {
 
     impl<$($T),+,V> $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       async fn load<S>(storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
-      r: TreeRef) -> Result<Self,Error> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
+      r: TreeId) -> Result<Self,Error> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
         let mut s = storage.lock().await.open(&format!["tree/{}",r.to_string()]).await?;
         let bytes = s.read(0, s.len().await?).await?;
         Ok(Self::from_bytes(&bytes)?.1)
@@ -432,7 +444,7 @@ macro_rules! impl_tree {
     }
 
     fn $get_bounds<$($T),+,V,I>(mut indexes: I,
-    rows: &[(($(Coord<$T>),+),InsertValue<'_,V>)]) -> (($($T),+),($($T),+))
+    rows: &[(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)]) -> (($($T),+),($($T),+))
     where $($T: Scalar),+, V: Value, I: Iterator<Item=usize> {
       let ibounds = (
         ($(
@@ -459,6 +471,12 @@ macro_rules! impl_tree {
     impl<$($T),+> Overlap for (($($T),+),($($T),+)) where $($T: Scalar),+ {
       fn overlap(&self, other: &Self) -> bool {
         true $(&& intersect_iv(&(self.0).$i, &(self.1).$i, &(other.0).$i, &(other.1).$i))+
+      }
+    }
+
+    impl<$($T),+> Overlap for ($(Coord<$T>),+) where $($T: Scalar),+ {
+      fn overlap(&self, other: &Self) -> bool {
+        true $(&& intersect_coord_coord(&self.$i, &other.$i))+
       }
     }
   }
@@ -493,9 +511,9 @@ macro_rules! impl_tree {
 #[async_trait::async_trait]
 pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug where P: Point, V: Value {
   fn build<'a>(branch_factor: usize, max_depth: usize,
-    rows: &[(P,InsertValue<'a,V>)], next_tree: &mut TreeRef)
-    -> (Self,HashMap<TreeRef,Arc<Mutex<Self>>>) where Self: Sized;
-  fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef>);
+    rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
+    -> (Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
+  fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static;
@@ -505,52 +523,46 @@ pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug wher
 
 // return value: (tree, remove_trees, create_trees)
 pub async fn merge<T,P,V>(branch_factor: usize, max_depth: usize, inserts: &[(&P,&V)],
-roots: &[TreeRef], trees: &HashMap<TreeRef,Arc<Mutex<T>>>, next_tree: &mut TreeRef)
--> (T,Vec<TreeRef>,HashMap<TreeRef,Arc<Mutex<T>>>)
+roots: &[TreeRef<P>], trees: &HashMap<TreeId,Arc<Mutex<T>>>, next_tree: &mut TreeId)
+-> (T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>)
 where P: Point, V: Value, T: Tree<P,V> {
   let mut lists = vec![];
   let mut l_refs = vec![];
   let mut rm_trees = vec![];
-  let mut rows: Vec<(P,InsertValue<V>)> = vec![];
+  let mut rows: Vec<(P,InsertValue<'_,P,V>)> = vec![];
 
   // TODO: quotas for deconstructed external tree per merge
   {
-    let mut bounds = Vec::with_capacity(roots.len());
-    for r in roots.iter() {
-      bounds.push(trees[r].lock().await.get_bounds());
-    }
-    let intersecting = calc_overlap::<P::Bounds>(&bounds);
+    let bounds = roots.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
+    let intersecting = calc_overlap::<P>(&bounds);
     // these nearly always intersect each other
     //eprintln!["TOP {:?}", intersecting];
     for (r,overlap) in roots.iter().zip(intersecting) {
       if overlap {
-        let (list,xrefs) = trees[r].lock().await.list();
+        let (list,xrefs) = trees[&r.id].lock().await.list();
         lists.push(list);
         l_refs.extend(xrefs);
-        rm_trees.push(*r);
+        rm_trees.push(r.id);
       } else {
-        rows.push((trees[r].lock().await.get_bounds_interval(),InsertValue::Ref(*r)));
+        rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
       }
     }
   }
   {
     // TODO : limits on number of trees to expand?
-    let mut bounds = Vec::with_capacity(l_refs.len());
-    for r in l_refs.iter() {
-      bounds.push(trees[r].lock().await.get_bounds());
-    }
-    let intersecting = calc_overlap::<P::Bounds>(&bounds);
+    let bounds = l_refs.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
+    let intersecting = calc_overlap::<P>(&bounds);
     //eprintln!["SUB {:?}", intersecting];
-    for (i,(r,overlap)) in l_refs.iter().zip(intersecting).enumerate() {
+    for (_i,(r,overlap)) in l_refs.iter().zip(intersecting).enumerate() {
       if overlap {
-        let (list,xrefs) = trees[r].lock().await.list();
+        let (list,xrefs) = trees[&r.id].lock().await.list();
         lists.push(list);
         for r in xrefs.iter() {
-          rows.push((trees[r].lock().await.get_bounds_interval(),InsertValue::Ref(*r)));
+          rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
         }
-        rm_trees.push(*r);
+        rm_trees.push(r.id);
       } else {
-        rows.push((trees[r].lock().await.get_bounds_interval(),InsertValue::Ref(*r)));
+        rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
       }
     }
   }
@@ -598,6 +610,15 @@ fn intersect_pivot<X>(c: &Coord<X>, p: &X) -> bool where X: Scalar {
   match c {
     Coord::Scalar(x) => *x == *p,
     Coord::Interval(min,max) => *min <= *p && *p <= *max,
+  }
+}
+
+fn intersect_coord_coord<X>(a: &Coord<X>, b: &Coord<X>) -> bool where X: Scalar {
+  match (a,b) {
+    (Coord::Scalar(x),Coord::Scalar(y)) => *x == *y,
+    (Coord::Scalar(x),Coord::Interval(y0,y1)) => *y0 <= *x && *x <= *y1,
+    (Coord::Interval(x0,x1),Coord::Scalar(y)) => *x0 <= *y && *y <= *x1,
+    (Coord::Interval(x0,x1),Coord::Interval(y0,y1)) => intersect_iv(x0,x1,y0,y1),
   }
 }
 
