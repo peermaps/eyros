@@ -53,8 +53,9 @@ pub trait Overlap {
 }
 
 macro_rules! impl_point {
-  ($Tree:ident,$($T:tt),+) => {
+  ($Tree:ident,$open_from_path:ident,$($T:tt),+) => {
     pub use tree::$Tree;
+    #[cfg(not(feature="wasm"))] pub use store::$open_from_path;
     #[async_trait::async_trait]
     impl<$($T),+> Point for ($(Coord<$T>),+) where $($T: Scalar),+ {
       type Bounds = (($($T),+),($($T),+));
@@ -103,13 +104,13 @@ macro_rules! impl_point {
   }
 }
 
-#[cfg(feature="2d")] impl_point![Tree2,P0,P1];
-#[cfg(feature="3d")] impl_point![Tree3,P0,P1,P2];
-#[cfg(feature="4d")] impl_point![Tree4,P0,P1,P2,P3];
-#[cfg(feature="5d")] impl_point![Tree5,P0,P1,P2,P3,P4];
-#[cfg(feature="6d")] impl_point![Tree6,P0,P1,P2,P3,P4,P5];
-#[cfg(feature="7d")] impl_point![Tree7,P0,P1,P2,P3,P4,P5,P6];
-#[cfg(feature="8d")] impl_point![Tree8,P0,P1,P2,P3,P4,P5,P6,P7];
+#[cfg(feature="2d")] impl_point![Tree2,open_from_path2,P0,P1];
+#[cfg(feature="3d")] impl_point![Tree3,open_from_path3,P0,P1,P2];
+#[cfg(feature="4d")] impl_point![Tree4,open_from_path4,P0,P1,P2,P3];
+#[cfg(feature="5d")] impl_point![Tree5,open_from_path5,P0,P1,P2,P3,P4];
+#[cfg(feature="6d")] impl_point![Tree6,open_from_path6,P0,P1,P2,P3,P4,P5];
+#[cfg(feature="7d")] impl_point![Tree7,open_from_path7,P0,P1,P2,P3,P4,P5,P6];
+#[cfg(feature="8d")] impl_point![Tree8,open_from_path8,P0,P1,P2,P3,P4,P5,P6,P7];
 
 pub enum Row<P,V> where P: Point, V: Value {
   Insert(P,V),
