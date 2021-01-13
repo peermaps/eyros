@@ -47,7 +47,7 @@ pub enum Coord<X> where X: Scalar {
 pub trait Point: 'static+Overlap+Clone {
   type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes+Overlap;
   async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
-    where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, Self: Sized, T: Tree<Self,V>;
+    where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static, V: Value, Self: Sized, T: Tree<Self,V>;
 }
 
 pub trait Overlap {
@@ -62,7 +62,7 @@ macro_rules! impl_point {
     impl<$($T),+> Point for ($(Coord<$T>),+) where $($T: Scalar),+ {
       type Bounds = (($($T),+),($($T),+));
       async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
-      where S: RandomAccess<Error=Error>+Unpin+Send+Sync, V: Value, T: Tree<($(Coord<$T>),+),V> {
+      where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static, V: Value, T: Tree<($(Coord<$T>),+),V> {
         let inserts: Vec<(&Self,&V)> = rows.iter()
           .map(|row| match row {
             Row::Insert(p,v) => Some((p,v)),
@@ -79,15 +79,15 @@ macro_rules! impl_point {
           .collect::<Vec<TreeRef<Self>>>();
         let (tr,t,rm_trees,create_trees) = tree::merge(
           9, 6, inserts.as_slice(), merge_trees.as_slice(), trees, &mut db.next_tree
-        ).await;
+        ).await?;
         //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
         rm_trees.iter().for_each(|r| {
           trees.remove(r);
         });
         create_trees.iter().for_each(|(r,t)| {
-          trees.insert(*r,Arc::clone(t));
+          trees.put(r,Arc::clone(t));
         });
-        trees.insert(tr.id, Arc::new(Mutex::new(t)));
+        trees.put(&tr.id, Arc::new(Mutex::new(t)));
         for i in 0..merge_trees.len() {
           if i < db.roots.len() {
             db.roots[i] = None;
@@ -100,6 +100,7 @@ macro_rules! impl_point {
         } else {
           db.roots.push(Some(tr));
         }
+        trees.flush().await?;
         Ok(())
       }
     }
@@ -121,14 +122,12 @@ pub enum Row<P,V> where P: Point, V: Value {
 
 pub struct DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync,
 P: Point, V: Value, T: Tree<P,V> {
-  pub storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
+  pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   pub meta: Arc<Mutex<S>>,
   pub fields: SetupFields,
   pub roots: Vec<Option<tree::TreeRef<P>>>,
-  pub trees: HashMap<tree::TreeId,Arc<Mutex<T>>>,
+  pub trees: TreeFile<S,T,P,V>,
   pub next_tree: TreeId,
-  _point: std::marker::PhantomData<P>,
-  _value: std::marker::PhantomData<V>,
 }
 
 impl<S,T,P,V> DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static,
@@ -141,9 +140,7 @@ P: Point, V: Value, T: Tree<P,V> {
       fields: setup.fields,
       roots: vec![],
       next_tree: 0,
-      trees: HashMap::new(),
-      _point: std::marker::PhantomData,
-      _value: std::marker::PhantomData,
+      trees: TreeFile::new(100, Arc::clone(&setup.storage)),
     })
   }
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
@@ -153,7 +150,7 @@ P: Point, V: Value, T: Tree<P,V> {
     let mut queries = vec![];
     for root in self.roots.iter() {
       if let Some(r) = root {
-        let t = self.trees.get(&r.id).unwrap();
+        let t = self.trees.get(&r.id).await?;
         queries.push(t.lock().await.query(Arc::clone(&self.storage), bbox));
       }
     }

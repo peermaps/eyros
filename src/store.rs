@@ -13,7 +13,7 @@ use crate::Error;
 
 /// Return random access storage adaptors for files by a string name
 #[async_trait::async_trait]
-pub trait Storage<S> {
+pub trait Storage<S>: Send+Sync+Unpin {
   async fn open (&mut self, name: &str) -> Result<S,Error>;
   async fn remove (&mut self, name: &str) -> Result<(),Error>;
 }
@@ -42,7 +42,9 @@ impl Storage<S> for FileStore {
       .map_err(|e| e.into())
   }
   async fn remove(&mut self, name: &str) -> Result<(),Error> {
-    unimplemented![];
+    let file = self.path.join(name);
+    async_std::fs::remove_file(file).await?;
+    Ok(())
   }
 }
 

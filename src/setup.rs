@@ -51,13 +51,13 @@ impl SetupFields {
 /// # Ok(()) }
 /// ```
 pub struct Setup<S> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
-  pub storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
+  pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   pub fields: SetupFields
 }
 
 impl<S> Setup<S> where S: RandomAccess<Error=Error>+'static+Unpin+Send+Sync {
   /// Create a new `Setup` builder from a storage function.
-  pub fn from_storage (storage: Box<dyn Storage<S>+Unpin+Send+Sync>) -> Self {
+  pub fn from_storage (storage: Box<dyn Storage<S>>) -> Self {
     Self {
       storage: Arc::new(Mutex::new(storage)),
       fields: SetupFields::default()

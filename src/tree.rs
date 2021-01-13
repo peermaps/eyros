@@ -1,5 +1,6 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Scalar,Point,Value,Coord,Location,query::QStream,Error,Storage,Overlap};
+use crate::{Scalar,Point,Value,Coord,Location,Error,Storage,Overlap,
+  query::QStream, tree_file::TreeFile};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
 use random_access_storage::RandomAccess;
@@ -348,7 +349,7 @@ macro_rules! impl_tree {
         }
         (rows,refs)
       }
-      fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
+      fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>>>>,
       bbox: &(($($T),+),($($T),+))) -> Arc<Mutex<QStream<($(Coord<$T>),+),V>>>
       where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {
         let istate = (
@@ -428,7 +429,7 @@ macro_rules! impl_tree {
     }
 
     impl<$($T),+,V> $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
-      async fn load<S>(storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
+      async fn load<S>(storage: Arc<Mutex<Box<dyn Storage<S>>>>,
       r: TreeId) -> Result<Self,Error> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
         let mut s = storage.lock().await.open(&format!["tree/{}",r.to_string()]).await?;
         let bytes = s.read(0, s.len().await?).await?;
@@ -508,16 +509,16 @@ pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug wher
     rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
     -> (TreeRef<P>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
-  fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>+Unpin+Send+Sync>>>,
+  fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static;
 }
 
 // return value: (tree, remove_trees, create_trees)
-pub async fn merge<T,P,V>(branch_factor: usize, max_depth: usize, inserts: &[(&P,&V)],
-roots: &[TreeRef<P>], trees: &HashMap<TreeId,Arc<Mutex<T>>>, next_tree: &mut TreeId)
--> (TreeRef<P>,T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>)
-where P: Point, V: Value, T: Tree<P,V> {
+pub async fn merge<S,T,P,V>(branch_factor: usize, max_depth: usize, inserts: &[(&P,&V)],
+roots: &[TreeRef<P>], trees: &mut TreeFile<S,T,P,V>, next_tree: &mut TreeId)
+-> Result<(TreeRef<P>,T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>),Error>
+where P: Point, V: Value, T: Tree<P,V>, S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {
   let mut lists = vec![];
   let mut l_refs = vec![];
   let mut rm_trees = vec![];
@@ -531,7 +532,7 @@ where P: Point, V: Value, T: Tree<P,V> {
     //eprintln!["TOP {:?}", intersecting];
     for (r,overlap) in roots.iter().zip(intersecting) {
       if overlap {
-        let (list,xrefs) = trees[&r.id].lock().await.list();
+        let (list,xrefs) = trees.get(&r.id).await?.lock().await.list();
         lists.push(list);
         l_refs.extend(xrefs);
         rm_trees.push(r.id);
@@ -547,7 +548,7 @@ where P: Point, V: Value, T: Tree<P,V> {
     //eprintln!["SUB {:?}", intersecting];
     for (_i,(r,overlap)) in l_refs.iter().zip(intersecting).enumerate() {
       if overlap {
-        let (list,xrefs) = trees[&r.id].lock().await.list();
+        let (list,xrefs) = trees.get(&r.id).await?.lock().await.list();
         lists.push(list);
         for r in xrefs.iter() {
           rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
@@ -568,7 +569,7 @@ where P: Point, V: Value, T: Tree<P,V> {
     }).collect::<Vec<_>>());
   }
   let (tr, t, create_trees) = T::build(branch_factor, max_depth, &rows, next_tree);
-  (tr, t, rm_trees, create_trees)
+  Ok((tr, t, rm_trees, create_trees))
 }
 
 fn calc_overlap<X>(bounds: &[X]) -> Vec<bool> where X: Overlap {

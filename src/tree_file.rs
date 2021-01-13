@@ -36,19 +36,23 @@ where T: Tree<P,V>, P: Point, V: Value, S: RandomAccess<Error=Error>+Unpin+Send+
     }
   }
   pub fn put(&mut self, id: &TreeId, t: Arc<Mutex<T>>) -> () {
+    //eprintln!["put {}", id];
     self.cache.put(*id, Arc::clone(&t));
     self.updated.insert(*id, Arc::clone(&t));
   }
   pub fn remove(&mut self, id: &TreeId) -> () {
+    //eprintln!["remove {}", id];
     self.cache.pop(id);
     self.updated.remove(id);
     self.removed.insert(*id);
   }
   pub async fn flush(&mut self) -> Result<(),Error> {
+    //eprintln!["flush {}", self.updated.len()];
     for (id,t) in self.updated.iter() {
       let file = get_file(id);
       let mut s = self.storage.lock().await.open(&file).await?;
       s.write(0, &t.lock().await.to_bytes()?).await?;
+      //eprintln!["id={}", id];
     }
     self.updated.clear();
     for id in self.removed.iter() {
