@@ -10,6 +10,8 @@ mod bytes;
 mod query;
 pub use query::QueryStream;
 mod unfold;
+mod tree_file;
+use tree_file::TreeFile;
 use std::collections::HashMap;
 
 use async_std::{sync::{Arc,Mutex}};

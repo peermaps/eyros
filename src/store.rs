@@ -15,6 +15,7 @@ use crate::Error;
 #[async_trait::async_trait]
 pub trait Storage<S> {
   async fn open (&mut self, name: &str) -> Result<S,Error>;
+  async fn remove (&mut self, name: &str) -> Result<(),Error>;
 }
 
 #[cfg(not(feature="wasm"))]
@@ -24,7 +25,7 @@ pub struct FileStore {
 
 #[cfg(not(feature="wasm"))]
 impl FileStore {
-  pub fn open (path: &Path) -> Self {
+  pub fn new (path: &Path) -> Self {
     Self { path: path.to_path_buf() }
   }
 }
@@ -32,13 +33,16 @@ impl FileStore {
 #[cfg(not(feature="wasm"))]
 #[async_trait::async_trait]
 impl Storage<S> for FileStore {
-  async fn open (&mut self, name: &str) -> Result<S,Error> {
+  async fn open(&mut self, name: &str) -> Result<S,Error> {
     let p = self.path.join(name);
     S::builder(p)
       .auto_sync(false)
       .build()
       .await
       .map_err(|e| e.into())
+  }
+  async fn remove(&mut self, name: &str) -> Result<(),Error> {
+    unimplemented![];
   }
 }
 
@@ -54,7 +58,7 @@ impl Setup<S> {
   /// Create a new `Setup` builder from a string file path.
   pub fn from_path(path: &Path) -> Self {
     Self {
-      storage: Arc::new(Mutex::new(Box::new(FileStore::open(Path::new(path))))),
+      storage: Arc::new(Mutex::new(Box::new(FileStore::new(Path::new(path))))),
       fields: SetupFields::default()
     }
   }
