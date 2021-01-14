@@ -25,13 +25,18 @@ where T: Tree<P,V>, P: Point, V: Value, S: RandomAccess<Error=Error>+Unpin+Send+
     }
   }
   pub async fn get(&mut self, id: &TreeId) -> Result<Arc<Mutex<T>>,Error> {
+    if let Some(t) = self.updated.get(id) {
+      return Ok(Arc::clone(t));
+    }
     match &self.cache.get(id) {
       Some(t) => Ok(Arc::clone(t)),
       None => {
         let file = get_file(id);
         let mut s = self.storage.lock().await.open(&file).await?;
         let bytes = s.read(0, s.len().await?).await?;
-        Ok(Arc::new(Mutex::new(T::from_bytes(&bytes)?.1)))
+        let t = Arc::new(Mutex::new(T::from_bytes(&bytes)?.1));
+        self.cache.put(*id, Arc::clone(&t));
+        Ok(t)
       }
     }
   }
@@ -57,7 +62,9 @@ where T: Tree<P,V>, P: Point, V: Value, S: RandomAccess<Error=Error>+Unpin+Send+
     self.updated.clear();
     for id in self.removed.iter() {
       let file = get_file(id);
-      self.storage.lock().await.remove(&file).await?;
+      //self.storage.lock().await.remove(&file).await?;
+      // ignoring errors for now
+      self.storage.lock().await.remove(&file).await;
     }
     self.removed.clear();
     Ok(())
