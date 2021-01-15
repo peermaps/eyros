@@ -16,12 +16,14 @@ pub struct TreeRef<P> {
 pub struct Build {
   pub level: usize,
   pub range: (usize,usize), // (start,end) indexes into sorted
+  pub count: usize,
 }
 impl Build {
   fn ext(&self) -> Self {
     Self {
       range: self.range.clone(),
       level: 0,
+      count: 0,
     }
   }
 }
@@ -90,7 +92,8 @@ macro_rules! impl_tree {
         *index += n;
         Build {
           level: build.level + 1,
-          range
+          range,
+          count: build.count + (build.range.1-build.range.0) - (range.1-range.0),
         }
       }
       fn build(&mut self, build: &Build) -> $Node<$($T),+,V> {
@@ -106,7 +109,7 @@ macro_rules! impl_tree {
             inserts[*i].clone()
           }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)>>());
         }
-        if build.level >= self.fields.max_depth {
+        if build.level >= self.fields.max_depth || build.count >= self.fields.max_records {
           let r = self.next_tree;
           let t = $Tree {
             root: Arc::new(self.build(&build.ext())),
@@ -294,6 +297,7 @@ macro_rules! impl_tree {
         let root = mstate.build(&Build {
           range: (0, inserts.len()),
           level: 0,
+          count: 0,
         });
         *next_tree = mstate.next_tree;
         let tr = TreeRef {
