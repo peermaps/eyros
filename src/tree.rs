@@ -61,8 +61,7 @@ macro_rules! impl_tree {
     }
 
     pub struct $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
-      pub branch_factor: usize,
-      pub max_depth: usize,
+      pub fields: Arc<SetupFields>,
       pub inserts: &'a [(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
       pub matched: Vec<bool>,
       pub next_tree: TreeId,
@@ -99,7 +98,7 @@ macro_rules! impl_tree {
         let rlen = build.range.1 - build.range.0;
         if rlen == 0 {
           return $Node::Data(vec![],vec![]);
-        } else if rlen < self.branch_factor {
+        } else if rlen < self.fields.branch_factor {
           let matched = &mut self.matched;
           let inserts = &self.inserts;
           return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
@@ -107,7 +106,7 @@ macro_rules! impl_tree {
             inserts[*i].clone()
           }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)>>());
         }
-        if build.level >= self.max_depth {
+        if build.level >= self.fields.max_depth {
           let r = self.next_tree;
           let t = $Tree {
             root: Arc::new(self.build(&build.ext())),
@@ -125,7 +124,7 @@ macro_rules! impl_tree {
           return $Node::Data(vec![],vec![tr]);
         }
 
-        let n = (self.branch_factor-1).min(rlen-1); // number of pivots
+        let n = (self.fields.branch_factor-1).min(rlen-1); // number of pivots
         let is_min = (build.level / $dim) % 2 != 0;
         let mut pivots = ($($n),+);
         match build.level % $dim {
@@ -270,13 +269,12 @@ macro_rules! impl_tree {
     }
 
     impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
-      pub fn build<'a>(branch_factor: usize, max_depth: usize,
+      pub fn build<'a>(fields: Arc<SetupFields>,
       inserts: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
       next_tree: &mut TreeId)
       -> (TreeRef<($(Coord<$T>),+)>,$Node<$($T),+,V>,HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>) {
         let mut mstate = $MState {
-          branch_factor,
-          max_depth,
+          fields,
           inserts,
           matched: vec![false;inserts.len()],
           next_tree: *next_tree,
@@ -314,12 +312,11 @@ macro_rules! impl_tree {
 
     #[async_trait::async_trait]
     impl<$($T),+,V> Tree<($(Coord<$T>),+),V> for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
-      fn build<'a>(branch_factor: usize, max_depth: usize,
+      fn build<'a>(fields: Arc<SetupFields>,
       rows: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], next_tree: &mut TreeId)
       -> (TreeRef<($(Coord<$T>),+)>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) {
         let (tr,root,ext_trees) = $Branch::build(
-          branch_factor,
-          max_depth,
+          fields,
           rows,
           next_tree
         );
@@ -506,8 +503,7 @@ macro_rules! impl_tree {
 #[async_trait::async_trait]
 pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug+'static
 where P: Point, V: Value {
-  fn build<'a>(branch_factor: usize, max_depth: usize,
-    rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
+  fn build<'a>(fields: Arc<SetupFields>, rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
     -> (TreeRef<P>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>>>>,
@@ -577,8 +573,7 @@ impl<'a,S,T,P,V> Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA
       }).collect::<Vec<_>>());
     }
     let (tr, t, create_trees) = T::build(
-      self.fields.branch_factor,
-      self.fields.max_depth,
+      Arc::clone(&self.fields),
       &rows,
       &mut self.next_tree
     );
