@@ -101,7 +101,7 @@ macro_rules! impl_tree {
         let rlen = build.range.1 - build.range.0;
         if rlen == 0 {
           return $Node::Data(vec![],vec![]);
-        } else if rlen < self.fields.branch_factor {
+        } else if rlen < self.fields.inline {
           let matched = &mut self.matched;
           let inserts = &self.inserts;
           return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {

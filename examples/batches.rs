@@ -17,9 +17,9 @@ async fn main() -> Result<(),E> {
   let batches: Vec<Vec<Row<P,V>>> = (0..nbatch).map(|_| {
     (0..batch_size).map(|i| {
       let xmin = (random::<f32>()*2.0-1.0)*180.0;
-      let xmax = xmin + random::<f32>().powf(16.0)*(180.0-xmin);
+      let xmax = xmin + random::<f32>().powf(32.0)*(180.0-xmin);
       let ymin = (random::<f32>()*2.0-1.0)*90.0;
-      let ymax = ymin + random::<f32>().powf(16.0)*(90.0-ymin);
+      let ymax = ymin + random::<f32>().powf(32.0)*(90.0-ymin);
       let point = (Coord::Interval(xmin,xmax), Coord::Interval(ymin,ymax));
       Row::Insert(point, i)
     }).collect()
@@ -28,12 +28,22 @@ async fn main() -> Result<(),E> {
   for batch in batches.iter() {
     db.batch(batch).await?;
   }
-  let elapsed = start.elapsed().as_secs_f64();
-  eprintln!["{} rows x{} in {}s ({}/s)",
+  let elapsed0 = start.elapsed().as_secs_f64();
+  db.flush().await?;
+  let elapsed1 = start.elapsed().as_secs_f64();
+  eprintln!["MEMORY {}*{}={} rows in {}s ({}/s)",
     batch_size,
     nbatch,
-    elapsed,
-    ((batch_size*nbatch) as f64)/elapsed
+    batch_size*nbatch,
+    elapsed0,
+    ((batch_size*nbatch) as f64)/elapsed0
+  ];
+  eprintln!["DISK {}*{}={} rows in {}s ({}/s)",
+    batch_size,
+    nbatch,
+    batch_size*nbatch,
+    elapsed1,
+    ((batch_size*nbatch) as f64)/elapsed1
   ];
 
   /*

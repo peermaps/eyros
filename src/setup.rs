@@ -7,6 +7,7 @@ pub struct SetupFields {
   pub branch_factor: usize,
   pub max_depth: usize,
   pub max_records: usize,
+  pub inline: usize,
   /*
   pub max_data_size: usize,
   pub base_size: usize,
@@ -18,9 +19,10 @@ pub struct SetupFields {
 impl SetupFields {
   pub fn default () -> Self {
     Self {
-      branch_factor: 9,
-      max_depth: 6,
+      branch_factor: 6,
+      max_depth: 8,
       max_records: 20_000,
+      inline: 500,
       /*
       max_data_size: 3_000,
       base_size: 9_000,
