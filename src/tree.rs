@@ -1,6 +1,6 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Scalar,Point,Value,Coord,Location,Error,Storage,Overlap,
-  query::QStream, tree_file::TreeFile};
+use crate::{Scalar,Point,Value,Coord,Location,Error,Storage,Overlap,RA,
+  query::QStream, tree_file::TreeFile, SetupFields};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
 use random_access_storage::RandomAccess;
@@ -351,7 +351,7 @@ macro_rules! impl_tree {
       }
       fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>>>>,
       bbox: &(($($T),+),($($T),+))) -> Arc<Mutex<QStream<($(Coord<$T>),+),V>>>
-      where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {
+      where S: RA {
         let istate = (
           bbox.clone(),
           vec![], // queue
@@ -430,7 +430,7 @@ macro_rules! impl_tree {
 
     impl<$($T),+,V> $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       async fn load<S>(storage: Arc<Mutex<Box<dyn Storage<S>>>>,
-      r: TreeId) -> Result<Self,Error> where S: RandomAccess<Error=Error>+Unpin+Send+Sync {
+      r: TreeId) -> Result<Self,Error> where S: RA {
         let mut s = storage.lock().await.open(&format!["tree/{}",r.to_string()]).await?;
         let bytes = s.read(0, s.len().await?).await?;
         Ok(Self::from_bytes(&bytes)?.1)
@@ -504,72 +504,86 @@ macro_rules! impl_tree {
 ];
 
 #[async_trait::async_trait]
-pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug where P: Point, V: Value {
+pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug+'static
+where P: Point, V: Value {
   fn build<'a>(branch_factor: usize, max_depth: usize,
     rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
     -> (TreeRef<P>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
-    where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static;
+    where S: RA;
+}
+
+pub struct Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA {
+  pub fields: Arc<SetupFields>,
+  pub inserts: &'a [(&'a P,&'a V)],
+  pub roots: &'a [TreeRef<P>],
+  pub trees: &'a mut TreeFile<S,T,P,V>,
+  pub next_tree: &'a mut TreeId,
 }
 
 // return value: (tree, remove_trees, create_trees)
-pub async fn merge<S,T,P,V>(branch_factor: usize, max_depth: usize, inserts: &[(&P,&V)],
-roots: &[TreeRef<P>], trees: &mut TreeFile<S,T,P,V>, next_tree: &mut TreeId)
--> Result<(TreeRef<P>,T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>),Error>
-where P: Point, V: Value, T: Tree<P,V>, S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {
-  let mut lists = vec![];
-  let mut l_refs = vec![];
-  let mut rm_trees = vec![];
-  let mut rows: Vec<(P,InsertValue<'_,P,V>)> = vec![];
+impl<'a,S,T,P,V> Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA {
+  pub async fn merge(&mut self)
+  -> Result<(TreeRef<P>,T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>),Error> {
+    let mut lists = vec![];
+    let mut l_refs = vec![];
+    let mut rm_trees = vec![];
+    let mut rows: Vec<(P,InsertValue<'_,P,V>)> = vec![];
 
-  // TODO: quotas for deconstructed external tree per merge
-  {
-    let bounds = roots.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
-    let intersecting = calc_overlap::<P>(&bounds);
-    // these nearly always intersect each other
-    //eprintln!["TOP {:?}", intersecting];
-    for (r,overlap) in roots.iter().zip(intersecting) {
-      if overlap {
-        let (list,xrefs) = trees.get(&r.id).await?.lock().await.list();
-        lists.push(list);
-        l_refs.extend(xrefs);
-        rm_trees.push(r.id);
-      } else {
-        rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
-      }
-    }
-  }
-  {
-    // TODO : limits on number of trees to expand?
-    let bounds = l_refs.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
-    let intersecting = calc_overlap::<P>(&bounds);
-    //eprintln!["SUB {:?}", intersecting];
-    for (_i,(r,overlap)) in l_refs.iter().zip(intersecting).enumerate() {
-      if overlap {
-        let (list,xrefs) = trees.get(&r.id).await?.lock().await.list();
-        lists.push(list);
-        for r in xrefs.iter() {
+    // TODO: quotas for deconstructed external tree per merge
+    {
+      let bounds = self.roots.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
+      let intersecting = calc_overlap::<P>(&bounds);
+      // these nearly always intersect each other
+      //eprintln!["TOP {:?}", intersecting];
+      for (r,overlap) in self.roots.iter().zip(intersecting) {
+        if overlap {
+          let (list,xrefs) = self.trees.get(&r.id).await?.lock().await.list();
+          lists.push(list);
+          l_refs.extend(xrefs);
+          rm_trees.push(r.id);
+        } else {
           rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
         }
-        rm_trees.push(r.id);
-      } else {
-        rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
       }
     }
-  }
+    {
+      // TODO : limits on number of trees to expand?
+      let bounds = l_refs.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
+      let intersecting = calc_overlap::<P>(&bounds);
+      //eprintln!["SUB {:?}", intersecting];
+      for (_i,(r,overlap)) in l_refs.iter().zip(intersecting).enumerate() {
+        if overlap {
+          let (list,xrefs) = self.trees.get(&r.id).await?.lock().await.list();
+          lists.push(list);
+          for r in xrefs.iter() {
+            rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
+          }
+          rm_trees.push(r.id);
+        } else {
+          rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
+        }
+      }
+    }
 
-  rows.extend(inserts.iter().map(|pv| {
-    (pv.0.clone(),InsertValue::Value(pv.1))
-  }).collect::<Vec<_>>());
-  for list in lists.iter_mut() {
-    rows.extend(list.iter().map(|pv| {
-      (pv.0.clone(),InsertValue::Value(&pv.1))
+    rows.extend(self.inserts.iter().map(|pv| {
+      (pv.0.clone(),InsertValue::Value(pv.1))
     }).collect::<Vec<_>>());
+    for list in lists.iter_mut() {
+      rows.extend(list.iter().map(|pv| {
+        (pv.0.clone(),InsertValue::Value(&pv.1))
+      }).collect::<Vec<_>>());
+    }
+    let (tr, t, create_trees) = T::build(
+      self.fields.branch_factor,
+      self.fields.max_depth,
+      &rows,
+      &mut self.next_tree
+    );
+    Ok((tr, t, rm_trees, create_trees))
   }
-  let (tr, t, create_trees) = T::build(branch_factor, max_depth, &rows, next_tree);
-  Ok((tr, t, rm_trees, create_trees))
 }
 
 fn calc_overlap<X>(bounds: &[X]) -> Vec<bool> where X: Overlap {

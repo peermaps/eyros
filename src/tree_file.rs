@@ -1,11 +1,10 @@
 use lru::{LruCache as LRU};
-use crate::{Tree,TreeId,Error,Point,Value,Storage};
+use crate::{Tree,TreeId,Error,Point,Value,Storage,RA};
 use std::collections::{HashMap,HashSet};
 use random_access_storage::RandomAccess;
-use async_std::sync::{Arc,Mutex};
+use async_std::{sync::{Arc,Mutex},task::spawn};
 
-pub struct TreeFile<S,T,P,V>
-where T: Tree<P,V>, P: Point, V: Value, S: RandomAccess<Error=Error>+Unpin+Send+Sync {
+pub struct TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   cache: LRU<TreeId,Arc<Mutex<T>>>,
   storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   updated: HashMap<TreeId,Arc<Mutex<T>>>,
@@ -13,8 +12,7 @@ where T: Tree<P,V>, P: Point, V: Value, S: RandomAccess<Error=Error>+Unpin+Send+
   _marker: std::marker::PhantomData<(P,V)>,
 }
 
-impl<S,T,P,V> TreeFile<S,T,P,V>
-where T: Tree<P,V>, P: Point, V: Value, S: RandomAccess<Error=Error>+Unpin+Send+Sync {
+impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   pub fn new(n: usize, storage: Arc<Mutex<Box<dyn Storage<S>>>>) -> Self {
     Self {
       cache: LRU::new(n),
@@ -40,12 +38,12 @@ where T: Tree<P,V>, P: Point, V: Value, S: RandomAccess<Error=Error>+Unpin+Send+
       }
     }
   }
-  pub fn put(&mut self, id: &TreeId, t: Arc<Mutex<T>>) -> () {
+  pub async fn put(&mut self, id: &TreeId, t: Arc<Mutex<T>>) -> () {
     //eprintln!["put {}", id];
     self.cache.put(*id, Arc::clone(&t));
     self.updated.insert(*id, Arc::clone(&t));
   }
-  pub fn remove(&mut self, id: &TreeId) -> () {
+  pub async fn remove(&mut self, id: &TreeId) -> () {
     //eprintln!["remove {}", id];
     self.cache.pop(id);
     self.updated.remove(id);
@@ -55,17 +53,17 @@ where T: Tree<P,V>, P: Point, V: Value, S: RandomAccess<Error=Error>+Unpin+Send+
     //eprintln!["flush {}", self.updated.len()];
     for (id,t) in self.updated.iter() {
       let file = get_file(id);
-      let mut s = self.storage.lock().await.open(&file).await?;
+      let storage = Arc::clone(&self.storage);
+      let mut s = storage.lock().await.open(&file).await?;
       s.write(0, &t.lock().await.to_bytes()?).await?;
-      //eprintln!["id={}", id];
     }
-    self.updated.clear();
     for id in self.removed.iter() {
       let file = get_file(id);
-      //self.storage.lock().await.remove(&file).await?;
+      let storage = Arc::clone(&self.storage);
       // ignoring errors for now
-      self.storage.lock().await.remove(&file).await;
+      storage.lock().await.remove(&file).await;
     }
+    self.updated.clear();
     self.removed.clear();
     Ok(())
   }

@@ -5,14 +5,13 @@ pub use store::Storage;
 mod setup;
 pub use setup::{Setup,SetupFields};
 mod tree;
-pub use tree::{Tree,TreeRef,TreeId};
+pub use tree::{Tree,TreeRef,TreeId,Merge};
 mod bytes;
 mod query;
 pub use query::QueryStream;
 mod unfold;
 mod tree_file;
 use tree_file::TreeFile;
-use std::collections::HashMap;
 
 use async_std::{sync::{Arc,Mutex}};
 use random_access_storage::RandomAccess;
@@ -37,6 +36,9 @@ impl Value for u32 {}
 impl Value for u64 {}
 impl<T> Value for Vec<T> where T: Value {}
 
+pub trait RA: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
+impl<S> RA for S where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
+
 #[derive(Debug,Clone)]
 pub enum Coord<X> where X: Scalar {
   Scalar(X),
@@ -44,10 +46,10 @@ pub enum Coord<X> where X: Scalar {
 }
 
 #[async_trait::async_trait]
-pub trait Point: 'static+Overlap+Clone {
+pub trait Point: 'static+Overlap+Clone+Send+Sync {
   type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes+Overlap;
   async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
-    where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static, V: Value, Self: Sized, T: Tree<Self,V>;
+    where S: RA, V: Value, Self: Sized, T: Tree<Self,V>;
 }
 
 pub trait Overlap {
@@ -62,7 +64,7 @@ macro_rules! impl_point {
     impl<$($T),+> Point for ($(Coord<$T>),+) where $($T: Scalar),+ {
       type Bounds = (($($T),+),($($T),+));
       async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
-      where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static, V: Value, T: Tree<($(Coord<$T>),+),V> {
+      where S: RA, V: Value, T: Tree<($(Coord<$T>),+),V> {
         let inserts: Vec<(&Self,&V)> = rows.iter()
           .map(|row| match row {
             Row::Insert(p,v) => Some((p,v)),
@@ -77,17 +79,22 @@ macro_rules! impl_point {
           .take_while(|r| r.is_some())
           .map(|r| r.as_ref().unwrap().clone())
           .collect::<Vec<TreeRef<Self>>>();
-        let (tr,t,rm_trees,create_trees) = tree::merge(
-          9, 6, inserts.as_slice(), merge_trees.as_slice(), trees, &mut db.next_tree
-        ).await?;
+        let mut m = Merge {
+          fields: Arc::clone(&db.fields),
+          inserts: inserts.as_slice(),
+          roots: merge_trees.as_slice(),
+          trees,
+          next_tree: &mut db.next_tree,
+        };
+        let (tr,t,rm_trees,create_trees) = m.merge().await?;
         //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
-        rm_trees.iter().for_each(|r| {
-          trees.remove(r);
-        });
-        create_trees.iter().for_each(|(r,t)| {
-          trees.put(r,Arc::clone(t));
-        });
-        trees.put(&tr.id, Arc::new(Mutex::new(t)));
+        for r in rm_trees.iter() {
+          trees.remove(r).await;
+        }
+        for (r,t) in create_trees.iter() {
+          trees.put(r,Arc::clone(t)).await;
+        }
+        trees.put(&tr.id, Arc::new(Mutex::new(t))).await;
         for i in 0..merge_trees.len() {
           if i < db.roots.len() {
             db.roots[i] = None;
@@ -100,7 +107,6 @@ macro_rules! impl_point {
         } else {
           db.roots.push(Some(tr));
         }
-        trees.flush().await?;
         Ok(())
       }
     }
@@ -120,24 +126,23 @@ pub enum Row<P,V> where P: Point, V: Value {
   Delete(Location)
 }
 
-pub struct DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync,
-P: Point, V: Value, T: Tree<P,V> {
+pub struct DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   pub meta: Arc<Mutex<S>>,
-  pub fields: SetupFields,
+  pub fields: Arc<SetupFields>,
   pub roots: Vec<Option<tree::TreeRef<P>>>,
   pub trees: TreeFile<S,T,P,V>,
   pub next_tree: TreeId,
 }
 
-impl<S,T,P,V> DB<S,T,P,V> where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static,
+impl<S,T,P,V> DB<S,T,P,V> where S: RA,
 P: Point, V: Value, T: Tree<P,V> {
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
     let meta = setup.storage.lock().await.open("meta").await?;
     Ok(Self {
       storage: Arc::clone(&setup.storage),
       meta: Arc::new(Mutex::new(meta)),
-      fields: setup.fields,
+      fields: Arc::new(setup.fields),
       roots: vec![],
       next_tree: 0,
       trees: TreeFile::new(100, Arc::clone(&setup.storage)),
@@ -145,6 +150,9 @@ P: Point, V: Value, T: Tree<P,V> {
   }
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     P::batch(self, rows).await
+  }
+  pub async fn flush(&mut self) -> Result<(),Error> {
+    self.trees.flush().await
   }
   pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
     let mut queries = vec![];
