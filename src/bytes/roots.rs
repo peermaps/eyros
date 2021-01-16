@@ -27,13 +27,14 @@ impl<P> ToBytes for Roots<P> where P: Point, Self: CountBytes {
 impl<P> FromBytes for Roots<P> where P: Point {
   fn from_bytes(src: &[u8]) -> Result<(usize,Self),Error> {
     let mut offset = 0;
-    let (n,len) = varint::decode(&src[offset..])?;
+    let (n,len64) = varint::decode(&src[offset..])?;
     offset += n;
-    if src.len() < offset + (n+7)/8 {
+    let len = len64 as usize;
+    if src.len() < offset + (len+7)/8 {
       bail!["not enough bytes to construct bitfield for Roots"]
     }
-    let bitfield = &src[offset..offset+(n+7)/8];
-    offset += (n+7)/8;
+    let bitfield = &src[offset..offset+(len+7)/8];
+    offset += (len+7)/8;
     let mut refs = vec![];
     for i in 0..(len as usize) {
       if (bitfield[i/8]>>(i%8))&1==1 {
