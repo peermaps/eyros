@@ -7,8 +7,8 @@ use async_std::{sync::{Arc,Mutex},task::spawn};
 pub struct TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   cache: LRU<TreeId,Arc<Mutex<T>>>,
   storage: Arc<Mutex<Box<dyn Storage<S>>>>,
-  updated: HashMap<TreeId,Arc<Mutex<T>>>,
-  removed: HashSet<TreeId>,
+  updated: Arc<Mutex<HashMap<TreeId,Arc<Mutex<T>>>>>,
+  removed: Arc<Mutex<HashSet<TreeId>>>,
   _marker: std::marker::PhantomData<(P,V)>,
 }
 
@@ -17,13 +17,13 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
     Self {
       cache: LRU::new(n),
       storage,
-      updated: HashMap::new(),
-      removed: HashSet::new(),
+      updated: Arc::new(Mutex::new(HashMap::new())),
+      removed: Arc::new(Mutex::new(HashSet::new())),
       _marker: std::marker::PhantomData,
     }
   }
   pub async fn get(&mut self, id: &TreeId) -> Result<Arc<Mutex<T>>,Error> {
-    if let Some(t) = self.updated.get(id) {
+    if let Some(t) = self.updated.lock().await.get(id) {
       return Ok(Arc::clone(t));
     }
     match &self.cache.get(id) {
@@ -41,30 +41,44 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   pub async fn put(&mut self, id: &TreeId, t: Arc<Mutex<T>>) -> () {
     //eprintln!["put {}", id];
     self.cache.put(*id, Arc::clone(&t));
-    self.updated.insert(*id, Arc::clone(&t));
+    self.updated.lock().await.insert(*id, Arc::clone(&t));
   }
   pub async fn remove(&mut self, id: &TreeId) -> () {
     //eprintln!["remove {}", id];
     self.cache.pop(id);
-    self.updated.remove(id);
-    self.removed.insert(*id);
+    self.updated.lock().await.remove(id);
+    self.removed.lock().await.insert(*id);
   }
   pub async fn flush(&mut self) -> Result<(),Error> {
     //eprintln!["flush {}", self.updated.len()];
-    for (id,t) in self.updated.iter() {
-      let file = get_file(id);
-      let storage = Arc::clone(&self.storage);
-      let mut s = storage.lock().await.open(&file).await?;
-      s.write(0, &t.lock().await.to_bytes()?).await?;
+    {
+      let updated = self.updated.clone();
+      let removed = self.removed.clone();
+      let mut tasks = vec![];
+      let updated_x = updated.lock().await;
+      for (id,t) in updated_x.iter() {
+        let file = get_file(id);
+        let storage = Arc::clone(&self.storage);
+        tasks.push(spawn(async move {
+          let mut s = storage.lock().await.open(&file).await?;
+          s.write(0, &t.lock().await.to_bytes()?).await
+        }));
+      }
+      for id in removed.lock().await.iter() {
+        let file = get_file(id);
+        let storage = self.storage.clone();
+        tasks.push(spawn(async move {
+          // ignoring errors for now
+          storage.lock().await.remove(&file).await
+        }));
+      }
+      // not concurrent, just demonstrating the issue
+      for t in tasks.iter_mut() {
+        t.await?;
+      }
     }
-    for id in self.removed.iter() {
-      let file = get_file(id);
-      let storage = Arc::clone(&self.storage);
-      // ignoring errors for now
-      storage.lock().await.remove(&file).await;
-    }
-    self.updated.clear();
-    self.removed.clear();
+    self.updated.lock().await.clear();
+    self.removed.lock().await.clear();
     Ok(())
   }
 }
