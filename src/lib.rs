@@ -164,12 +164,16 @@ pub struct DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
 
 impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
-    let meta = setup.storage.lock().await.open("meta").await?;
+    let mut meta = setup.storage.lock().await.open("meta").await?;
+    let roots = match meta.len().await? {
+      0 => Roots { refs: vec![] },
+      n => Roots::from_bytes(&meta.read(0,n).await?)?.1,
+    };
     Ok(Self {
       storage: Arc::clone(&setup.storage),
       meta: Arc::new(Mutex::new(meta)),
       fields: Arc::new(setup.fields),
-      roots: Roots { refs: vec![] }, // TODO: load from meta
+      roots,
       next_tree: 0,
       trees: TreeFile::new(100, Arc::clone(&setup.storage)),
     })
@@ -178,8 +182,8 @@ impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
     P::batch(self, rows).await
   }
   pub async fn flush(&mut self) -> Result<(),Error> {
-    let rbytes = self.roots.to_bytes()?;
     self.trees.flush().await?;
+    let rbytes = self.roots.to_bytes()?;
     self.meta.lock().await.write(0, &rbytes).await?;
     Ok(())
   }
