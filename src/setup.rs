@@ -1,5 +1,4 @@
 use crate::{DB,Tree,Storage,Point,Value,Error,RA};
-use random_access_storage::RandomAccess;
 use async_std::sync::{Arc,Mutex};
 
 /// Struct for reading database properties.

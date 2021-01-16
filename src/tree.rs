@@ -3,7 +3,6 @@ use crate::{Scalar,Point,Value,Coord,Location,Error,Storage,Overlap,RA,
   query::QStream, tree_file::TreeFile, SetupFields};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
-use random_access_storage::RandomAccess;
 use std::collections::HashMap;
 
 pub type TreeId = u64;
