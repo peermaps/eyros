@@ -110,10 +110,7 @@ macro_rules! impl_tree {
         }
         if build.level >= self.fields.max_depth || build.count >= self.fields.max_records {
           let r = self.next_tree;
-          let t = $Tree {
-            root: Arc::new(self.build(&build.ext())),
-          };
-          //eprintln!["EXT {} bytes", t.count_bytes()];
+          //eprintln!["EXT id={:02x}", r];
           let tr = TreeRef {
             id: r,
             bounds: $get_bounds(
@@ -121,8 +118,11 @@ macro_rules! impl_tree {
               self.inserts
             ),
           };
-          self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
           self.next_tree += 1;
+          let t = $Tree {
+            root: Arc::new(self.build(&build.ext())),
+          };
+          self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
           return $Node::Data(vec![],vec![tr]);
         }
 
@@ -379,6 +379,7 @@ macro_rules! impl_tree {
               return None;
             }
             let (level,c) = cursors.pop().unwrap();
+            //eprintln!["(level,c)=({},{:?})", level, c];
             match c.as_ref() {
               $Node::Branch(branch) => {
                 match level % $dim {

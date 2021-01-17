@@ -46,7 +46,7 @@ pub enum Coord<X> where X: Scalar {
 }
 
 #[async_trait::async_trait]
-pub trait Point: 'static+Overlap+Clone+Send+Sync {
+pub trait Point: 'static+Overlap+Clone+Send+Sync+core::fmt::Debug {
   type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes+Overlap;
   async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
     where S: RA, V: Value, Self: Sized, T: Tree<Self,V>;
@@ -97,7 +97,7 @@ macro_rules! impl_point {
           .collect();
 
         let trees = &mut db.trees.lock().await;
-        let merge_trees = db.roots.refs.iter()
+        let merge_trees = db.meta.roots.iter()
           .take_while(|r| r.is_some())
           .map(|r| r.as_ref().unwrap().clone())
           .collect::<Vec<TreeRef<Self>>>();
@@ -106,7 +106,7 @@ macro_rules! impl_point {
           inserts: inserts.as_slice(),
           roots: merge_trees.as_slice(),
           trees,
-          next_tree: &mut db.next_tree,
+          next_tree: &mut db.meta.next_tree,
         };
         let (tr,t,rm_trees,create_trees) = m.merge().await?;
         //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
@@ -118,16 +118,16 @@ macro_rules! impl_point {
         }
         trees.put(&tr.id, Arc::new(Mutex::new(t))).await;
         for i in 0..merge_trees.len() {
-          if i < db.roots.refs.len() {
-            db.roots.refs[i] = None;
+          if i < db.meta.roots.len() {
+            db.meta.roots[i] = None;
           } else {
-            db.roots.refs.push(None);
+            db.meta.roots.push(None);
           }
         }
-        if merge_trees.len() < db.roots.refs.len() {
-          db.roots.refs[merge_trees.len()] = Some(tr);
+        if merge_trees.len() < db.meta.roots.len() {
+          db.meta.roots[merge_trees.len()] = Some(tr);
         } else {
-          db.roots.refs.push(Some(tr));
+          db.meta.roots.push(Some(tr));
         }
         Ok(())
       }
@@ -149,32 +149,32 @@ pub enum Row<P,V> where P: Point, V: Value {
 }
 
 pub type Root<P> = Option<tree::TreeRef<P>>;
-pub struct Roots<P> where P: Point {
-  pub refs: Vec<Root<P>>,
+#[derive(Debug,Clone)]
+pub struct Meta<P> where P: Point {
+  pub roots: Vec<Root<P>>,
+  pub next_tree: TreeId,
 }
 
 pub struct DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
-  pub meta: Arc<Mutex<S>>,
   pub fields: Arc<SetupFields>,
-  pub roots: Roots<P>,
+  pub meta_store: Arc<Mutex<S>>,
+  pub meta: Meta<P>,
   pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
-  pub next_tree: TreeId,
 }
 
 impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
-    let mut meta = setup.storage.lock().await.open("meta").await?;
-    let roots = match meta.len().await? {
-      0 => Roots { refs: vec![] },
-      n => Roots::from_bytes(&meta.read(0,n).await?)?.1,
+    let mut meta_store = setup.storage.lock().await.open("meta").await?;
+    let meta = match meta_store.len().await? {
+      0 => Meta { roots: vec![], next_tree: 0 },
+      n => Meta::from_bytes(&meta_store.read(0,n).await?)?.1,
     };
     Ok(Self {
       storage: Arc::clone(&setup.storage),
-      meta: Arc::new(Mutex::new(meta)),
       fields: Arc::new(setup.fields),
-      roots,
-      next_tree: 0,
+      meta_store: Arc::new(Mutex::new(meta_store)),
+      meta,
       trees: Arc::new(Mutex::new(TreeFile::new(1000, Arc::clone(&setup.storage)))),
     })
   }
@@ -183,13 +183,13 @@ impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
   }
   pub async fn flush(&mut self) -> Result<(),Error> {
     self.trees.lock().await.flush().await?;
-    let rbytes = self.roots.to_bytes()?;
-    self.meta.lock().await.write(0, &rbytes).await?;
+    let rbytes = self.meta.to_bytes()?;
+    self.meta_store.lock().await.write(0, &rbytes).await?;
     Ok(())
   }
   pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
     let mut queries = vec![];
-    for root in self.roots.refs.iter() {
+    for root in self.meta.roots.iter() {
       if let Some(r) = root {
         let mut trees = self.trees.lock().await;
         let t = trees.get(&r.id).await?;
