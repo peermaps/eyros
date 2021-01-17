@@ -96,7 +96,7 @@ macro_rules! impl_point {
           .map(|x| x.unwrap())
           .collect();
 
-        let trees = &mut db.trees;
+        let trees = &mut db.trees.lock().await;
         let merge_trees = db.roots.refs.iter()
           .take_while(|r| r.is_some())
           .map(|r| r.as_ref().unwrap().clone())
@@ -158,7 +158,7 @@ pub struct DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub meta: Arc<Mutex<S>>,
   pub fields: Arc<SetupFields>,
   pub roots: Roots<P>,
-  pub trees: TreeFile<S,T,P,V>,
+  pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
   pub next_tree: TreeId,
 }
 
@@ -175,14 +175,14 @@ impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
       fields: Arc::new(setup.fields),
       roots,
       next_tree: 0,
-      trees: TreeFile::new(100, Arc::clone(&setup.storage)),
+      trees: Arc::new(Mutex::new(TreeFile::new(1000, Arc::clone(&setup.storage)))),
     })
   }
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     P::batch(self, rows).await
   }
   pub async fn flush(&mut self) -> Result<(),Error> {
-    self.trees.flush().await?;
+    self.trees.lock().await.flush().await?;
     let rbytes = self.roots.to_bytes()?;
     self.meta.lock().await.write(0, &rbytes).await?;
     Ok(())
@@ -191,8 +191,9 @@ impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
     let mut queries = vec![];
     for root in self.roots.refs.iter() {
       if let Some(r) = root {
-        let t = self.trees.get(&r.id).await?;
-        queries.push(t.lock().await.query(Arc::clone(&self.storage), bbox));
+        let mut trees = self.trees.lock().await;
+        let t = trees.get(&r.id).await?;
+        queries.push(t.lock().await.query(Arc::clone(&self.trees), bbox));
       }
     }
     <QueryStream<P,V>>::from_queries(queries)

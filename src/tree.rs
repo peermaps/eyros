@@ -1,5 +1,5 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Scalar,Point,Value,Coord,Location,Error,Storage,Overlap,RA,
+use crate::{Scalar,Point,Value,Coord,Location,Error,Overlap,RA,
   query::QStream, tree_file::TreeFile, SetupFields};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
@@ -349,7 +349,7 @@ macro_rules! impl_tree {
         }
         (rows,refs)
       }
-      fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>>>>,
+      fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,($(Coord<$T>),+),V>>>,
       bbox: &(($($T),+),($($T),+))) -> Arc<Mutex<QStream<($(Coord<$T>),+),V>>>
       where S: RA {
         let istate = (
@@ -357,23 +357,22 @@ macro_rules! impl_tree {
           vec![], // queue
           vec![(0usize,Arc::clone(&self.root))], // cursors
           vec![], // refs
-          Arc::clone(&storage), // storage
+          Arc::clone(&trees),
         );
         Arc::new(Mutex::new(Box::new(unfold(istate, async move |mut state| {
           let bbox = &state.0;
           let queue = &mut state.1;
           let cursors = &mut state.2;
           let refs = &mut state.3;
-          let storage = &mut state.4;
+          let trees = &mut state.4;
           loop {
             if let Some(q) = queue.pop() {
               return Some((Ok(q),state));
             }
             if cursors.is_empty() && !refs.is_empty() {
-              // TODO: use a tree LRU
-              match Self::load(Arc::clone(storage), refs.pop().unwrap()).await {
+              match Arc::clone(trees).lock().await.get(&refs.pop().unwrap()).await {
                 Err(e) => return Some((Err(e.into()),state)),
-                Ok(tree) => cursors.push((0usize,tree.root)),
+                Ok(t) => cursors.push((0usize,Arc::clone(&t.lock().await.root))),
               };
               continue;
             } else if cursors.is_empty() {
@@ -425,15 +424,6 @@ macro_rules! impl_tree {
             }
           }
         }))))
-      }
-    }
-
-    impl<$($T),+,V> $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
-      async fn load<S>(storage: Arc<Mutex<Box<dyn Storage<S>>>>,
-      r: TreeId) -> Result<Self,Error> where S: RA {
-        let mut s = storage.lock().await.open(&format!["tree/{}",r.to_string()]).await?;
-        let bytes = s.read(0, s.len().await?).await?;
-        Ok(Self::from_bytes(&bytes)?.1)
       }
     }
 
@@ -509,7 +499,7 @@ where P: Point, V: Value {
   fn build<'a>(fields: Arc<SetupFields>, rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
     -> (TreeRef<P>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
-  fn query<S>(&mut self, storage: Arc<Mutex<Box<dyn Storage<S>>>>,
+  fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RA;
 }
