@@ -13,7 +13,6 @@ impl<P> ToBytes for Meta<P> where P: Point, Self: CountBytes {
         buf[offset+i/8] |= 1<<(i%8);
       }
     }
-    eprintln!["bitfield={:?}",&buf[offset..offset+(self.roots.len()+7)/8]];
     offset += (self.roots.len()+7)/8;
     for root in self.roots.iter() {
       match root {
@@ -41,7 +40,7 @@ impl<P> FromBytes for Meta<P> where P: Point {
     }
     let bitfield = &src[offset..offset+(len+7)/8];
     offset += (len+7)/8;
-    let mut roots = vec![];
+    let mut roots = Vec::with_capacity(len);
     for i in 0..(len as usize) {
       if (bitfield[i/8]>>(i%8))&1==1 {
         let (n,id) = varint::decode(&src[offset..])?;
@@ -49,6 +48,8 @@ impl<P> FromBytes for Meta<P> where P: Point {
         let (n,bounds) = <P::Bounds>::from_bytes(&src[offset..])?;
         offset += n;
         roots.push(Some(TreeRef { id, bounds: P::bounds_to_point(&bounds) }));
+      } else {
+        roots.push(None);
       }
     }
     Ok((offset,Self { roots, next_tree }))
