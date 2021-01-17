@@ -8,7 +8,7 @@ impl<P> ToBytes for Roots<P> where P: Point, Self: CountBytes {
     let mut buf = vec![0u8;self.count_bytes()];
     offset += varint::encode(self.refs.len() as u64, &mut buf[offset..])?;
     for i in 0..self.refs.len() {
-      buf[i/8] |= 1<<(i%8);
+      buf[offset+i/8] |= 1<<(i%8);
     }
     offset += (self.refs.len()+7)/8;
     for root in self.refs.iter() {
