@@ -1,10 +1,11 @@
 use lru::{LruCache as LRU};
-use crate::{Tree,TreeId,Error,Point,Value,Storage,RA};
+use crate::{Tree,TreeId,Error,Point,Value,Storage,RA,SetupFields};
 use std::collections::{HashMap,HashSet};
 use async_std::{sync::{Arc,Mutex},task::spawn};
 use async_std::prelude::*;
 
 pub struct TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
+  fields: Arc<SetupFields>,
   cache: LRU<TreeId,Arc<Mutex<T>>>,
   storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   updated: HashMap<TreeId,Arc<Mutex<T>>>,
@@ -13,9 +14,11 @@ pub struct TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
 }
 
 impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
-  pub fn new(n: usize, storage: Arc<Mutex<Box<dyn Storage<S>>>>) -> Self {
+  pub fn new(fields: Arc<SetupFields>, storage: Arc<Mutex<Box<dyn Storage<S>>>>) -> Self {
+    let cache = LRU::new(fields.tree_cache_size);
     Self {
-      cache: LRU::new(n),
+      fields,
+      cache,
       storage,
       updated: HashMap::new(),
       removed: HashSet::new(),
@@ -31,7 +34,13 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
       None => {
         let file = get_file(id);
         let mut s = self.storage.lock().await.open(&file).await?;
-        let bytes = s.read(0, s.len().await?).await?;
+        let len = s.len().await?;
+        if len == 0 {
+          return Err(Box::new(failure::err_msg(
+            format!["tree empty id={} file={}", id, file]).compat()
+          ));
+        }
+        let bytes = s.read(0, len).await?;
         let t = Arc::new(Mutex::new(T::from_bytes(&bytes)?.1));
         self.cache.put(*id, Arc::clone(&t));
         Ok(t)
@@ -67,8 +76,7 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
       let storage = self.storage.clone();
       tasks.push(spawn(async move {
         // ignoring errors for now
-        storage.lock().await.remove(&file).await;
-        Ok(())
+        storage.lock().await.remove(&file).await
       }));
     }
     let mut itasks = tasks.iter_mut();

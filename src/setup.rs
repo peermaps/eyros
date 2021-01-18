@@ -7,6 +7,7 @@ pub struct SetupFields {
   pub max_depth: usize,
   pub max_records: usize,
   pub inline: usize,
+  pub tree_cache_size: usize,
   /*
   pub max_data_size: usize,
   pub base_size: usize,
@@ -22,6 +23,7 @@ impl SetupFields {
       max_depth: 8,
       max_records: 20_000,
       inline: 500,
+      tree_cache_size: 1000,
       /*
       max_data_size: 3_000,
       base_size: 9_000,

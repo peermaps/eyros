@@ -170,12 +170,14 @@ impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
       0 => Meta { roots: vec![], next_tree: 0 },
       n => Meta::from_bytes(&meta_store.read(0,n).await?)?.1,
     };
+    let fields = Arc::new(setup.fields);
+    let trees = TreeFile::new(Arc::clone(&fields), Arc::clone(&setup.storage));
     Ok(Self {
       storage: Arc::clone(&setup.storage),
-      fields: Arc::new(setup.fields),
+      fields,
       meta_store: Arc::new(Mutex::new(meta_store)),
       meta,
-      trees: Arc::new(Mutex::new(TreeFile::new(1000, Arc::clone(&setup.storage)))),
+      trees: Arc::new(Mutex::new(trees))
     })
   }
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
