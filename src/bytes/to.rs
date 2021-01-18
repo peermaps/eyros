@@ -21,11 +21,7 @@ macro_rules! impl_to_bytes {
             $write_data_bytes(data, refs, &mut buf[offset..])?;
           },
           $Node::Branch(branch) => {
-            //let (n,_) = alloc.get(&0).unwrap();
-            //assert_eq![*n, hsize, "n ({}) != hsize ({})", *n, hsize];
-            //assert_eq![*n, offset+4, "n ({}) != offset ({}+4)", *n, offset];
             offset += ((hsize*2+0) as u32).write_bytes(&mut buf[offset..])?;
-            //assert_eq![offset, hsize, "offset ({}) != hsize ({})", offset, hsize];
             $write_branch_bytes(branch, &alloc, offset, &mut buf)?;
           },
         }
@@ -39,7 +35,7 @@ macro_rules! impl_to_bytes {
       let mut cursors = vec![root];
       let mut index = 0;
       let mut offset = hsize;
-      while let Some(node) = cursors.pop() {
+      while let Some(node) = cursors.get(index) {
         match node {
           $Node::Data(_,_) => {},
           $Node::Branch(branch) => {
@@ -68,7 +64,8 @@ macro_rules! impl_to_bytes {
       let mut cursors = vec![root];
       let mut offset = i_offset;
       let mut index = 0;
-      while let Some(branch) = cursors.pop() {
+      let mut next_index = 1;
+      while let Some(branch) = cursors.get(index) {
         loop {
           $(if let Some(x) = &branch.pivots.$i {
             offset += x.write_bytes(&mut buf[offset..])?;
@@ -76,14 +73,13 @@ macro_rules! impl_to_bytes {
           })+
           panic!["pivots empty"];
         }
-        let mut i = index + 1;
         for x in [&branch.intersections,&branch.nodes].iter() {
           for b in x.iter() {
             match b.as_ref() {
               $Node::Branch(branch) => {
-                let (j,_) = alloc.get(&i).unwrap();
+                let (j,size) = alloc.get(&next_index).unwrap();
                 offset += (((*j)*2+0) as u32).write_bytes(&mut buf[offset..])?;
-                i += 1;
+                next_index += 1;
                 cursors.push(branch);
               },
               $Node::Data(data, refs) => {
@@ -118,9 +114,10 @@ macro_rules! impl_to_bytes {
     refs: &[TreeRef<($(Coord<$T>),+)>], buf: &mut [u8]) -> Result<usize,Error>
     where $($T: Scalar),+, V: Value {
       let mut offset = 0;
-      offset += (((rows.len()<<1) + (refs.len()<<17) + 1) as u32).write_bytes(&mut buf[offset..])?;
+      let n = ((rows.len()<<1) + (refs.len()<<17) + 1) as u32;
+      offset += n.write_bytes(&mut buf[offset..])?;
       for _j in 0..(rows.len()+7)/8 {
-        buf[offset] = 0;
+        buf[offset] = 0; // all inserted, no deleted when constructing
         offset += 1;
       }
       for row in rows.iter() {
