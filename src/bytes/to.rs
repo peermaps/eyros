@@ -34,8 +34,9 @@ macro_rules! impl_to_bytes {
       let mut alloc: HashMap<usize,(usize,usize)> = HashMap::new(); // index => (offset, size)
       let mut cursors = vec![root];
       let mut index = 0;
+      let mut cindex = 0;
       let mut offset = hsize;
-      while let Some(node) = cursors.get(index) {
+      while let Some(node) = cursors.get(cindex) {
         match node {
           $Node::Data(_,_) => {},
           $Node::Branch(branch) => {
@@ -55,6 +56,7 @@ macro_rules! impl_to_bytes {
             index += 1;
           },
         }
+        cindex += 1;
       }
       (alloc,offset)
     }
@@ -77,7 +79,7 @@ macro_rules! impl_to_bytes {
           for b in x.iter() {
             match b.as_ref() {
               $Node::Branch(branch) => {
-                let (j,size) = alloc.get(&next_index).unwrap();
+                let (j,_size) = alloc.get(&next_index).unwrap();
                 offset += (((*j)*2+0) as u32).write_bytes(&mut buf[offset..])?;
                 next_index += 1;
                 cursors.push(branch);
