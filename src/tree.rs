@@ -395,11 +395,11 @@ macro_rules! impl_tree {
                 match level % $dim {
                   $($i => {
                     let pivots = branch.pivots.$i.as_ref().unwrap();
-                    for (pivot,b) in pivots.iter().zip(branch.intersections.iter()) {
-                      if &(bbox.0).$i <= pivot && pivot <= &(bbox.1).$i {
-                        cursors.push((level+1,Arc::clone(b)));
-                      }
+                    for b in branch.intersections.iter() {
+                      // it's not possible to rule any intersection out
+                      cursors.push((level+1,Arc::clone(b)));
                     }
+
                     let xs = &branch.nodes;
                     let ranges = pivots.iter().zip(pivots.iter().skip(1));
                     if &(bbox.0).$i <= pivots.first().unwrap() {
@@ -420,8 +420,7 @@ macro_rules! impl_tree {
               $Node::Data(data,rs) => {
                 queue.extend(data.iter()
                   .filter(|pv| {
-                    intersect_coord(&(pv.0).0, &(bbox.0).0, &(bbox.1).0)
-                    && intersect_coord(&(pv.0).1, &(bbox.0).1, &(bbox.1).1)
+                    true $(&& intersect_coord(&(pv.0).$i, &(bbox.0).$i, &(bbox.1).$i))+
                   })
                   .map(|pv| {
                     let loc: Location = (0,0); // TODO
