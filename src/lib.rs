@@ -49,7 +49,7 @@ impl Scalar for i64 {}
 pub trait RA: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
 impl<S> RA for S where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug,Clone,PartialEq,PartialOrd)]
 pub enum Coord<X> where X: Scalar {
   Scalar(X),
   Interval(X,X)
