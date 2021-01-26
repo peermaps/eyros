@@ -64,7 +64,6 @@ macro_rules! impl_tree {
     pub struct $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
       pub fields: Arc<SetupFields>,
       pub inserts: &'a [(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
-      pub matched: Vec<bool>,
       pub next_tree: TreeId,
       pub ext_trees: HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>,
       pub sorted: Vec<usize>,
@@ -73,12 +72,11 @@ macro_rules! impl_tree {
     impl<'a,$($T),+,V> $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
       fn next<X>(&mut self, x: &X, build: &Build, index: &mut usize,
       f: Box<dyn Fn (&X,&[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], &usize) -> bool>) -> Build {
-        let matched = &self.matched;
         let inserts = &self.inserts;
         // partition:
         let n = self.sorted[build.range.0+*index..build.range.1]
           .iter_mut().partition_in_place(|j| {
-            !matched[*j] && f(x, inserts, j)
+            f(x, inserts, j)
           });
         let range = (build.range.0+*index,build.range.0+*index+n);
         // sort for next dimension:
@@ -105,10 +103,8 @@ macro_rules! impl_tree {
         if rlen == 0 {
           return $Node::Data(vec![],vec![]);
         } else if rlen < self.fields.inline || rlen <= 2 {
-          let matched = &mut self.matched;
           let inserts = &self.inserts;
           return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
-            matched[*i] = true;
             inserts[*i].clone()
           }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)>>());
         }
@@ -172,6 +168,7 @@ macro_rules! impl_tree {
                 }).collect()
               }
             };
+            // pivots aren't always sorted. make sure they are:
             ps.sort_unstable_by(|a,b| {
               match a.partial_cmp(b) {
                 Some(c) => c,
@@ -196,10 +193,8 @@ macro_rules! impl_tree {
                 })
               );
               if next.range.1 - next.range.0 == rlen {
-                let matched = &mut self.matched;
                 let inserts = &self.inserts;
                 Arc::new($build_data(&self.sorted[next.range.0..next.range.1].iter().map(|i| {
-                  matched[*i] = true;
                   inserts[*i].clone()
                 }).collect::<Vec<(_,InsertValue<'_,_,V>)>>()))
               } else {
@@ -266,10 +261,8 @@ macro_rules! impl_tree {
           }
         });
         if node_count <= 1 {
-          let matched = &mut self.matched;
           let inserts = &self.inserts;
           return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
-            matched[*i] = true;
             inserts[*i].clone()
           }).collect::<Vec<(_,InsertValue<'_,($(Coord<$T>),+),V>)>>());
         }
@@ -290,7 +283,6 @@ macro_rules! impl_tree {
         let mut mstate = $MState {
           fields,
           inserts,
-          matched: vec![false;inserts.len()],
           next_tree: *next_tree,
           ext_trees: HashMap::new(),
           sorted: {
