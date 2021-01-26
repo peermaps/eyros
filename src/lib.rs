@@ -39,7 +39,7 @@ impl<T> Value for Vec<T> where T: Value {}
 pub trait RA: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
 impl<S> RA for S where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
 
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,PartialEq)]
 pub enum Coord<X> where X: Scalar {
   Scalar(X),
   Interval(X,X)
@@ -143,6 +143,7 @@ macro_rules! impl_point {
 #[cfg(feature="7d")] impl_point![Tree7,open_from_path7,(P0,P1,P2,P3,P4,P5,P6),(0,1,2,3,4,5,6)];
 #[cfg(feature="8d")] impl_point![Tree8,open_from_path8,(P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7)];
 
+#[derive(Debug,Clone)]
 pub enum Row<P,V> where P: Point, V: Value {
   Insert(P,V),
   Delete(Location)
