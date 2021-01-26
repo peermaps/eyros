@@ -58,8 +58,6 @@ pub enum Coord<X> where X: Scalar {
 #[async_trait::async_trait]
 pub trait Point: 'static+Overlap+Clone+Send+Sync+core::fmt::Debug {
   type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes+Overlap;
-  async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
-    where S: RA, V: Value, Self: Sized, T: Tree<Self,V>;
   fn to_bounds(&self) -> Result<Self::Bounds,Error>;
   fn bounds_to_point(bounds: &Self::Bounds) -> Self;
 }
@@ -93,53 +91,6 @@ macro_rules! impl_point {
       }
       fn bounds_to_point(bounds: &Self::Bounds) -> Self {
         ($(Coord::Interval((bounds.0).$i.clone(),(bounds.1).$i.clone())),+)
-      }
-
-      async fn batch<S,T,V>(db: &mut DB<S,T,Self,V>, rows: &[Row<Self,V>]) -> Result<(),Error>
-      where S: RA, V: Value, T: Tree<($(Coord<$T>),+),V> {
-        let inserts: Vec<(&Self,&V)> = rows.iter()
-          .map(|row| match row {
-            Row::Insert(p,v) => Some((p,v)),
-            _ => None
-          })
-          .filter(|row| !row.is_none())
-          .map(|x| x.unwrap())
-          .collect();
-
-        let trees = &mut db.trees.lock().await;
-        let merge_trees = db.meta.roots.iter()
-          .take_while(|r| r.is_some())
-          .map(|r| r.as_ref().unwrap().clone())
-          .collect::<Vec<TreeRef<Self>>>();
-        let mut m = Merge {
-          fields: Arc::clone(&db.fields),
-          inserts: inserts.as_slice(),
-          roots: merge_trees.as_slice(),
-          trees,
-          next_tree: &mut db.meta.next_tree,
-        };
-        let (tr,t,rm_trees,create_trees) = m.merge().await?;
-        //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
-        for r in rm_trees.iter() {
-          trees.remove(r).await;
-        }
-        for (r,t) in create_trees.iter() {
-          trees.put(r,Arc::clone(t)).await;
-        }
-        trees.put(&tr.id, Arc::new(Mutex::new(t))).await;
-        for i in 0..merge_trees.len() {
-          if i < db.meta.roots.len() {
-            db.meta.roots[i] = None;
-          } else {
-            db.meta.roots.push(None);
-          }
-        }
-        if merge_trees.len() < db.meta.roots.len() {
-          db.meta.roots[merge_trees.len()] = Some(tr);
-        } else {
-          db.meta.roots.push(Some(tr));
-        }
-        Ok(())
       }
     }
   }
@@ -192,7 +143,49 @@ impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
     })
   }
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
-    P::batch(self, rows).await
+    let inserts: Vec<(&P,&V)> = rows.iter()
+      .map(|row| match row {
+        Row::Insert(p,v) => Some((p,v)),
+        _ => None
+      })
+      .filter(|row| !row.is_none())
+      .map(|x| x.unwrap())
+      .collect();
+
+    let trees = &mut self.trees.lock().await;
+    let merge_trees = self.meta.roots.iter()
+      .take_while(|r| r.is_some())
+      .map(|r| r.as_ref().unwrap().clone())
+      .collect::<Vec<TreeRef<P>>>();
+    let mut m = Merge {
+      fields: Arc::clone(&self.fields),
+      inserts: inserts.as_slice(),
+      roots: merge_trees.as_slice(),
+      trees,
+      next_tree: &mut self.meta.next_tree,
+    };
+    let (tr,t,rm_trees,create_trees) = m.merge().await?;
+    //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
+    for r in rm_trees.iter() {
+      trees.remove(r).await;
+    }
+    for (r,t) in create_trees.iter() {
+      trees.put(r,Arc::clone(t)).await;
+    }
+    trees.put(&tr.id, Arc::new(Mutex::new(t))).await;
+    for i in 0..merge_trees.len() {
+      if i < self.meta.roots.len() {
+        self.meta.roots[i] = None;
+      } else {
+        self.meta.roots.push(None);
+      }
+    }
+    if merge_trees.len() < self.meta.roots.len() {
+      self.meta.roots[merge_trees.len()] = Some(tr);
+    } else {
+      self.meta.roots.push(Some(tr));
+    }
+    Ok(())
   }
   pub async fn sync(&mut self) -> Result<(),Error> {
     self.trees.lock().await.sync().await?;
