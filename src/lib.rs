@@ -28,13 +28,23 @@ pub trait Scalar: Clone+PartialOrd+From<u8>+core::fmt::Debug
   +Value+Add<Output=Self>+Div<Output=Self> {}
 impl Value for f32 {}
 impl Value for f64 {}
-impl Scalar for f32 {}
-impl Scalar for f64 {}
 impl Value for u8 {}
 impl Value for u16 {}
 impl Value for u32 {}
 impl Value for u64 {}
+impl Value for i16 {}
+impl Value for i32 {}
+impl Value for i64 {}
 impl<T> Value for Vec<T> where T: Value {}
+impl Scalar for f32 {}
+impl Scalar for f64 {}
+impl Scalar for u8 {}
+impl Scalar for u16 {}
+impl Scalar for u32 {}
+impl Scalar for u64 {}
+impl Scalar for i16 {}
+impl Scalar for i32 {}
+impl Scalar for i64 {}
 
 pub trait RA: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
 impl<S> RA for S where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
