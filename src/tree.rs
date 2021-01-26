@@ -609,11 +609,11 @@ fn calc_overlap<X>(bounds: &[X]) -> Vec<bool> where X: Overlap {
 
 fn find_separation<X>(amin: &X, amax: &X, bmin: &X, bmax: &X, is_min: bool) -> X where X: Scalar {
   if is_min && intersect_iv(amin, amax, bmin, bmax) {
-    ((*amin).clone() + (*bmin).clone()) / 2.into()
+    amin.clone()/2.into() + bmin.clone()/2.into()
   } else if !is_min && intersect_iv(amin, amax, bmin, bmax) {
-    ((*amax).clone() + (*bmax).clone()) / 2.into()
+    amax.clone()/2.into() + bmax.clone()/2.into()
   } else {
-    ((*amax).clone() + (*bmin).clone()) / 2.into()
+    amax.clone()/2.into() + bmin.clone()/2.into()
   }
 }
 
