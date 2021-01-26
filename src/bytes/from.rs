@@ -121,18 +121,20 @@ macro_rules! impl_from_bytes {
       for _i in 0..ref_len {
         let (s,r) = varint::decode(&src[offset..])?;
         offset += s;
-        refs.push(TreeRef {
+        let tr = TreeRef {
           id: r,
           bounds: ($({
-            let (s,x) = $T::from_bytes(&src[offset..])?;
-            assert![x == x, "non-identity deserializing x={:?}", x];
+            let (s,xmin) = $T::from_bytes(&src[offset..])?;
+            assert![xmin == xmin, "non-identity deserializing xmin={:?}", xmin];
             offset += s;
-            let (s,y) = $T::from_bytes(&src[offset..])?;
-            assert![y == y, "non-identity deserializing y={:?}", y];
+            let (s,xmax) = $T::from_bytes(&src[offset..])?;
+            assert![xmax == xmax, "non-identity deserializing xmax={:?}", xmax];
             offset += s;
-            Coord::Interval(x,y)
+            Coord::Interval(xmin,xmax)
           }),+)
-        });
+        };
+        //eprintln!["from:bounds={:?}",&tr.bounds];
+        refs.push(tr);
       }
       Ok((offset,$Node::Data(data,refs)))
     }

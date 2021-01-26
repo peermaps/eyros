@@ -18,6 +18,7 @@ impl<P> ToBytes for Meta<P> where P: Point, Self: CountBytes {
       match root {
         Some(r) => {
           offset += varint::encode(r.id as u64, &mut buf[offset..])?;
+          //eprintln!["meta:to bounds={:?}", r.bounds.to_bounds().unwrap()];
           offset += r.bounds.to_bounds().unwrap().write_bytes(&mut buf[offset..])?;
         },
         None => {},
@@ -46,6 +47,7 @@ impl<P> FromBytes for Meta<P> where P: Point {
         let (n,id) = varint::decode(&src[offset..])?;
         offset += n;
         let (n,bounds) = <P::Bounds>::from_bytes(&src[offset..])?;
+        //eprintln!["meta:from bounds={:?}", &bounds];
         offset += n;
         roots.push(Some(TreeRef { id, bounds: P::bounds_to_point(&bounds) }));
       } else {

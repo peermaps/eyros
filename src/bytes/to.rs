@@ -128,12 +128,13 @@ macro_rules! impl_to_bytes {
       }
       for r in refs.iter() {
         offset += varint::encode(r.id, &mut buf[offset..])?;
+        //eprintln!["to:bounds={:?}", &r.bounds];
         $(match &r.bounds.$i {
-          Coord::Interval(x,y) => {
-            assert![x == x, "non-idenity serializing x={:?}", x];
-            assert![y == y, "non-idenity serializing y={:?}", y];
-            offset += x.write_bytes(&mut buf[offset..])?;
-            offset += y.write_bytes(&mut buf[offset..])?;
+          Coord::Interval(xmin,xmax) => {
+            assert![xmin == xmin, "non-idenity serializing xmin={:?}", xmin];
+            assert![xmax == xmax, "non-idenity serializing xmax={:?}", xmax];
+            offset += xmin.write_bytes(&mut buf[offset..])?;
+            offset += xmax.write_bytes(&mut buf[offset..])?;
           },
           _ => panic!["unexpected scalar in TreeRef bound"]
         };)+

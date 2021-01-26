@@ -29,6 +29,11 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
     if let Some(t) = self.updated.get(id) {
       return Ok(Arc::clone(t));
     }
+    if self.removed.contains(id) {
+      return Err(Box::new(failure::err_msg(format![
+        "attempted to load tree scheduled for removal. id={}", id
+      ]).compat()));
+    }
     match &self.cache.get(id) {
       Some(t) => Ok(Arc::clone(t)),
       None => {
@@ -36,9 +41,9 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
         let mut s = self.storage.lock().await.open(&file).await?;
         let len = s.len().await?;
         if len == 0 {
-          return Err(Box::new(failure::err_msg(
-            format!["tree empty id={} file={}", id, file]).compat()
-          ));
+          return Err(Box::new(failure::err_msg(format![
+            "tree empty id={} file={}", id, file
+          ]).compat()));
         }
         let bytes = s.read(0, len).await?;
         let t = Arc::new(Mutex::new(T::from_bytes(&bytes)?.1));
