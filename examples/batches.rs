@@ -12,7 +12,7 @@ async fn main() -> Result<(),E> {
   let mut db = eyros::open_from_path2(
     &std::path::PathBuf::from("/tmp/eyros.db")
   ).await?;
-  let nbatch = 10;
+  let nbatch = 100;
   let batch_size = 100_000;
   let batches: Vec<Vec<Row<P,V>>> = (0..nbatch).map(|_| {
     (0..batch_size).map(|i| {
@@ -29,7 +29,7 @@ async fn main() -> Result<(),E> {
     db.batch(batch).await?;
   }
   let elapsed0 = start.elapsed().as_secs_f64();
-  db.flush().await?;
+  db.sync().await?;
   let elapsed1 = start.elapsed().as_secs_f64();
   eprintln!["MEMORY {}*{}={} rows in {}s ({}/s)",
     batch_size,

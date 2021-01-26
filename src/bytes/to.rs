@@ -130,6 +130,8 @@ macro_rules! impl_to_bytes {
         offset += varint::encode(r.id, &mut buf[offset..])?;
         $(match &r.bounds.$i {
           Coord::Interval(x,y) => {
+            assert![x == x, "non-idenity serializing x={:?}", x];
+            assert![y == y, "non-idenity serializing y={:?}", y];
             offset += x.write_bytes(&mut buf[offset..])?;
             offset += y.write_bytes(&mut buf[offset..])?;
           },

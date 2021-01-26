@@ -5,7 +5,7 @@ use async_std::{sync::{Arc,Mutex},task::spawn};
 use async_std::prelude::*;
 
 pub struct TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
-  fields: Arc<SetupFields>,
+  //fields: Arc<SetupFields>,
   cache: LRU<TreeId,Arc<Mutex<T>>>,
   storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   updated: HashMap<TreeId,Arc<Mutex<T>>>,
@@ -17,7 +17,7 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   pub fn new(fields: Arc<SetupFields>, storage: Arc<Mutex<Box<dyn Storage<S>>>>) -> Self {
     let cache = LRU::new(fields.tree_cache_size);
     Self {
-      fields,
+      //fields,
       cache,
       storage,
       updated: HashMap::new(),
@@ -59,7 +59,7 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
     self.updated.remove(id);
     self.removed.insert(*id);
   }
-  pub async fn flush(&mut self) -> Result<(),Error> {
+  pub async fn sync(&mut self) -> Result<(),Error> {
     let mut tasks = vec![];
     for (id,t) in self.updated.iter() {
       let file = get_file(id);
@@ -75,8 +75,9 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
       let file = get_file(id);
       let storage = self.storage.clone();
       tasks.push(spawn(async move {
-        // ignoring errors for now
-        storage.lock().await.remove(&file).await
+        // ignore errors
+        storage.lock().await.remove(&file).await;
+        Ok(())
       }));
     }
     let mut itasks = tasks.iter_mut();

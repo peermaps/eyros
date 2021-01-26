@@ -125,8 +125,10 @@ macro_rules! impl_from_bytes {
           id: r,
           bounds: ($({
             let (s,x) = $T::from_bytes(&src[offset..])?;
+            assert![x == x, "non-identity deserializing x={:?}", x];
             offset += s;
             let (s,y) = $T::from_bytes(&src[offset..])?;
+            assert![y == y, "non-identity deserializing y={:?}", y];
             offset += s;
             Coord::Interval(x,y)
           }),+)

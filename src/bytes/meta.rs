@@ -1,5 +1,5 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Point,Meta,bytes::varint,TreeRef,TreeId};
+use crate::{Point,Meta,bytes::varint,TreeRef};
 use failure::{Error,bail};
 
 impl<P> ToBytes for Meta<P> where P: Point, Self: CountBytes {

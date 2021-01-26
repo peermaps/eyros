@@ -27,7 +27,7 @@ impl Build {
   }
 }
 
-#[derive(Clone)]
+#[derive(Debug,Clone)]
 pub enum InsertValue<'a,P,V> where P: Point, V: Value {
   Value(&'a V),
   Ref(TreeRef<P>),
@@ -84,7 +84,11 @@ macro_rules! impl_tree {
         // sort for next dimension:
         match (build.level+1)%$dim {
           $($i => self.sorted[range.0..range.1].sort_unstable_by(|a,b| {
-            coord_cmp(&(inserts[*a].0).$i,&(inserts[*b].0).$i).unwrap()
+            match coord_cmp(&(inserts[*a].0).$i,&(inserts[*b].0).$i) {
+              Some(c) => c,
+              None => panic!["comparison failed for sorting (1). a={:?} b={:?}",
+                inserts[*a], inserts[*b]],
+            }
           })),+,
           _ => panic!["unexpected level modulo dimension"]
         };
@@ -100,7 +104,7 @@ macro_rules! impl_tree {
         let rlen = build.range.1 - build.range.0;
         if rlen == 0 {
           return $Node::Data(vec![],vec![]);
-        } else if rlen < self.fields.inline {
+        } else if rlen < self.fields.inline || rlen <= 2 {
           let matched = &mut self.matched;
           let inserts = &self.inserts;
           return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
@@ -131,7 +135,7 @@ macro_rules! impl_tree {
         let mut pivots = ($($n),+);
         match build.level % $dim {
           $($i => {
-            pivots.$i = Some(match rlen {
+            let mut ps = match rlen {
               0 => panic!["not enough data to create a branch"],
               1 => match &(self.inserts[self.sorted[build.range.0]].0).$i {
                 Coord::Scalar(x) => {
@@ -154,6 +158,7 @@ macro_rules! impl_tree {
               },
               _ => {
                 (0..n).map(|k| {
+                  assert![n+1 > 0, "!(n+1 > 0). n={}", n];
                   let m = k * rlen / (n+1);
                   let a = match &(self.inserts[self.sorted[build.range.0+m+0]].0).$i {
                     Coord::Scalar(x) => (x,x),
@@ -166,7 +171,14 @@ macro_rules! impl_tree {
                   find_separation(a.0,a.1,b.0,b.1,is_min)
                 }).collect()
               }
+            };
+            ps.sort_unstable_by(|a,b| {
+              match a.partial_cmp(b) {
+                Some(c) => c,
+                None => panic!["comparison failed for sorting pivots. a={:?} b={:?}", a, b],
+              }
             });
+            pivots.$i = Some(ps);
           }),+,
           _ => panic!["unexpected level modulo dimension"]
         };
@@ -284,11 +296,17 @@ macro_rules! impl_tree {
           sorted: {
             let mut xs: Vec<usize> = (0..inserts.len()).collect();
             xs.sort_unstable_by(|a,b| {
-              coord_cmp(&(inserts[*a].0).0,&(inserts[*b].0).0).unwrap()
+              //coord_cmp(&(inserts[*a].0).0,&(inserts[*b].0).0).unwrap()
+              match coord_cmp(&(inserts[*a].0).0,&(inserts[*b].0).0) {
+                Some(c) => c,
+                None => panic!["comparison failed for sorting (2). a={:?} b={:?}",
+                  inserts[*a], inserts[*b]],
+              }
             });
             xs
           }
         };
+        assert![mstate.sorted.len() >= 2, "sorted.len()={}, must be >= 2", mstate.sorted.len()];
         let bounds = $get_bounds(
           mstate.sorted.iter().map(|i| *i),
           mstate.inserts
@@ -451,6 +469,15 @@ macro_rules! impl_tree {
           ($(coord_max(&(rows[i].0).$i,&(bounds.1).$i)),+)
         )
       });
+      $(assert![(bounds.0).$i < (bounds.1).$i,
+        "!((bounds.0).{}={:?} < (bounds.1).{}={:?})",
+        $i, (bounds.0).$i, $i, (bounds.1).$i];)+
+      $(assert![(bounds.0).$i == (bounds.0).$i,
+        "(bounds.0).{}={:?} != (bounds.0).{}={:?}",
+        $i, (bounds.0).$i, $i, (bounds.0).$i];)+
+      $(assert![(bounds.1).$i == (bounds.1).$i,
+        "(bounds.1).{}={:?} != (bounds.1).{}={:?}",
+        $i, (bounds.1).$i, $i, (bounds.1).$i];)+
       ($(Coord::Interval((bounds.0).$i,(bounds.1).$i)),+)
     }
 
@@ -566,6 +593,7 @@ impl<'a,S,T,P,V> Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA
         (pv.0.clone(),InsertValue::Value(&pv.1))
       }).collect::<Vec<_>>());
     }
+    assert![rows.len()>0, "rows.len()={}. must be >0", rows.len()];
     let (tr, t, create_trees) = T::build(
       Arc::clone(&self.fields),
       &rows,

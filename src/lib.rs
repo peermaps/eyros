@@ -183,8 +183,8 @@ impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     P::batch(self, rows).await
   }
-  pub async fn flush(&mut self) -> Result<(),Error> {
-    self.trees.lock().await.flush().await?;
+  pub async fn sync(&mut self) -> Result<(),Error> {
+    self.trees.lock().await.sync().await?;
     let rbytes = self.meta.to_bytes()?;
     self.meta_store.lock().await.write(0, &rbytes).await?;
     Ok(())
