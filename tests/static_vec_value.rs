@@ -106,13 +106,6 @@ fn coord_cmp<X>(x: &Coord<X>, y: &Coord<X>) -> Option<std::cmp::Ordering> where 
   }
 }
 
-fn contains_iv<T> (min: T, max: T, iv: (T,T)) -> bool where T: PartialOrd {
-  min <= iv.1 && iv.0 <= max
-}
-fn contains_pt<T> (min: T, max: T, pt: T) -> bool where T: PartialOrd {
-  min <= pt && pt <= max
-}
-
 fn intersect_coord<X>(low: &X, high: &X, c: &Coord<X>) -> bool where X: Scalar {
   match c {
     Coord::Scalar(x) => low <= x && x <= high,

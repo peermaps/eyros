@@ -1,4 +1,4 @@
-use eyros::{DB,Coord,Scalar,Row,Error};
+use eyros::{Coord,Scalar,Row,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
 use async_std::prelude::*;

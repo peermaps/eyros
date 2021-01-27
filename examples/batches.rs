@@ -1,6 +1,6 @@
 use eyros::{Row,Coord};
 use rand::random;
-use async_std::prelude::*;
+//use async_std::prelude::*;
 use std::time;
 
 type P = (Coord<f32>,Coord<f32>);

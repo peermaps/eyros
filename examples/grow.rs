@@ -1,9 +1,9 @@
-use eyros::{Setup,Row};
+use eyros::{DB,Tree2,Coord,Setup,Row};
 use rand::random;
 use std::path::PathBuf;
 use std::time;
 
-type P = ((f32,f32),(f32,f32));
+type P = (Coord<f32>,Coord<f32>);
 type V = u32;
 type E = Box<dyn std::error::Error+Sync+Send>;
 
@@ -11,10 +11,9 @@ type E = Box<dyn std::error::Error+Sync+Send>;
 async fn main() -> Result<(),E> {
   let args: Vec<String> = std::env::args().collect();
   let base = PathBuf::from(args[1].clone());
-  let mut db = Setup::from_path(&base)
+  let mut db: DB<_,Tree2<f32,f32,V>,P,V> = Setup::from_path(&base)
     .branch_factor(5)
-    .max_data_size(3_000)
-    .base_size(1_000)
+    .max_records(3_000)
     .build()
     .await?;
   let batch_size = 10_000;
@@ -27,7 +26,10 @@ async fn main() -> Result<(),E> {
       let ymin: f32 = random::<f32>()*2.0-1.0;
       let ymax: f32 = ymin + random::<f32>().powf(64.0)*(1.0-ymin);
       let value: u32 = random();
-      let point = ((xmin,xmax),(ymin,ymax));
+      let point = (
+        Coord::Interval(xmin,xmax),
+        Coord::Interval(ymin,ymax)
+      );
       Row::Insert(point, value)
     }).collect();
     let batch_start = time::Instant::now();
