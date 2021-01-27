@@ -1,50 +1,48 @@
-use eyros::{Setup,Row,Error};
+use eyros::{DB,Tree3,Coord,Scalar,Setup,Row,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
 use std::time;
 use std::cmp::Ordering;
 use async_std::prelude::*;
 
-type P = ((f32,f32),(f32,f32),f32);
+type P = (Coord<f32>,Coord<f32>,Coord<f32>);
 type V = u32;
 
 #[async_std::test]
 async fn single_4k_batch_xxyyz_9_bf_10_data_16_base() -> Result<(),Error> {
-  from_params(4000, 9, 10, 16).await
+  from_params(4000, 9, 10).await
 }
 
 #[async_std::test]
 async fn single_4k_batch_xxyyz_5_bf_10_data_16_base() -> Result<(),Error> {
-  from_params(4000, 5, 10, 16).await
+  from_params(4000, 5, 10).await
 }
 
 #[async_std::test]
 async fn single_4k_batch_xxyyz_17_bf_10_data_16_base() -> Result<(),Error> {
-  from_params(4000, 17, 10, 16).await
+  from_params(4000, 17, 10).await
 }
 
 #[async_std::test]
 async fn single_32k_batch_xxyyz_9_bf_400_data_1k_base() -> Result<(),Error> {
-  from_params(32_000, 9, 400, 1000).await
+  from_params(32_000, 9, 400).await
 }
 
 #[async_std::test]
 async fn single_64k_batch_xxyyz_9_bf_1k_data_16k_base() -> Result<(),Error> {
-  from_params(64_000, 9, 1_000, 16_000).await
+  from_params(64_000, 9, 1_000).await
 }
 
 #[async_std::test]
 async fn single_200k_batch_xxyyz_9_bf_400_data_1k_base() -> Result<(),Error> {
-  from_params(200_000, 9, 400, 1000).await
+  from_params(200_000, 9, 400).await
 }
 
-async fn from_params (size: usize, bf: usize, max_data_size: usize,
-base_size: usize) -> Result<(),Error> {
+async fn from_params (size: usize, bf: usize, max_records: usize) -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db = Setup::from_path(dir.path())
+  let mut db: DB<_,Tree3<f32,f32,f32,V>,P,V> = Setup::from_path(dir.path())
     .branch_factor(bf)
-    .max_data_size(max_data_size)
-    .base_size(base_size)
+    .max_records(max_records)
     .build()
     .await?;
   let mut r = rand().seed([13,12]);
@@ -55,7 +53,11 @@ base_size: usize) -> Result<(),Error> {
     let ymax: f32 = ymin + r.read::<f32>().powf(64.0)*(1.0-ymin);
     let time: f32 = r.read::<f32>()*1000.0;
     let value: u32 = r.read();
-    let point = ((xmin,xmax),(ymin,ymax),time);
+    let point = (
+      Coord::Interval(xmin,xmax),
+      Coord::Interval(ymin,ymax),
+      Coord::Scalar(time)
+    );
     Row::Insert(point, value)
   }).collect();
   {
@@ -77,10 +79,9 @@ base_size: usize) -> Result<(),Error> {
     eprintln!["batch query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
     assert_eq!(results.len(), size, "incorrect length for full region");
-    let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
-    = inserts.iter().map(|r| {
+    let mut expected: Vec<(P,V)> = inserts.iter().map(|r| {
       match r {
-        Row::Insert(point,value) => (*point,*value),
+        Row::Insert(point,value) => (point.clone(),value.clone()),
         _ => panic!["unexpected row type"]
       }
     }).collect();
@@ -100,18 +101,17 @@ base_size: usize) -> Result<(),Error> {
     }
     eprintln!["batch query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
-    let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
-    = inserts.iter()
+    let mut expected: Vec<(P,V)> = inserts.iter()
       .map(|r| {
         match r {
-          Row::Insert(point,value) => (*point,*value),
+          Row::Insert(point,value) => (point.clone(),value.clone()),
           _ => panic!["unexpected row type"]
         }
       })
       .filter(|r| {
-        contains_iv((bbox.0).0,(bbox.1).0, (r.0).0)
-        && contains_iv((bbox.0).1,(bbox.1).1, (r.0).1)
-        && contains_pt((bbox.0).2,(bbox.1).2, (r.0).2)
+        contains(&(bbox.0).0,&(bbox.1).0,&(r.0).0)
+        && contains(&(bbox.0).1,&(bbox.1).1,&(r.0).1)
+        && contains(&(bbox.0).2,&(bbox.1).2,&(r.0).2)
       })
       .collect();
     results.sort_unstable_by(cmp);
@@ -130,9 +130,9 @@ fn cmp<T> (a: &T, b: &T) -> Ordering where T: PartialOrd {
   }
 }
 
-fn contains_iv<T> (min: T, max: T, iv: (T,T)) -> bool where T: PartialOrd {
-  min <= iv.1 && iv.0 <= max
-}
-fn contains_pt<T> (min: T, max: T, pt: T) -> bool where T: PartialOrd {
-  min <= pt && pt <= max
+fn contains<T> (min: &T, max: &T, c: &Coord<T>) -> bool where T: Scalar {
+  match c {
+    Coord::Interval(x0,x1) => min <= x1 && x0 <= max,
+    Coord::Scalar(x) => min <= x && x <= max
+  }
 }
