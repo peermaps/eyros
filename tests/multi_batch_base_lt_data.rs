@@ -1,20 +1,19 @@
-use eyros::{DB,Row,Setup,Error};
+use eyros::{DB,Tree3,Coord,Scalar,Row,Setup,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
 use std::time;
 use std::cmp::Ordering;
 use async_std::prelude::*;
 
-type P = ((f32,f32),(f32,f32),f32);
+type P = (Coord<f32>,Coord<f32>,Coord<f32>);
 type V = u32;
 
 #[async_std::test]
 async fn multi_batch() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<_,P,V> = Setup::from_path(dir.path())
+  let mut db: DB<_,Tree3<f32,f32,f32,V>,P,V> = Setup::from_path(dir.path())
     .branch_factor(5)
-    .max_data_size(3_000)
-    .base_size(1_000)
+    .max_records(3_000)
     .build()
     .await?;
   let mut r = rand().seed([13,12]);
@@ -26,7 +25,11 @@ async fn multi_batch() -> Result<(),Error> {
     let ymax: f32 = ymin + r.read::<f32>().powf(64.0)*(1.0-ymin);
     let time: f32 = r.read::<f32>()*1000.0;
     let value: u32 = r.read();
-    let point = ((xmin,xmax),(ymin,ymax),time);
+    let point = (
+      Coord::Interval(xmin,xmax),
+      Coord::Interval(ymin,ymax),
+      Coord::Scalar(time)
+    );
     Row::Insert(point, value)
   }).collect();
   let mut count = 0u64;
@@ -58,7 +61,7 @@ async fn multi_batch() -> Result<(),Error> {
     let mut expected: Vec<(P,V)>
     = inserts.iter().map(|r| {
       match r {
-        Row::Insert(point,value) => (*point,*value),
+        Row::Insert(point,value) => (point.clone(),value.clone()),
         _ => panic!["unexpected row type"]
       }
     }).collect();
@@ -75,18 +78,17 @@ async fn multi_batch() -> Result<(),Error> {
       let r = result?;
       results.push((r.0,r.1));
     }
-    let mut expected: Vec<(((f32,f32),(f32,f32),f32),u32)>
-    = inserts.iter()
+    let mut expected: Vec<(P,V)> = inserts.iter()
       .map(|r| {
         match r {
-          Row::Insert(point,value) => (*point,*value),
+          Row::Insert(point,value) => (point.clone(),value.clone()),
           _ => panic!["unexpected row type"]
         }
       })
       .filter(|r| {
-        contains_iv((bbox.0).0,(bbox.1).0, (r.0).0)
-        && contains_iv((bbox.0).1,(bbox.1).1, (r.0).1)
-        && contains_pt((bbox.0).2,(bbox.1).2, (r.0).2)
+        contains(&(bbox.0).0,&(bbox.1).0,&(r.0).0)
+        && contains(&(bbox.0).1,&(bbox.1).1,&(r.0).1)
+        && contains(&(bbox.0).2,&(bbox.1).2,&(r.0).2)
       })
       .collect();
     results.sort_unstable_by(cmp);
@@ -105,9 +107,9 @@ fn cmp<T> (a: &T, b: &T) -> Ordering where T: PartialOrd {
   }
 }
 
-fn contains_iv<T> (min: T, max: T, iv: (T,T)) -> bool where T: PartialOrd {
-  min <= iv.1 && iv.0 <= max
-}
-fn contains_pt<T> (min: T, max: T, pt: T) -> bool where T: PartialOrd {
-  min <= pt && pt <= max
+fn contains<T> (min: &T, max: &T, c: &Coord<T>) -> bool where T: Scalar {
+  match c {
+    Coord::Interval(x0,x1) => min <= x1 && x0 <= max,
+    Coord::Scalar(x) => min <= x && x <= max
+  }
 }

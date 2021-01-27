@@ -1,4 +1,4 @@
-use eyros::{DB,Row,Error};
+use eyros::{Coord,Scalar,Row,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
 use std::cmp::Ordering;
@@ -6,17 +6,17 @@ use async_std::prelude::*;
 
 #[async_std::test]
 async fn multi_batch_f32_f64_u16() -> Result<(),Error> {
-  type P = (f32,f64);
+  type P = (Coord<f32>,Coord<f64>);
   type V = u16;
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<_,P,V> = DB::open_from_path(dir.path()).await?;
+  let mut db = eyros::open_from_path2(dir.path()).await?;
   let mut r = rand().seed([13,12]);
   let size = 10_000;
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
     let x: f32 = (r.read::<f32>()*2.0-1.0)*1000.0;
     let y: f64 = r.read::<f64>()*4000.0+2000.0;
     let value: u16 = r.read();
-    Row::Insert((x,y), value)
+    Row::Insert((Coord::Scalar(x),Coord::Scalar(y)), value)
   }).collect();
   let n = 5;
   let batches: Vec<Vec<Row<P,V>>> = (0..n).map(|i| {
@@ -25,6 +25,7 @@ async fn multi_batch_f32_f64_u16() -> Result<(),Error> {
   for batch in batches {
     db.batch(&batch).await?;
   }
+  db.sync().await?;
 
   {
     let bbox = ((-1000.0,2000.0),(1000.0,6000.0));
@@ -38,7 +39,7 @@ async fn multi_batch_f32_f64_u16() -> Result<(),Error> {
     let mut expected: Vec<(P,V)>
     = inserts.iter().map(|r| {
       match r {
-        Row::Insert(point,value) => (*point,*value),
+        Row::Insert(point,value) => (point.clone(),value.clone()),
         _ => panic!["unexpected row type"]
       }
     }).collect();
@@ -58,13 +59,13 @@ async fn multi_batch_f32_f64_u16() -> Result<(),Error> {
     let mut expected: Vec<(P,V)> = inserts.iter()
       .map(|r| {
         match r {
-          Row::Insert(point,value) => (*point,*value),
+          Row::Insert(point,value) => (point.clone(),value.clone()),
           _ => panic!["unexpected row type"]
         }
       })
       .filter(|r| {
-        contains_pt((bbox.0).0,(bbox.1).0, (r.0).0)
-        && contains_pt((bbox.0).1,(bbox.1).1, (r.0).1)
+        contains(&(bbox.0).0,&(bbox.1).0,&(r.0).0)
+        && contains(&(bbox.0).1,&(bbox.1).1,&(r.0).1)
       })
       .collect();
     results.sort_unstable_by(cmp);
@@ -78,10 +79,10 @@ async fn multi_batch_f32_f64_u16() -> Result<(),Error> {
 
 #[async_std::test]
 async fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
-  type P = ((f64,f64),f32);
+  type P = (Coord<f64>,Coord<f32>);
   type V = u16;
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<_,P,V> = DB::open_from_path(dir.path()).await?;
+  let mut db = eyros::open_from_path2(dir.path()).await?;
   let mut r = rand().seed([13,12]);
   let size = 10_000;
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
@@ -89,7 +90,7 @@ async fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
     let x1: f64 = x0 + ((r.read::<f64>().powf(64.0))*2.0-1.0)*500.0;
     let y: f32 = r.read::<f32>()*4000.0+2000.0;
     let value: u16 = r.read();
-    Row::Insert(((x0,x1),y), value)
+    Row::Insert((Coord::Interval(x0,x1),Coord::Scalar(y)), value)
   }).collect();
   let n = 5;
   let batches: Vec<Vec<Row<P,V>>> = (0..n).map(|i| {
@@ -98,6 +99,7 @@ async fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
   for batch in batches {
     db.batch(&batch).await?;
   }
+  db.sync().await?;
 
   {
     let bbox = ((-1500.0,2000.0),(1500.0,6000.0));
@@ -110,7 +112,7 @@ async fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
     assert_eq!(results.len(), size, "incorrect length for full region");
     let mut expected: Vec<(P,V)> = inserts.iter().map(|r| {
       match r {
-        Row::Insert(point,value) => (*point,*value),
+        Row::Insert(point,value) => (point.clone(),value.clone()),
         _ => panic!["unexpected row type"]
       }
     }).collect();
@@ -130,13 +132,13 @@ async fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
     let mut expected: Vec<(P,V)> = inserts.iter()
       .map(|r| {
         match r {
-          Row::Insert(point,value) => (*point,*value),
+          Row::Insert(point,value) => (point.clone(),value.clone()),
           _ => panic!["unexpected row type"]
         }
       })
       .filter(|r| {
-        contains_iv((bbox.0).0,(bbox.1).0, (r.0).0)
-        && contains_pt((bbox.0).1,(bbox.1).1, (r.0).1)
+        contains(&(bbox.0).0,&(bbox.1).0,&(r.0).0)
+        && contains(&(bbox.0).1,&(bbox.1).1,&(r.0).1)
       })
       .collect();
     results.sort_unstable_by(cmp);
@@ -155,9 +157,9 @@ fn cmp<T> (a: &T, b: &T) -> Ordering where T: PartialOrd {
   }
 }
 
-fn contains_iv<T> (min: T, max: T, iv: (T,T)) -> bool where T: PartialOrd {
-  min <= iv.1 && iv.0 <= max
-}
-fn contains_pt<T> (min: T, max: T, pt: T) -> bool where T: PartialOrd {
-  min <= pt && pt <= max
+fn contains<T> (min: &T, max: &T, c: &Coord<T>) -> bool where T: Scalar {
+  match c {
+    Coord::Interval(x0,x1) => min <= x1 && x0 <= max,
+    Coord::Scalar(x) => min <= x && x <= max
+  }
 }
