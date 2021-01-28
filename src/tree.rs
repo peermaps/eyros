@@ -562,12 +562,12 @@ impl<'a,S,T,P,V> Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA
       let bounds = l_refs.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
       let intersecting = calc_overlap::<P>(&bounds);
       //eprintln!["SUB {:?}", intersecting];
-      for (_i,(r,overlap)) in l_refs.iter().zip(intersecting).enumerate() {
+      for (r,overlap) in l_refs.iter().zip(intersecting) {
         if overlap {
           let (list,xrefs) = self.trees.get(&r.id).await?.lock().await.list();
           lists.push(list);
-          for r in xrefs.iter() {
-            rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
+          for xr in xrefs.iter() {
+            rows.push((xr.bounds.clone(), InsertValue::Ref(xr.clone())));
           }
           rm_trees.push(r.id);
         } else {

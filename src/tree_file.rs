@@ -53,13 +53,11 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
     }
   }
   pub async fn put(&mut self, id: &TreeId, t: Arc<Mutex<T>>) -> () {
-    //eprintln!["put {}", id];
     self.cache.put(*id, Arc::clone(&t));
     self.updated.insert(*id, Arc::clone(&t));
     self.removed.remove(id);
   }
   pub async fn remove(&mut self, id: &TreeId) -> () {
-    //eprintln!["remove {}", id];
     self.cache.pop(id);
     self.updated.remove(id);
     self.removed.insert(*id);
@@ -73,7 +71,10 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
       tasks.push(spawn(async move {
         let bytes = tree.lock().await.to_bytes()?;
         let mut s = storage.lock().await.open(&file).await?;
-        s.write(0, &bytes).await
+        s.write(0, &bytes).await?;
+        s.sync_all().await?;
+        let res: Result<(),Error> = Ok(());
+        res
       }));
     }
     for id in self.removed.iter() {
@@ -81,7 +82,10 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
       let storage = self.storage.clone();
       tasks.push(spawn(async move {
         // ignore errors
-        storage.lock().await.remove(&file).await;
+        match storage.lock().await.remove(&file).await {
+          Ok(()) => {},
+          Err(_err) => {}
+        }
         Ok(())
       }));
     }
@@ -118,13 +122,13 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
 fn get_file(id: &TreeId) -> String {
   format![
     "t/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}",
-    (id >> (8*7)) % 0xff,
-    (id >> (8*6)) % 0xff,
-    (id >> (8*5)) % 0xff,
-    (id >> (8*4)) % 0xff,
-    (id >> (8*3)) % 0xff,
-    (id >> (8*2)) % 0xff,
-    (id >> (8*1)) % 0xff,
-    (id >> (8*0)) % 0xff,
+    (id >> (8*7)) % 0x100,
+    (id >> (8*6)) % 0x100,
+    (id >> (8*5)) % 0x100,
+    (id >> (8*4)) % 0x100,
+    (id >> (8*3)) % 0x100,
+    (id >> (8*2)) % 0x100,
+    (id >> (8*1)) % 0x100,
+    (id >> (8*0)) % 0x100,
   ]
 }
