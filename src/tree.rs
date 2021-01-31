@@ -6,7 +6,7 @@ use crate::unfold::unfold;
 use std::collections::HashMap;
 
 pub type TreeId = u64;
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,PartialEq)]
 pub struct TreeRef<P> {
   pub id: TreeId,
   pub bounds: P,
@@ -36,7 +36,7 @@ pub enum InsertValue<'a,P,V> where P: Point, V: Value {
 macro_rules! impl_tree {
   ($Tree:ident,$Branch:ident,$Node:ident,$MState:ident,$get_bounds:ident,$build_data:ident,
   ($($T:tt),+),($($i:tt),+),($($u:ty),+),($($n:tt),+),$dim:expr) => {
-    #[derive(Debug)]
+    #[derive(Debug,PartialEq)]
     pub enum $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
       Branch($Branch<$($T),+,V>),
       Data(Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>),
@@ -54,7 +54,7 @@ macro_rules! impl_tree {
       $Node::Data(points, refs)
     }
 
-    #[derive(Debug)]
+    #[derive(Debug,PartialEq)]
     pub struct $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub pivots: ($(Option<Vec<$T>>),+),
       pub intersections: Vec<Arc<$Node<$($T),+,V>>>,
@@ -154,7 +154,7 @@ macro_rules! impl_tree {
               },
               _ => {
                 (0..n).map(|k| {
-                  assert![n+1 > 0, "!(n+1 > 0). n={}", n];
+                  //assert![n+1 > 0, "!(n+1 > 0). n={}", n];
                   let m = k * rlen / (n+1);
                   let a = match &(self.inserts[self.sorted[build.range.0+m+0]].0).$i {
                     Coord::Scalar(x) => (x,x),
@@ -254,19 +254,6 @@ macro_rules! impl_tree {
           _ => panic!["unexpected level modulo dimension"]
         };
 
-        let node_count = nodes.iter().fold(0usize, |count,node| {
-          count + match node.as_ref() {
-            $Node::Data(bs,rs) => if bs.is_empty() && rs.is_empty() { 0 } else { 1 },
-            $Node::Branch(_) => 1,
-          }
-        });
-        if node_count <= 1 {
-          let inserts = &self.inserts;
-          return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
-            inserts[*i].clone()
-          }).collect::<Vec<(_,InsertValue<'_,($(Coord<$T>),+),V>)>>());
-        }
-
         $Node::Branch($Branch {
           pivots,
           intersections,
@@ -298,7 +285,7 @@ macro_rules! impl_tree {
             xs
           }
         };
-        assert![mstate.sorted.len() >= 2, "sorted.len()={}, must be >= 2", mstate.sorted.len()];
+        //assert![mstate.sorted.len() >= 2, "sorted.len()={}, must be >= 2", mstate.sorted.len()];
         let bounds = $get_bounds(
           mstate.sorted.iter().map(|i| *i),
           mstate.inserts
@@ -318,7 +305,7 @@ macro_rules! impl_tree {
       }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug,PartialEq)]
     pub struct $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub root: Arc<$Node<$($T),+,V>>
     }
@@ -584,7 +571,7 @@ impl<'a,S,T,P,V> Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA
         (pv.0.clone(),InsertValue::Value(&pv.1))
       }).collect::<Vec<_>>());
     }
-    assert![rows.len()>0, "rows.len()={}. must be >0", rows.len()];
+    //assert![rows.len()>0, "rows.len()={}. must be >0", rows.len()];
     let (tr, t, create_trees) = T::build(
       Arc::clone(&self.fields),
       &rows,

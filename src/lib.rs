@@ -21,7 +21,7 @@ use core::ops::{Add,Div};
 pub type Error = Box<dyn std::error::Error+Sync+Send>;
 pub type Location = (u64,u32);
 
-pub trait Value: Clone+core::fmt::Debug+Send+Sync+'static
+pub trait Value: Clone+core::fmt::Debug+Send+Sync+'static+PartialEq
   +ToBytes+CountBytes+FromBytes {}
 pub trait Scalar: Clone+PartialOrd+From<u8>+core::fmt::Debug
   +ToBytes+CountBytes+FromBytes

@@ -13,9 +13,7 @@ macro_rules! impl_to_bytes {
         let hsize = self.root.count_bytes();
         let (alloc,size) = $allocate(&self.root, hsize);
         let mut buf = vec![0u8;size];
-
         let mut offset = 0;
- 
         match self.root.as_ref() {
           $Node::Data(data,refs) => {
             $write_data_bytes(data, refs, &mut buf[offset..])?;

@@ -25,9 +25,7 @@ macro_rules! impl_from_bytes {
           },
           _ => panic!["unexpected value for n%2: {}", n%2]
         };
-        Ok((offset, $Tree {
-          root: Arc::new(root),
-        }))
+        Ok((offset, $Tree { root: Arc::new(root) }))
       }
     }
 
