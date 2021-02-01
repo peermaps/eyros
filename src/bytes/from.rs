@@ -43,18 +43,32 @@ macro_rules! impl_from_bytes {
         },)+
         _ => panic!["unexpected modulo depth"]
       };
-      let mut intersections = vec![];
-      for _ in 0..pivot_len {
+      let (s,ilen64) = varint::decode(&src[offset..])?;
+      let ilen = ilen64 as usize;
+      offset += s;
+      let ibf = &src[offset..offset+(ilen*pivot_len+7)/8];
+      let mut ibfi = 0;
+      offset += (ilen*pivot_len+7)/8;
+      let mut intersections = Vec::with_capacity(ilen);
+      for _ in 0..ilen {
+        let mut bitfield: u32 = 0;
+        for _ in 0..pivot_len {
+          bitfield |= ((ibf[ibfi/8]>>(ibfi%8))&1) as u32;
+          ibfi += 1;
+        }
         let (s,n) = u32::from_bytes(&src[offset..])?;
         offset += s;
         match n%2 {
           0 => {
-            intersections.push(Arc::new($parse_branch(&src, (n/2) as usize, depth+1)?));
+            intersections.push((
+              bitfield,
+              Arc::new($parse_branch(&src, (n/2) as usize, depth+1)?)
+            ));
           },
           1 => {
             let (s,data) = $parse_data(&src[offset..], n as usize)?;
             offset += s;
-            intersections.push(Arc::new(data));
+            intersections.push((bitfield,Arc::new(data)));
           },
           _ => panic!["unexpected value for n%2: {}", n%2]
         }

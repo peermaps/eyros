@@ -3,7 +3,7 @@ use crate::{Scalar,Point,Value,Coord,Location,Error,Overlap,RA,
   query::QStream, tree_file::TreeFile, SetupFields};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
-use std::collections::HashMap;
+use std::collections::{HashMap,HashSet};
 
 pub type TreeId = u64;
 #[derive(Debug,Clone,PartialEq)]
@@ -57,7 +57,7 @@ macro_rules! impl_tree {
     #[derive(Debug,PartialEq)]
     pub struct $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub pivots: ($(Option<Vec<$T>>),+),
-      pub intersections: Vec<Arc<$Node<$($T),+,V>>>,
+      pub intersections: Vec<(u32,Arc<$Node<$($T),+,V>>)>,
       pub nodes: Vec<Arc<$Node<$($T),+,V>>>,
     }
 
@@ -181,25 +181,42 @@ macro_rules! impl_tree {
         };
 
         let mut index = 0;
-        let intersections: Vec<Arc<$Node<$($T),+,V>>> = match build.level % $dim {
+        let intersections: Vec<(u32,Arc<$Node<$($T),+,V>>)> = match build.level % $dim {
           $($i => {
-            pivots.$i.as_ref().unwrap().iter().map(|pivot| {
+            let ps = pivots.$i.as_ref().unwrap();
+            let mut ibuckets: HashMap<u32,HashSet<usize>> = HashMap::new();
+            for j in self.sorted[build.range.0..build.range.1].iter() {
+              let mut bitfield: u32 = 0;
+              for (i,pivot) in ps.iter().enumerate() {
+                if intersect_pivot(&(self.inserts[*j].0).$i, pivot) {
+                  bitfield |= 1 << i;
+                }
+              }
+              if bitfield > 0 && ibuckets.contains_key(&bitfield) {
+                ibuckets.get_mut(&bitfield).unwrap().insert(*j);
+              } else if bitfield > 0 {
+                let mut hset = HashSet::new();
+                hset.insert(*j);
+                ibuckets.insert(bitfield, hset);
+              }
+            }
+            ibuckets.iter_mut().map(|(bitfield,hset)| {
               let next = self.next(
-                &pivot,
+                &hset,
                 build,
                 &mut index,
-                Box::new(|pivot, inserts, j: &usize| {
-                  intersect_pivot(&(inserts[*j].0).$i, pivot)
+                Box::new(|hset, _inserts, j: &usize| {
+                  hset.contains(j)
                 })
               );
-              if next.range.1 - next.range.0 == rlen {
+              (*bitfield, if next.range.1 - next.range.0 == rlen {
                 let inserts = &self.inserts;
                 Arc::new($build_data(&self.sorted[next.range.0..next.range.1].iter().map(|i| {
                   inserts[*i].clone()
                 }).collect::<Vec<(_,InsertValue<'_,_,V>)>>()))
               } else {
                 Arc::new(self.build(&next))
-              }
+              })
             }).collect()
           }),+,
           _ => panic!["unexpected level modulo dimension"]
@@ -329,7 +346,7 @@ macro_rules! impl_tree {
         while let Some(c) = cursors.pop() {
           match c.as_ref() {
             $Node::Branch(branch) => {
-              for b in branch.intersections.iter() {
+              for (_bitfield,b) in branch.intersections.iter() {
                 cursors.push(Arc::clone(b));
               }
               for b in branch.nodes.iter() {
@@ -382,23 +399,43 @@ macro_rules! impl_tree {
                 match level % $dim {
                   $($i => {
                     let pivots = branch.pivots.$i.as_ref().unwrap();
-                    for b in branch.intersections.iter() {
-                      // it's not possible to rule any intersection out
-                      cursors.push((level+1,Arc::clone(b)));
-                    }
 
-                    let xs = &branch.nodes;
-                    let ranges = pivots.iter().zip(pivots.iter().skip(1));
-                    if &(bbox.0).$i <= pivots.first().unwrap() {
-                      cursors.push((level+1,Arc::clone(xs.first().unwrap())));
-                    }
-                    for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
-                      if intersect_iv(start, end, &(bbox.0).$i, &(bbox.1).$i) {
-                        cursors.push((level+1,Arc::clone(b)));
+                    {
+                      let mut matching: u32 = 0;
+                      let ranges = pivots.iter().zip(pivots.iter().skip(1));
+                      if &(bbox.0).$i <= pivots.first().unwrap() {
+                        matching |= 1<<0;
+                      }
+                      for (i,(start,end)) in ranges.enumerate() {
+                        if intersect_iv(start, end, &(bbox.0).$i, &(bbox.1).$i) {
+                          matching |= 1<<i;
+                          matching |= 1<<(i+1);
+                        }
+                      }
+                      if &(bbox.1).$i >= pivots.last().unwrap() {
+                        matching |= 1<<(pivots.len()-1);
+                      }
+                      for (bitfield,b) in branch.intersections.iter() {
+                        if matching & bitfield > 0 {
+                          cursors.push((level+1,Arc::clone(b)));
+                        }
                       }
                     }
-                    if &(bbox.1).$i >= pivots.last().unwrap() {
-                      cursors.push((level+1,Arc::clone(xs.last().unwrap())));
+
+                    {
+                      let xs = &branch.nodes;
+                      let ranges = pivots.iter().zip(pivots.iter().skip(1));
+                      if &(bbox.0).$i <= pivots.first().unwrap() {
+                        cursors.push((level+1,Arc::clone(xs.first().unwrap())));
+                      }
+                      for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
+                        if intersect_iv(start, end, &(bbox.0).$i, &(bbox.1).$i) {
+                          cursors.push((level+1,Arc::clone(b)));
+                        }
+                      }
+                      if &(bbox.1).$i >= pivots.last().unwrap() {
+                        cursors.push((level+1,Arc::clone(xs.last().unwrap())));
+                      }
                     }
                   }),+
                   _ => panic!["unexpected level modulo dimension"]

@@ -41,7 +41,7 @@ macro_rules! impl_to_bytes {
             let size = branch.count_bytes();
             alloc.insert(index, (offset,size));
             offset += size;
-            for b in branch.intersections.iter() {
+            for (_bitfield,b) in branch.intersections.iter() {
               if let $Node::Branch(_br) = b.as_ref() {
                 cursors.push(b);
               }
@@ -66,28 +66,57 @@ macro_rules! impl_to_bytes {
       let mut index = 0;
       let mut next_index = 1;
       while let Some(branch) = cursors.get(index) {
+        let mut pivot_len = 0;
         loop {
           $(if let Some(x) = &branch.pivots.$i {
+            pivot_len += x.len();
             offset += x.write_bytes(&mut buf[offset..])?;
             break;
           })+
           panic!["pivots empty"];
         }
-        for x in [&branch.intersections,&branch.nodes].iter() {
-          for b in x.iter() {
-            match b.as_ref() {
-              $Node::Branch(branch) => {
-                let (j,_size) = alloc.get(&next_index).unwrap();
-                offset += (((*j)*2+0) as u32).write_bytes(&mut buf[offset..])?;
-                next_index += 1;
-                cursors.push(branch);
-              },
-              $Node::Data(data, refs) => {
-                offset += $write_data_bytes(data, refs, &mut buf[offset..])?;
-              },
+        offset += varint::encode(branch.intersections.len() as u64, &mut buf[offset..])?;
+        let ibitfield = &mut buf[offset..offset+(pivot_len*branch.intersections.len()+7)/8];
+        ibitfield.fill(0);
+        offset += ibitfield.len();
+        {
+          let mut i = 0;
+          for (bitfield,_) in branch.intersections.iter() {
+            for j in 0..pivot_len {
+              assert![i/8<ibitfield.len(), "{}/8<{}", i, ibitfield.len()];
+              ibitfield[i/8] |= (((bitfield>>j)&1) as u8);
+              i += 1;
             }
           }
         }
+        let mut xcursors = vec![];
+        for (_,b) in branch.intersections.iter() {
+          match b.as_ref() {
+            $Node::Branch(br) => {
+              let (j,_size) = alloc.get(&next_index).unwrap();
+              offset += (((*j)*2+0) as u32).write_bytes(&mut buf[offset..])?;
+              next_index += 1;
+              xcursors.push(br);
+            },
+            $Node::Data(data, refs) => {
+              offset += $write_data_bytes(data, refs, &mut buf[offset..])?;
+            },
+          }
+        }
+        for b in branch.nodes.iter() {
+          match b.as_ref() {
+            $Node::Branch(br) => {
+              let (j,_size) = alloc.get(&next_index).unwrap();
+              offset += (((*j)*2+0) as u32).write_bytes(&mut buf[offset..])?;
+              next_index += 1;
+              xcursors.push(br);
+            },
+            $Node::Data(data, refs) => {
+              offset += $write_data_bytes(data, refs, &mut buf[offset..])?;
+            },
+          }
+        }
+        cursors.extend(xcursors);
         index += 1;
       }
       Ok(offset)

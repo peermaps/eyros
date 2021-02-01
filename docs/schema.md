@@ -39,7 +39,10 @@ Each tree contains these fields:
 
 * `pivot_len` (`varint`) - length of pivots list to follow
 * `pivots` `(X,Y,...)%depth` - list of pivots. type is modulo tree depth
-* `intersections` (`[node]`) - list of nodes (length=`pivot_len`) that intersect the pivots list
+* `intersection_len` (`varint`) - length of intersections
+* `intersection_bitfield` - bitfield of which pivots intersect which intersection nodes.
+  the `intersection_bitfield` length is `floor((pivot_len*intersection_len+7)/8)`.
+* `intersections` (`[node]`) - list of nodes that intersect at least one pivot.
 * `nodes` (`[node]`) - list of nodes (length=`pivot_len+1`) split by, but not intersecting, the
   pivots
 

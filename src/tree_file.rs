@@ -26,6 +26,7 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
     }
   }
   pub async fn get(&mut self, id: &TreeId) -> Result<Arc<Mutex<T>>,Error> {
+    //eprintln!["file={}", get_file(id)];
     if let Some(t) = self.updated.get(id) {
       return Ok(Arc::clone(t));
     }

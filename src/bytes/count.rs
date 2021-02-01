@@ -14,7 +14,7 @@ macro_rules! impl_count_bytes {
           match &*node {
             $Node::Branch(branch) => {
               bytes += branch.count_bytes();
-              for b in branch.intersections.iter() {
+              for (_,b) in branch.intersections.iter() {
                 if let $Node::Branch(_br) = b.as_ref() {
                   cursors.push(b);
                 }
@@ -40,14 +40,18 @@ macro_rules! impl_count_bytes {
     impl<$($T),+,V> CountBytes for $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn count_bytes(&self) -> usize {
         let mut size = 0;
+        let mut pivot_len = 0;
         loop {
           $(if let Some(x) = &self.pivots.$i {
+            pivot_len += x.len();
             size += x.count_bytes();
             break;
           })+
           panic!["invalid pivot state"] // todo: use a custom enum for pivots
         }
-        for b in self.intersections.iter() {
+        size += varint::length(self.intersections.len() as u64);
+        size += (self.intersections.len()*pivot_len+7)/8;
+        for (_,b) in self.intersections.iter() {
           size += b.count_bytes();
         }
         for b in self.nodes.iter() {
