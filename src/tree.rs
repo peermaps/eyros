@@ -402,10 +402,10 @@ macro_rules! impl_tree {
 
                     {
                       let mut matching: u32 = 0;
-                      let ranges = pivots.iter().zip(pivots.iter().skip(1));
                       if &(bbox.0).$i <= pivots.first().unwrap() {
                         matching |= 1<<0;
                       }
+                      let ranges = pivots.iter().zip(pivots.iter().skip(1));
                       for (i,(start,end)) in ranges.enumerate() {
                         if intersect_iv(start, end, &(bbox.0).$i, &(bbox.1).$i) {
                           matching |= 1<<i;

@@ -41,7 +41,7 @@ macro_rules! impl_to_bytes {
             let size = branch.count_bytes();
             alloc.insert(index, (offset,size));
             offset += size;
-            for (_bitfield,b) in branch.intersections.iter() {
+            for (_,b) in branch.intersections.iter() {
               if let $Node::Branch(_br) = b.as_ref() {
                 cursors.push(b);
               }
@@ -83,8 +83,7 @@ macro_rules! impl_to_bytes {
           let mut i = 0;
           for (bitfield,_) in branch.intersections.iter() {
             for j in 0..pivot_len {
-              assert![i/8<ibitfield.len(), "{}/8<{}", i, ibitfield.len()];
-              ibitfield[i/8] |= (((bitfield>>j)&1) as u8);
+              ibitfield[i/8] |= (((bitfield>>j)&1) as u8)<<(i%8);
               i += 1;
             }
           }

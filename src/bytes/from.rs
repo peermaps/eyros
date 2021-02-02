@@ -52,8 +52,8 @@ macro_rules! impl_from_bytes {
       let mut intersections = Vec::with_capacity(ilen);
       for _ in 0..ilen {
         let mut bitfield: u32 = 0;
-        for _ in 0..pivot_len {
-          bitfield |= ((ibf[ibfi/8]>>(ibfi%8))&1) as u32;
+        for j in 0..pivot_len {
+          bitfield |= (((ibf[ibfi/8]>>(ibfi%8))&1) as u32) << j;
           ibfi += 1;
         }
         let (s,n) = u32::from_bytes(&src[offset..])?;
