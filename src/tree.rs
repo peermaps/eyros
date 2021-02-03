@@ -368,6 +368,7 @@ macro_rules! impl_tree {
       where S: RA {
         let istate = (
           bbox.clone(),
+          ($(Coord::Interval((bbox.0).$i.clone(),(bbox.1).$i.clone())),+),
           vec![], // queue
           vec![(0usize,Arc::clone(&self.root))], // cursors
           vec![], // refs
@@ -375,10 +376,11 @@ macro_rules! impl_tree {
         );
         Arc::new(Mutex::new(Box::new(unfold(istate, async move |mut state| {
           let bbox = &state.0;
-          let queue = &mut state.1;
-          let cursors = &mut state.2;
-          let refs = &mut state.3;
-          let trees = &mut state.4;
+          let cbbox = &state.1;
+          let queue = &mut state.2;
+          let cursors = &mut state.3;
+          let refs = &mut state.4;
+          let trees = &mut state.5;
           loop {
             if let Some(q) = queue.pop() {
               return Some((Ok(q),state));
@@ -415,11 +417,18 @@ macro_rules! impl_tree {
                       if &(bbox.1).$i >= pivots.last().unwrap() {
                         matching |= 1<<(pivots.len()-1);
                       }
+                      eprintln!["pivots[{}]={:?}", $i, pivots];
+                      eprintln!["  matching={:05b}", matching];
+                      //*
                       for (bitfield,b) in branch.intersections.iter() {
                         if matching & bitfield > 0 {
+                          eprintln!["  [X] {:05b}", bitfield];
                           cursors.push((level+1,Arc::clone(b)));
+                        } else {
+                          eprintln!["  [ ] {:05b}", bitfield];
                         }
                       }
+                      //*/
                     }
 
                     {
@@ -453,7 +462,11 @@ macro_rules! impl_tree {
                   .collect::<Vec<_>>()
                 );
                 // TODO: check bbox against ref bounds
-                refs.extend(rs.iter().map(|r| { r.id }).collect::<Vec<TreeId>>());
+                refs.extend(rs.iter()
+                  .filter(|r| { r.bounds.overlap(&cbbox) })
+                  .map(|r| { r.id })
+                  .collect::<Vec<TreeId>>()
+                );
               },
             }
           }
