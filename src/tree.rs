@@ -110,7 +110,6 @@ macro_rules! impl_tree {
         }
         if build.level >= self.fields.max_depth || build.count >= self.fields.max_records {
           let r = self.next_tree;
-          //eprintln!["EXT id={:02x}", r];
           let tr = TreeRef {
             id: r,
             bounds: $get_bounds(
@@ -395,7 +394,6 @@ macro_rules! impl_tree {
               return None;
             }
             let (level,c) = cursors.pop().unwrap();
-            //eprintln!["(level,c)=({},{:?})", level, c];
             match c.as_ref() {
               $Node::Branch(branch) => {
                 match level % $dim {
@@ -417,18 +415,11 @@ macro_rules! impl_tree {
                       if &(bbox.1).$i >= pivots.last().unwrap() {
                         matching |= 1<<(pivots.len()-1);
                       }
-                      eprintln!["pivots[{}]={:?}", $i, pivots];
-                      eprintln!["  matching={:05b}", matching];
-                      //*
                       for (bitfield,b) in branch.intersections.iter() {
                         if matching & bitfield > 0 {
-                          eprintln!["  [X] {:05b}", bitfield];
                           cursors.push((level+1,Arc::clone(b)));
-                        } else {
-                          eprintln!["  [ ] {:05b}", bitfield];
                         }
                       }
-                      //*/
                     }
 
                     {
@@ -582,7 +573,6 @@ impl<'a,S,T,P,V> Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA
       let bounds = self.roots.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
       let intersecting = calc_overlap::<P>(&bounds);
       // these nearly always intersect each other
-      //eprintln!["TOP {:?}", intersecting];
       for (r,overlap) in self.roots.iter().zip(intersecting) {
         if overlap {
           let (list,xrefs) = self.trees.get(&r.id).await?.lock().await.list();
@@ -598,7 +588,6 @@ impl<'a,S,T,P,V> Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA
       // TODO : limits on number of trees to expand?
       let bounds = l_refs.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
       let intersecting = calc_overlap::<P>(&bounds);
-      //eprintln!["SUB {:?}", intersecting];
       for (r,overlap) in l_refs.iter().zip(intersecting) {
         if overlap {
           let (list,xrefs) = self.trees.get(&r.id).await?.lock().await.list();
