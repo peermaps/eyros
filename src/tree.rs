@@ -557,6 +557,7 @@ pub struct Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA {
   pub roots: &'a [TreeRef<P>],
   pub trees: &'a mut TreeFile<S,T,P,V>,
   pub next_tree: &'a mut TreeId,
+  pub rebuild_depth: usize,
 }
 
 // return value: (tree, remove_trees, create_trees)
@@ -569,8 +570,7 @@ impl<'a,S,T,P,V> Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA
     let mut l_refs = Vec::with_capacity(self.roots.len());
     l_refs.extend_from_slice(&self.roots);
 
-    let levels = 2;
-    for _ in 0..levels {
+    for _ in 0..self.rebuild_depth {
       let bounds = l_refs.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
       let intersecting = calc_overlap::<P>(&bounds);
       let mut n_refs = vec![];

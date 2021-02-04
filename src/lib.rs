@@ -143,6 +143,9 @@ impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
     })
   }
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
+    self.batch_with_rebuild_depth(self.fields.rebuild_depth, rows).await
+  }
+  pub async fn batch_with_rebuild_depth(&mut self, rebuild_depth: usize, rows: &[Row<P,V>]) -> Result<(),Error> {
     let inserts: Vec<(&P,&V)> = rows.iter()
       .map(|row| match row {
         Row::Insert(p,v) => Some((p,v)),
@@ -163,6 +166,7 @@ impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
       roots: merge_trees.as_slice(),
       trees,
       next_tree: &mut self.meta.next_tree,
+      rebuild_depth,
     };
     let (tr,t,rm_trees,create_trees) = m.merge().await?;
     //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
