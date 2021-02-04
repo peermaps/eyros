@@ -487,7 +487,7 @@ macro_rules! impl_tree {
         ($(
           match (rows[indexes.next().unwrap()].0).$i.clone() {
             Coord::Scalar(x) => x,
-            Coord::Interval(x,_) => x,
+            Coord::Interval(_,x) => x,
           }
         ),+)
       );
