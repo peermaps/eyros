@@ -191,6 +191,32 @@ impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
     }
     Ok(())
   }
+  pub async fn optimize(&mut self, rebuild_depth: usize) -> Result<(),Error> {
+    let trees = &mut self.trees.lock().await;
+    let merge_trees = self.meta.roots.iter()
+      .filter(|r| r.is_some())
+      .map(|r| r.as_ref().unwrap().clone())
+      .collect::<Vec<TreeRef<P>>>();
+    let mut m = Merge {
+      fields: Arc::clone(&self.fields),
+      inserts: &vec![],
+      roots: merge_trees.as_slice(),
+      trees,
+      next_tree: &mut self.meta.next_tree,
+      rebuild_depth,
+    };
+    let (tr,t,rm_trees,create_trees) = m.merge().await?;
+    for r in rm_trees.iter() {
+      trees.remove(r).await;
+    }
+    for (r,t) in create_trees.iter() {
+      trees.put(r,Arc::clone(t)).await;
+    }
+    trees.put(&tr.id, Arc::new(Mutex::new(t))).await;
+    self.meta.roots.clear();
+    self.meta.roots.push(Some(tr));
+    Ok(())
+  }
   pub async fn sync(&mut self) -> Result<(),Error> {
     self.trees.lock().await.sync().await?;
     let rbytes = self.meta.to_bytes()?;
