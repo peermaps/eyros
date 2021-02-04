@@ -564,42 +564,31 @@ impl<'a,S,T,P,V> Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA
   pub async fn merge(&mut self)
   -> Result<(TreeRef<P>,T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>),Error> {
     let mut lists = vec![];
-    let mut l_refs = vec![];
     let mut rm_trees = vec![];
     let mut rows: Vec<(P,InsertValue<'_,P,V>)> = vec![];
+    let mut l_refs = Vec::with_capacity(self.roots.len());
+    l_refs.extend_from_slice(&self.roots);
 
-    // TODO: quotas for deconstructed external tree per merge
-    {
-      let bounds = self.roots.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
-      let intersecting = calc_overlap::<P>(&bounds);
-      // these nearly always intersect each other
-      for (r,overlap) in self.roots.iter().zip(intersecting) {
-        if overlap {
-          let (list,xrefs) = self.trees.get(&r.id).await?.lock().await.list();
-          lists.push(list);
-          l_refs.extend(xrefs);
-          rm_trees.push(r.id);
-        } else {
-          rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
-        }
-      }
-    }
-    {
-      // TODO : limits on number of trees to expand?
+    let levels = 2;
+    for _ in 0..levels {
       let bounds = l_refs.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
       let intersecting = calc_overlap::<P>(&bounds);
+      let mut n_refs = vec![];
       for (r,overlap) in l_refs.iter().zip(intersecting) {
         if overlap {
           let (list,xrefs) = self.trees.get(&r.id).await?.lock().await.list();
           lists.push(list);
-          for xr in xrefs.iter() {
-            rows.push((xr.bounds.clone(), InsertValue::Ref(xr.clone())));
-          }
+          n_refs.extend(xrefs);
           rm_trees.push(r.id);
         } else {
           rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
         }
       }
+      l_refs = n_refs;
+      if l_refs.is_empty() { break }
+    }
+    for r in l_refs.iter() {
+      rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
     }
 
     rows.extend(self.inserts.iter().map(|pv| {
