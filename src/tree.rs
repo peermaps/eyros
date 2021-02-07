@@ -493,15 +493,6 @@ macro_rules! impl_tree {
           ($(coord_max(&(rows[i].0).$i,&(bounds.1).$i)),+)
         )
       });
-      $(assert![(bounds.0).$i < (bounds.1).$i,
-        "!((bounds.0).{}={:?} < (bounds.1).{}={:?})",
-        $i, (bounds.0).$i, $i, (bounds.1).$i];)+
-      $(assert![(bounds.0).$i == (bounds.0).$i,
-        "(bounds.0).{}={:?} != (bounds.0).{}={:?}",
-        $i, (bounds.0).$i, $i, (bounds.0).$i];)+
-      $(assert![(bounds.1).$i == (bounds.1).$i,
-        "(bounds.1).{}={:?} != (bounds.1).{}={:?}",
-        $i, (bounds.1).$i, $i, (bounds.1).$i];)+
       ($(Coord::Interval((bounds.0).$i,(bounds.1).$i)),+)
     }
 
