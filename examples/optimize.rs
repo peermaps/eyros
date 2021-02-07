@@ -1,6 +1,4 @@
-use eyros::{DB,Row,Coord};
-use rand::random;
-//use async_std::prelude::*;
+use eyros::{DB,Coord};
 use std::time;
 
 type P = (Coord<f32>,Coord<f32>);

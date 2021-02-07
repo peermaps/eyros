@@ -450,10 +450,15 @@ macro_rules! impl_tree {
                   })
                   .collect::<Vec<_>>()
                 );
-                // TODO: check bbox against ref bounds
                 refs.extend(rs.iter()
                   .filter(|r| {
-                    true $(&& intersect_coord(&r.bounds.$i, &(bbox.0).$i, &(bbox.1).$i))+
+                    // unsure why this doesn't work:
+                    // true $(&& intersect_coord(&r.bounds.$i, &(bbox.0).$i, &(bbox.1).$i))+
+                    // work-around for now:
+                    match level % $dim {
+                      $($i => intersect_coord(&r.bounds.$i, &(bbox.0).$i, &(bbox.1).$i),)+
+                      _ => panic!["unexpected level modulo dimension"]
+                    }
                   })
                   .map(|r| { r.id })
                   .collect::<Vec<TreeId>>()
@@ -470,15 +475,15 @@ macro_rules! impl_tree {
     where $($T: Scalar),+, V: Value, I: Iterator<Item=usize> {
       let ibounds = (
         ($(
-          match (rows[indexes.next().unwrap()].0).$i.clone() {
-            Coord::Scalar(x) => x,
-            Coord::Interval(x,_) => x,
+          match &(rows[indexes.next().unwrap()].0).$i {
+            Coord::Scalar(x) => x.clone(),
+            Coord::Interval(x,_) => x.clone(),
           }
         ),+),
         ($(
-          match (rows[indexes.next().unwrap()].0).$i.clone() {
-            Coord::Scalar(x) => x,
-            Coord::Interval(_,x) => x,
+          match &(rows[indexes.next().unwrap()].0).$i {
+            Coord::Scalar(x) => x.clone(),
+            Coord::Interval(_,x) => x.clone(),
           }
         ),+)
       );
