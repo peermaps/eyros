@@ -1,6 +1,5 @@
 use crate::{Error,Point,Value};
 use async_std::{prelude::*,stream::Stream,sync::{Arc,Mutex}};
-use std::collections::HashSet;
 use crate::unfold::unfold;
 use std::marker::Unpin;
 

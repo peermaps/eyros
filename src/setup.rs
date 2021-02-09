@@ -1,4 +1,4 @@
-use crate::{DB,Tree,Storage,Point,Value,Error,RA};
+use crate::{DB,Tree,Storage,Point,Value,GetId,Error,RA};
 use async_std::sync::{Arc,Mutex};
 
 /// Struct for reading database properties.
@@ -51,7 +51,7 @@ impl SetupFields {
 ///
 /// # #[async_std::main]
 /// # async fn main () -> Result<(),Box<dyn std::error::Error+Sync+Send>> {
-/// let mut db: DB<_,P,V> = Setup::from_path(&PathBuf::from("/tmp/eyros-db/"))
+/// let mut db: DB<_,_,P,V,_> = Setup::from_path(&PathBuf::from("/tmp/eyros-db/"))
 ///   .branch_factor(5)
 ///   .max_data_size(3_000)
 ///   .base_size(1_000)
@@ -84,7 +84,8 @@ impl<S> Setup<S> where S: RA {
     self.fields.max_records = mr;
     self
   }
-  pub async fn build<T,P,V> (self) -> Result<DB<S,T,P,V>,Error> where P: Point, V: Value, T: Tree<P,V> {
+  pub async fn build<T,P,V,X> (self) -> Result<DB<S,T,P,V,X>,Error>
+  where P: Point, V: Value+GetId<X>, T: Tree<P,V> {
     DB::open_from_setup(self).await
   }
 }

@@ -1,5 +1,5 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Scalar,Point,Value,Coord,Error,Overlap,RA,
+use crate::{Scalar,Point,Value,Coord,Error,Overlap,RA,GetId,
   query::QStream, tree_file::TreeFile, SetupFields};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
@@ -544,9 +544,10 @@ where P: Point, V: Value {
     where S: RA;
 }
 
-pub struct Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA {
+pub struct Merge<'a,S,T,P,V,X> where P: Point, V: Value, T: Tree<P,V>, S: RA, V: GetId<X> {
   pub fields: Arc<SetupFields>,
   pub inserts: &'a [(&'a P,&'a V)],
+  pub deletes: &'a [(&'a P,&'a X)],
   pub roots: &'a [TreeRef<P>],
   pub trees: &'a mut TreeFile<S,T,P,V>,
   pub next_tree: &'a mut TreeId,
@@ -554,9 +555,11 @@ pub struct Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA {
 }
 
 // return value: (tree, remove_trees, create_trees)
-impl<'a,S,T,P,V> Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA {
+impl<'a,S,T,P,V,X> Merge<'a,S,T,P,V,X> where P: Point, V: Value, T: Tree<P,V>, S: RA, V: GetId<X> {
   pub async fn merge(&mut self)
   -> Result<(TreeRef<P>,T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>),Error> {
+    self.remove().await?;
+
     let mut lists = vec![];
     let mut rm_trees = vec![];
     let mut rows: Vec<(P,InsertValue<'_,P,V>)> = vec![];
@@ -599,6 +602,10 @@ impl<'a,S,T,P,V> Merge<'a,S,T,P,V> where P: Point, V: Value, T: Tree<P,V>, S: RA
       &mut self.next_tree
     );
     Ok((tr, t, rm_trees, create_trees))
+  }
+  async fn remove(&mut self) -> Result<(),Error> {
+    eprintln!["todo... delete {} records", self.deletes.len()];
+    Ok(())
   }
 }
 

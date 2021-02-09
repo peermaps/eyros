@@ -1,4 +1,4 @@
-use eyros::{DB,Row,Point,Coord,Error};
+use eyros::{Row,Point,Coord,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
 use std::cmp::Ordering;
@@ -10,7 +10,7 @@ type V = u32;
 #[async_std::test]
 async fn mix2() -> Result<(),Error> {
   let dir = Tmpfile::new().prefix("eyros").tempdir()?;
-  let mut db: DB<_,_,P,V> = eyros::open_from_path2(dir.path()).await?;
+  let mut db = eyros::open_from_path2(dir.path()).await?;
   let mut inserted: Vec<(P,V)> = vec![];
   let mut r = rand().seed([13,12]);
   for _n in 0..50 {
