@@ -1,5 +1,5 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Scalar,Point,Value,Coord,Location,Error,Overlap,RA,
+use crate::{Scalar,Point,Value,Coord,Error,Overlap,RA,
   query::QStream, tree_file::TreeFile, SetupFields};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
@@ -444,10 +444,7 @@ macro_rules! impl_tree {
                   .filter(|pv| {
                     true $(&& intersect_coord(&(pv.0).$i, &(bbox.0).$i, &(bbox.1).$i))+
                   })
-                  .map(|pv| {
-                    let loc: Location = (0,0); // TODO
-                    (pv.0.clone(),pv.1.clone(),loc)
-                  })
+                  .map(|pv| { pv.clone() })
                   .collect::<Vec<_>>()
                 );
                 refs.extend(rs.iter()

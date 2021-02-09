@@ -18,7 +18,7 @@ pub struct SetupFields {
 }
 
 impl SetupFields {
-  pub fn default () -> Self {
+  pub fn default() -> Self {
     Self {
       branch_factor: 6,
       max_depth: 8,

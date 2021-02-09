@@ -1,17 +1,16 @@
-use crate::{Error,Point,Value,Location};
+use crate::{Error,Point,Value};
 use async_std::{prelude::*,stream::Stream,sync::{Arc,Mutex}};
 use std::collections::HashSet;
 use crate::unfold::unfold;
 use std::marker::Unpin;
 
-type Out<P,V> = Option<Result<(P,V,Location),Error>>;
-pub type QStream<P,V> = Box<dyn Stream<Item=Result<(P,V,Location),Error>>+Unpin>;
+type Out<P,V> = Option<Result<(P,V),Error>>;
+pub type QStream<P,V> = Box<dyn Stream<Item=Result<(P,V),Error>>+Unpin>;
 
 pin_project_lite::pin_project! {
   pub struct QueryStream<P,V> where P: Point, V: Value {
     index: usize,
     #[pin] queries: Vec<Arc<Mutex<QStream<P,V>>>>,
-    deletes: Arc<Mutex<HashSet<Location>>>,
   }
 }
 
@@ -20,7 +19,6 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
     let qs = Self {
       index: 0,
       queries,
-      deletes: Arc::new(Mutex::new(HashSet::new()))
     };
     Ok(Box::new(unfold(qs, async move |mut qs| {
       let res = qs.get_next().await;
@@ -40,12 +38,6 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
           let result = q.lock().await.next().await;
           match result {
             Some(Err(e)) => return Some(Err(e.into())),
-            Some(Ok((_,_,loc))) => {
-              if self.deletes.lock().await.contains(&loc) {
-                self.index = (self.index+1) % len;
-                continue;
-              }
-            },
             _ => {}
           };
           result

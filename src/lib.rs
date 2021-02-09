@@ -12,6 +12,8 @@ pub use query::QueryStream;
 mod unfold;
 mod tree_file;
 use tree_file::TreeFile;
+mod get_id;
+use get_id::GetId;
 
 use async_std::{sync::{Arc,Mutex}};
 use random_access_storage::RandomAccess;
@@ -19,7 +21,6 @@ use desert::{ToBytes,FromBytes,CountBytes};
 use core::ops::{Add,Div};
 
 pub type Error = Box<dyn std::error::Error+Sync+Send>;
-pub type Location = (u64,u32);
 
 pub trait Value: Clone+core::fmt::Debug+Send+Sync+'static+PartialEq
   +ToBytes+CountBytes+FromBytes {}
@@ -105,9 +106,9 @@ macro_rules! impl_point {
 #[cfg(feature="8d")] impl_point![Tree8,open_from_path8,(P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7)];
 
 #[derive(Debug,Clone)]
-pub enum Row<P,V> where P: Point, V: Value {
+pub enum Row<P,V,X> where P: Point, V: Value {
   Insert(P,V),
-  Delete(Location)
+  Delete(P,X)
 }
 
 pub type Root<P> = Option<tree::TreeRef<P>>;
@@ -142,10 +143,12 @@ impl<S,T,P,V> DB<S,T,P,V> where S: RA, P: Point, V: Value, T: Tree<P,V> {
       trees: Arc::new(Mutex::new(trees))
     })
   }
-  pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
+  pub async fn batch<X>(&mut self, rows: &[Row<P,V,X>]) -> Result<(),Error>
+  where V: GetId<X> {
     self.batch_with_rebuild_depth(self.fields.rebuild_depth, rows).await
   }
-  pub async fn batch_with_rebuild_depth(&mut self, rebuild_depth: usize, rows: &[Row<P,V>]) -> Result<(),Error> {
+  pub async fn batch_with_rebuild_depth<X>(&mut self, rebuild_depth: usize, rows: &[Row<P,V,X>])
+  -> Result<(),Error> {
     let inserts: Vec<(&P,&V)> = rows.iter()
       .map(|row| match row {
         Row::Insert(p,v) => Some((p,v)),
