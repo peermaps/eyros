@@ -1,7 +1,7 @@
 use desert::{ToBytes,FromBytes,CountBytes};
 use crate::{Scalar,Point,Value,Coord,Error,Overlap,RA,GetId,
   query::QStream, tree_file::TreeFile, SetupFields};
-use async_std::{sync::{Arc,Mutex}};
+use async_std::{sync::{Arc,Mutex},task::spawn};
 use crate::unfold::unfold;
 use std::collections::{HashMap,HashSet};
 
@@ -547,7 +547,7 @@ where P: Point, V: Value {
 pub struct Merge<'a,S,T,P,V,X> where P: Point, V: Value, T: Tree<P,V>, S: RA, V: GetId<X> {
   pub fields: Arc<SetupFields>,
   pub inserts: &'a [(&'a P,&'a V)],
-  pub deletes: &'a [(&'a P,&'a X)],
+  pub deletes: Arc<Vec<(P,X)>>,
   pub roots: &'a [TreeRef<P>],
   pub trees: &'a mut TreeFile<S,T,P,V>,
   pub next_tree: &'a mut TreeId,
@@ -603,8 +603,21 @@ impl<'a,S,T,P,V,X> Merge<'a,S,T,P,V,X> where P: Point, V: Value, T: Tree<P,V>, S
     );
     Ok((tr, t, rm_trees, create_trees))
   }
-  async fn remove(&mut self) -> Result<(),Error> {
-    eprintln!["todo... delete {} records", self.deletes.len()];
+  pub async fn remove(&mut self) -> Result<(),Error> {
+    if self.deletes.is_empty() { return Ok(()) }
+    eprintln!["todo remove..."];
+    /*
+    let mut tasks = vec![];
+    for r in self.roots.iter() {
+      let t = Arc::clone(r);
+      let deletes = Arc::clone(&self.deletes);
+      tasks.push(spawn(async move {
+        t.remove(&deletes);
+      }));
+    }
+    let mut cursors = Vec::with_capacity(self.roots.len());
+    cursors.extend_from_slice(&self.roots);
+    */
     Ok(())
   }
 }

@@ -3,6 +3,8 @@ use crate::{Tree,TreeId,Error,Point,Value,Storage,RA,SetupFields};
 use std::collections::{HashMap,HashSet};
 use async_std::{sync::{Arc,Mutex},task::spawn};
 use async_std::prelude::*;
+#[path="./join.rs"] mod join;
+use join::Join;
 
 pub struct TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   //fields: Arc<SetupFields>,
@@ -64,56 +66,33 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
     self.removed.insert(*id);
   }
   pub async fn sync(&mut self) -> Result<(),Error> {
-    let mut tasks = vec![];
+    let mut join = Join::new();
     for (id,t) in self.updated.iter() {
       let file = get_file(id);
       let tree = Arc::clone(t);
       let storage = Arc::clone(&self.storage);
-      tasks.push(spawn(async move {
+      join.push(async move {
         let bytes = tree.lock().await.to_bytes()?;
         let mut s = storage.lock().await.open(&file).await?;
         s.write(0, &bytes).await?;
         s.sync_all().await?;
         let res: Result<(),Error> = Ok(());
         res
-      }));
+      });
     }
     for id in self.removed.iter() {
       let file = get_file(id);
       let storage = self.storage.clone();
-      tasks.push(spawn(async move {
+      join.push(async move {
         // ignore errors
         match storage.lock().await.remove(&file).await {
           Ok(()) => {},
           Err(_err) => {}
         }
         Ok(())
-      }));
+      });
     }
-    let mut itasks = tasks.iter_mut();
-    loop {
-      let a = itasks.next();
-      if a.is_none() { break }
-      let b = itasks.next();
-      if b.is_none() {
-        a.unwrap().await?;
-        break;
-      }
-      let c = itasks.next();
-      if c.is_none() {
-        a.unwrap().try_join(b.unwrap()).await?;
-        break;
-      }
-      let d = itasks.next();
-      if d.is_none() {
-        a.unwrap().try_join(b.unwrap()).try_join(c.unwrap()).await?;
-        break;
-      }
-      a.unwrap()
-        .try_join(b.unwrap())
-        .try_join(c.unwrap().try_join(d.unwrap()))
-        .await?;
-    }
+    join.try_join().await?;
     self.updated.clear();
     self.removed.clear();
     Ok(())

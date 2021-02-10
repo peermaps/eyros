@@ -1,4 +1,4 @@
-#![feature(async_closure,iter_partition_in_place)]
+#![feature(async_closure,iter_partition_in_place,try_trait)]
 mod store;
 pub use store::Storage;
 #[doc(hidden)] pub use store::FileStore;
@@ -106,7 +106,7 @@ macro_rules! impl_point {
 #[cfg(feature="8d")] impl_point![Tree8,open_from_path8,(P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7)];
 
 #[derive(Debug,Clone)]
-pub enum Row<P,V,X> where P: Point, V: Value {
+pub enum Row<P,V,X> where P: Point, V: Value, X: Clone {
   Insert(P,V),
   Delete(P,X)
 }
@@ -118,7 +118,7 @@ pub struct Meta<P> where P: Point {
   pub next_tree: TreeId,
 }
 
-pub struct DB<S,T,P,V,X> where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V> {
+pub struct DB<S,T,P,V,X> where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V>, X: Clone {
   pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   pub fields: Arc<SetupFields>,
   pub meta_store: Arc<Mutex<S>>,
@@ -127,7 +127,7 @@ pub struct DB<S,T,P,V,X> where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V> 
   _marker: std::marker::PhantomData<X>,
 }
 
-impl<S,T,P,V,X> DB<S,T,P,V,X> where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V> {
+impl<S,T,P,V,X> DB<S,T,P,V,X> where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V>, X: Clone {
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
     let mut meta_store = setup.storage.lock().await.open("meta").await?;
     let meta = match meta_store.len().await? {
@@ -150,6 +150,7 @@ impl<S,T,P,V,X> DB<S,T,P,V,X> where S: RA, P: Point, V: Value+GetId<X>, T: Tree<
   }
   pub async fn batch_with_rebuild_depth(&mut self, rebuild_depth: usize, rows: &[Row<P,V,X>])
   -> Result<(),Error> {
+    if rows.is_empty() { return Ok(()) }
     let inserts: Vec<(&P,&V)> = rows.iter()
       .map(|row| match row {
         Row::Insert(p,v) => Some((p,v)),
@@ -158,9 +159,9 @@ impl<S,T,P,V,X> DB<S,T,P,V,X> where S: RA, P: Point, V: Value+GetId<X>, T: Tree<
       .filter(|row| !row.is_none())
       .map(|x| x.unwrap())
       .collect();
-    let deletes: Vec<(&P,&X)> = rows.iter()
+    let deletes: Vec<(P,X)> = rows.iter()
       .map(|row| match row {
-        Row::Delete(p,x) => Some((p,x)),
+        Row::Delete(p,x) => Some((p.clone(),x.clone())),
         _ => None
       })
       .filter(|row| !row.is_none())
@@ -175,12 +176,16 @@ impl<S,T,P,V,X> DB<S,T,P,V,X> where S: RA, P: Point, V: Value+GetId<X>, T: Tree<
     let mut m = Merge {
       fields: Arc::clone(&self.fields),
       inserts: inserts.as_slice(),
-      deletes: deletes.as_slice(),
+      deletes: Arc::new(deletes),
       roots: merge_trees.as_slice(),
       trees,
       next_tree: &mut self.meta.next_tree,
       rebuild_depth,
     };
+    if inserts.is_empty() {
+      m.remove().await?;
+      return Ok(());
+    }
     let (tr,t,rm_trees,create_trees) = m.merge().await?;
     //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
     for r in rm_trees.iter() {
@@ -213,7 +218,7 @@ impl<S,T,P,V,X> DB<S,T,P,V,X> where S: RA, P: Point, V: Value+GetId<X>, T: Tree<
     let mut m = Merge {
       fields: Arc::clone(&self.fields),
       inserts: &vec![],
-      deletes: &vec![],
+      deletes: Arc::new(vec![]),
       roots: merge_trees.as_slice(),
       trees,
       next_tree: &mut self.meta.next_tree,

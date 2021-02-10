@@ -1,4 +1,4 @@
-use eyros::{Coord,Scalar,Row,Location,Error};
+use eyros::{Coord,Scalar,Row,Error};
 use random::{Source,default as rand};
 use tempfile::Builder as Tmpfile;
 use async_std::prelude::*;
@@ -16,23 +16,22 @@ async fn delete() -> Result<(),Error> {
   let mut db = eyros::open_from_path3(dir.path()).await?;
   let mut r = rand().seed([13,12]);
   let size = 40_000;
-  let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
+  let inserts: Vec<Row<P,V,V>> = (0..size).map(|i| {
     let xmin: f32 = r.read::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + r.read::<f32>().powf(64.0)*(1.0-xmin);
     let ymin: f32 = r.read::<f32>()*2.0-1.0;
     let ymax: f32 = ymin + r.read::<f32>().powf(64.0)*(1.0-ymin);
     let time: f32 = r.read::<f32>()*1000.0;
-    let value: u32 = r.read();
     let point = (
       Coord::Interval(xmin,xmax),
       Coord::Interval(ymin,ymax),
       Coord::Scalar(time)
     );
-    Row::Insert(point, value)
+    Row::Insert(point, i as u32)
   }).collect();
   let batch_size = 5_000;
   let n = size / batch_size;
-  let batches: Vec<Vec<Row<P,V>>> = (0..n).map(|i| {
+  let batches: Vec<Vec<Row<P,V,V>>> = (0..n).map(|i| {
     inserts[i*batch_size..(i+1)*batch_size].to_vec()
   }).collect();
   {
@@ -49,7 +48,7 @@ async fn delete() -> Result<(),Error> {
       total, (size as f64)/total];
   }
 
-  let full: Vec<(P,V,Location)> = {
+  let full: Vec<(P,V)> = {
     let bbox = ((-1.0,-1.0,0.0),(1.0,1.0,1000.0));
     let mut results = vec![];
     let mut stream = db.query(&bbox).await?;
@@ -61,14 +60,14 @@ async fn delete() -> Result<(),Error> {
   assert_eq![full.len(), inserts.len(),
     "correct number of results before deleting"];
 
-  let mut deleted: HashSet<Location> = HashSet::new();
+  let mut deleted: HashSet<V> = HashSet::new();
   {
     // delete 50% of the records
     let mut deletes = vec![];
     for (i,r) in full.iter().enumerate() {
       if i % 2 == 0 {
-        deletes.push(Row::Delete(r.2));
-        deleted.insert(r.2);
+        deletes.push(Row::Delete(r.0.clone(),r.1.clone()));
+        deleted.insert(r.1);
       }
     }
     let start = time::Instant::now();
@@ -89,8 +88,8 @@ async fn delete() -> Result<(),Error> {
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
     assert_eq!(results.len(), size/2, "incorrect length for full region");
-    let mut expected: Vec<(P,V,Location)> = full.iter()
-      .filter(|r| !deleted.contains(&r.2))
+    let mut expected: Vec<(P,V)> = full.iter()
+      .filter(|r| !deleted.contains(&r.1))
       .map(|r| r.clone())
       .collect();
     results.sort_unstable_by(cmp);
@@ -110,9 +109,9 @@ async fn delete() -> Result<(),Error> {
     }
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
-    let mut expected: Vec<(P,V,Location)> = full.iter()
+    let mut expected: Vec<(P,V)> = full.iter()
       .filter(|r| {
-        !deleted.contains(&r.2)
+        !deleted.contains(&r.1)
         && contains(&(bbox.0).0,&(bbox.1).0,&(r.0).0)
         && contains(&(bbox.0).1,&(bbox.1).1,&(r.0).1)
         && contains(&(bbox.0).2,&(bbox.1).2,&(r.0).2)
@@ -136,9 +135,9 @@ async fn delete() -> Result<(),Error> {
     }
     eprintln!["query for {} records in {} seconds",
       results.len(), start.elapsed().as_secs_f64()];
-    let mut expected: Vec<(P,V,Location)> = full.iter()
+    let mut expected: Vec<(P,V)> = full.iter()
       .filter(|r| {
-        !deleted.contains(&r.2)
+        !deleted.contains(&r.1)
         && contains(&(bbox.0).0,&(bbox.1).0,&(r.0).0)
         && contains(&(bbox.0).1,&(bbox.1).1,&(r.0).1)
         && contains(&(bbox.0).2,&(bbox.1).2,&(r.0).2)

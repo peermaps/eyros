@@ -85,7 +85,7 @@ impl<S> Setup<S> where S: RA {
     self
   }
   pub async fn build<T,P,V,X> (self) -> Result<DB<S,T,P,V,X>,Error>
-  where P: Point, V: Value+GetId<X>, T: Tree<P,V> {
+  where P: Point, V: Value+GetId<X>, T: Tree<P,V>, X: Clone {
     DB::open_from_setup(self).await
   }
 }
