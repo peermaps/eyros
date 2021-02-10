@@ -1,6 +1,7 @@
 pub trait GetId<X> {
   fn get_id(&self) -> X;
 }
+pub trait Id: Clone+core::fmt::Debug+Send+Sync+'static {}
 
 // Self->Self definitions for built-in types
 
@@ -9,6 +10,7 @@ macro_rules! def_getid {
     impl GetId<$T> for $T {
       fn get_id(&self) -> $T { self.clone() }
     }
+    impl Id for $T {}
   }
 }
 

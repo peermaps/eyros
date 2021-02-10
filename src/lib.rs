@@ -13,7 +13,7 @@ mod unfold;
 mod tree_file;
 use tree_file::TreeFile;
 mod get_id;
-use get_id::GetId;
+pub use get_id::{GetId,Id};
 
 use async_std::{sync::{Arc,Mutex}};
 use random_access_storage::RandomAccess;
@@ -106,7 +106,7 @@ macro_rules! impl_point {
 #[cfg(feature="8d")] impl_point![Tree8,open_from_path8,(P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7)];
 
 #[derive(Debug,Clone)]
-pub enum Row<P,V,X> where P: Point, V: Value, X: Clone {
+pub enum Row<P,V,X> where P: Point, V: Value, X: Id {
   Insert(P,V),
   Delete(P,X)
 }
@@ -118,16 +118,18 @@ pub struct Meta<P> where P: Point {
   pub next_tree: TreeId,
 }
 
-pub struct DB<S,T,P,V,X> where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V>, X: Clone {
+pub struct DB<S,T,P,V,X>
+where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V,X>, X: Id {
   pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   pub fields: Arc<SetupFields>,
   pub meta_store: Arc<Mutex<S>>,
   pub meta: Meta<P>,
-  pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
+  pub trees: Arc<Mutex<TreeFile<S,T,P,V,X>>>,
   _marker: std::marker::PhantomData<X>,
 }
 
-impl<S,T,P,V,X> DB<S,T,P,V,X> where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V>, X: Clone {
+impl<S,T,P,V,X> DB<S,T,P,V,X>
+where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V,X>, X: Id {
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
     let mut meta_store = setup.storage.lock().await.open("meta").await?;
     let meta = match meta_store.len().await? {

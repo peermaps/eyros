@@ -1,5 +1,5 @@
 use desert::{ToBytes,CountBytes};
-use crate::{Coord,Scalar,Value,tree::TreeRef,bytes::varint};
+use crate::{Coord,Scalar,Value,GetId,Id,tree::TreeRef,bytes::varint};
 use failure::Error;
 use std::collections::HashMap;
 
@@ -8,7 +8,7 @@ macro_rules! impl_to_bytes {
   $allocate:ident, $write_branch_bytes:ident, $write_point_bytes:ident, $write_data_bytes:ident,
   ($($i:tt),+),($($T:tt),+)) => {
     use crate::tree::{$Tree,$Branch,$Node};
-    impl<$($T),+,V> ToBytes for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
+    impl<$($T),+,V,X> ToBytes for $Tree<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
       fn to_bytes(&self) -> Result<Vec<u8>,Error> {
         let hsize = self.root.count_bytes();
         let (alloc,size) = $allocate(&self.root, hsize);
@@ -27,8 +27,8 @@ macro_rules! impl_to_bytes {
       }
     }
 
-    fn $allocate<$($T),+,V>(root: &$Node<$($T),+,V>, hsize: usize) -> (HashMap<usize,(usize,usize)>,usize)
-    where $($T: Scalar),+, V: Value {
+    fn $allocate<$($T),+,V,X>(root: &$Node<$($T),+,V,X>, hsize: usize) -> (HashMap<usize,(usize,usize)>,usize)
+    where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
       let mut alloc: HashMap<usize,(usize,usize)> = HashMap::new(); // index => (offset, size)
       let mut cursors = vec![root];
       let mut index = 0;
@@ -59,8 +59,9 @@ macro_rules! impl_to_bytes {
       (alloc,offset)
     }
 
-    fn $write_branch_bytes<$($T),+,V>(root: &$Branch<$($T),+,V>, alloc: &HashMap<usize,(usize,usize)>,
-    i_offset: usize, buf: &mut [u8]) -> Result<usize,Error> where $($T: Scalar),+, V: Value {
+    fn $write_branch_bytes<$($T),+,V,X>(root: &$Branch<$($T),+,V,X>, alloc: &HashMap<usize,(usize,usize)>,
+    i_offset: usize, buf: &mut [u8]) -> Result<usize,Error>
+    where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
       let mut cursors = vec![root];
       let mut offset = i_offset;
       let mut index = 0;

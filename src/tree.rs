@@ -1,9 +1,11 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Scalar,Point,Value,Coord,Error,Overlap,RA,GetId,
+use crate::{Scalar,Point,Value,Coord,Error,Overlap,RA,GetId,Id,
   query::QStream, tree_file::TreeFile, SetupFields};
-use async_std::{sync::{Arc,Mutex},task::spawn};
+use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
 use std::collections::{HashMap,HashSet};
+#[path="./join.rs"] mod join;
+use join::Join;
 
 pub type TreeId = u64;
 #[derive(Debug,Clone,PartialEq)]
@@ -37,13 +39,13 @@ macro_rules! impl_tree {
   ($Tree:ident,$Branch:ident,$Node:ident,$MState:ident,$get_bounds:ident,$build_data:ident,
   ($($T:tt),+),($($i:tt),+),($($u:ty),+),($($n:tt),+),$dim:expr) => {
     #[derive(Debug,PartialEq)]
-    pub enum $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
-      Branch($Branch<$($T),+,V>),
+    pub enum $Node<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+      Branch($Branch<$($T),+,V,X>),
       Data(Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>),
     }
-    fn $build_data<'a,$($T),+,V>(rows: &[
+    fn $build_data<'a,$($T),+,V,X>(rows: &[
       (($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)
-    ]) -> $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
+    ]) -> $Node<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
       let (points, refs) = rows.iter().fold((vec![],vec![]),|(mut points, mut refs), pv| {
         match &pv.1 {
           InsertValue::Value(v) => points.push((pv.0.clone(),(*v).clone())),
@@ -55,23 +57,24 @@ macro_rules! impl_tree {
     }
 
     #[derive(Debug,PartialEq)]
-    pub struct $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
+    pub struct $Branch<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
       pub pivots: ($(Option<Vec<$T>>),+),
-      pub intersections: Vec<(u32,Arc<$Node<$($T),+,V>>)>,
-      pub nodes: Vec<Arc<$Node<$($T),+,V>>>,
+      pub intersections: Vec<(u32,Arc<$Node<$($T),+,V,X>>)>,
+      pub nodes: Vec<Arc<$Node<$($T),+,V,X>>>,
+      _marker: std::marker::PhantomData<X>,
     }
 
-    pub struct $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
+    pub struct $MState<'a,$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
       pub fields: Arc<SetupFields>,
       pub inserts: &'a [(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
       pub next_tree: TreeId,
-      pub ext_trees: HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>,
+      pub ext_trees: HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V,X>>>>,
       pub sorted: Vec<usize>,
     }
 
-    impl<'a,$($T),+,V> $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
-      fn next<X>(&mut self, x: &X, build: &Build, index: &mut usize,
-      f: Box<dyn Fn (&X,&[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], &usize) -> bool>) -> Build {
+    impl<'a,$($T),+,V,X> $MState<'a,$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+      fn next<T>(&mut self, x: &T, build: &Build, index: &mut usize,
+      f: Box<dyn Fn (&T,&[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], &usize) -> bool>) -> Build {
         let inserts = &self.inserts;
         // partition:
         let n = self.sorted[build.range.0+*index..build.range.1]
@@ -97,7 +100,7 @@ macro_rules! impl_tree {
           count: build.count + (build.range.1-build.range.0) - (range.1-range.0),
         }
       }
-      fn build(&mut self, build: &Build) -> $Node<$($T),+,V> {
+      fn build(&mut self, build: &Build) -> $Node<$($T),+,V,X> {
         // TODO: insert self.refs into the construction
         let rlen = build.range.1 - build.range.0;
         if rlen == 0 {
@@ -120,6 +123,7 @@ macro_rules! impl_tree {
           self.next_tree += 1;
           let t = $Tree {
             root: Arc::new(self.build(&build.ext())),
+            _marker: std::marker::PhantomData,
           };
           self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
           return $Node::Data(vec![],vec![tr]);
@@ -180,7 +184,7 @@ macro_rules! impl_tree {
         };
 
         let mut index = 0;
-        let intersections: Vec<(u32,Arc<$Node<$($T),+,V>>)> = match build.level % $dim {
+        let intersections: Vec<(u32,Arc<$Node<$($T),+,V,X>>)> = match build.level % $dim {
           $($i => {
             let ps = pivots.$i.as_ref().unwrap();
             let mut ibuckets: HashMap<u32,HashSet<usize>> = HashMap::new();
@@ -274,15 +278,25 @@ macro_rules! impl_tree {
           pivots,
           intersections,
           nodes,
+          _marker: std::marker::PhantomData,
         })
       }
     }
 
-    impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
+    impl<$($T),+,V,X> $Branch<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+      pub fn new(pivots: ($(Option<Vec<$T>>),+), intersections: Vec<(u32,Arc<$Node<$($T),+,V,X>>)>,
+      nodes: Vec<Arc<$Node<$($T),+,V,X>>>) -> Self {
+        Self {
+          pivots,
+          intersections,
+          nodes,
+          _marker: std::marker::PhantomData,
+        }
+      }
       pub fn build<'a>(fields: Arc<SetupFields>,
       inserts: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
       next_tree: &mut TreeId)
-      -> (TreeRef<($(Coord<$T>),+)>,$Node<$($T),+,V>,HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>) {
+      -> (TreeRef<($(Coord<$T>),+)>,$Node<$($T),+,V,X>,HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V,X>>>>) {
         let mut mstate = $MState {
           fields,
           inserts,
@@ -322,12 +336,19 @@ macro_rules! impl_tree {
     }
 
     #[derive(Debug,PartialEq)]
-    pub struct $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
-      pub root: Arc<$Node<$($T),+,V>>
+    pub struct $Tree<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+      pub root: Arc<$Node<$($T),+,V,X>>,
+      _marker: std::marker::PhantomData<X>,
+    }
+    impl<$($T),+,V,X> $Tree<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+      pub fn new(root: Arc<$Node<$($T),+,V,X>>) -> Self {
+        Self { root, _marker: std::marker::PhantomData }
+      }
     }
 
     #[async_trait::async_trait]
-    impl<$($T),+,V> Tree<($(Coord<$T>),+),V> for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
+    impl<$($T),+,V,X> Tree<($(Coord<$T>),+),V,X> for $Tree<$($T),+,V,X>
+    where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
       fn build<'a>(fields: Arc<SetupFields>,
       rows: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], next_tree: &mut TreeId)
       -> (TreeRef<($(Coord<$T>),+)>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) {
@@ -336,7 +357,10 @@ macro_rules! impl_tree {
           rows,
           next_tree
         );
-        (tr, Self { root: Arc::new(root) }, ext_trees)
+        (tr, Self {
+          root: Arc::new(root),
+          _marker: std::marker::PhantomData,
+        }, ext_trees)
       }
       fn list(&mut self) -> (Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>) {
         let mut cursors = vec![Arc::clone(&self.root)];
@@ -362,7 +386,7 @@ macro_rules! impl_tree {
         }
         (rows,refs)
       }
-      fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,($(Coord<$T>),+),V>>>,
+      fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,($(Coord<$T>),+),V,X>>>,
       bbox: &(($($T),+),($($T),+))) -> Arc<Mutex<QStream<($(Coord<$T>),+),V>>>
       where S: RA {
         let istate = (
@@ -465,6 +489,13 @@ macro_rules! impl_tree {
           }
         }))))
       }
+      fn remove(&mut self, _deletes: Arc<Vec<(($(Coord<$T>),+),X)>>) -> () {
+        eprintln!["todo... remove tree"];
+        /*
+        let mut cursors = Vec::with_capacity(self.roots.len());
+        cursors.extend_from_slice(&self.roots);
+        */
+      }
     }
 
     fn $get_bounds<$($T),+,V,I>(mut indexes: I,
@@ -534,28 +565,31 @@ macro_rules! impl_tree {
 ];
 
 #[async_trait::async_trait]
-pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug+'static
-where P: Point, V: Value {
+pub trait Tree<P,V,X>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug+'static
+where P: Point, V: Value+GetId<X>, X: Id {
   fn build<'a>(fields: Arc<SetupFields>, rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
     -> (TreeRef<P>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
-  fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>,
+  fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V,X>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RA;
+  fn remove(&mut self, deletes: Arc<Vec<(P,X)>>) -> ();
 }
 
-pub struct Merge<'a,S,T,P,V,X> where P: Point, V: Value, T: Tree<P,V>, S: RA, V: GetId<X> {
+pub struct Merge<'a,S,T,P,V,X>
+where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id {
   pub fields: Arc<SetupFields>,
   pub inserts: &'a [(&'a P,&'a V)],
   pub deletes: Arc<Vec<(P,X)>>,
   pub roots: &'a [TreeRef<P>],
-  pub trees: &'a mut TreeFile<S,T,P,V>,
+  pub trees: &'a mut TreeFile<S,T,P,V,X>,
   pub next_tree: &'a mut TreeId,
   pub rebuild_depth: usize,
 }
 
 // return value: (tree, remove_trees, create_trees)
-impl<'a,S,T,P,V,X> Merge<'a,S,T,P,V,X> where P: Point, V: Value, T: Tree<P,V>, S: RA, V: GetId<X> {
+impl<'a,S,T,P,V,X> Merge<'a,S,T,P,V,X>
+where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
   pub async fn merge(&mut self)
   -> Result<(TreeRef<P>,T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>),Error> {
     self.remove().await?;
@@ -605,20 +639,16 @@ impl<'a,S,T,P,V,X> Merge<'a,S,T,P,V,X> where P: Point, V: Value, T: Tree<P,V>, S
   }
   pub async fn remove(&mut self) -> Result<(),Error> {
     if self.deletes.is_empty() { return Ok(()) }
-    eprintln!["todo remove..."];
-    /*
-    let mut tasks = vec![];
+    let mut join = Join::new();
     for r in self.roots.iter() {
-      let t = Arc::clone(r);
+      let t = Arc::clone(&self.trees.get(&r.id).await?);
       let deletes = Arc::clone(&self.deletes);
-      tasks.push(spawn(async move {
-        t.remove(&deletes);
-      }));
+      join.push(async move {
+        t.lock().await.remove(deletes);
+        Ok(())
+      });
     }
-    let mut cursors = Vec::with_capacity(self.roots.len());
-    cursors.extend_from_slice(&self.roots);
-    */
-    Ok(())
+    join.try_join().await
   }
 }
 

@@ -1,4 +1,4 @@
-use crate::{DB,Tree,Storage,Point,Value,GetId,Error,RA};
+use crate::{DB,Tree,Storage,Point,Value,GetId,Id,Error,RA};
 use async_std::sync::{Arc,Mutex};
 
 /// Struct for reading database properties.
@@ -85,7 +85,7 @@ impl<S> Setup<S> where S: RA {
     self
   }
   pub async fn build<T,P,V,X> (self) -> Result<DB<S,T,P,V,X>,Error>
-  where P: Point, V: Value+GetId<X>, T: Tree<P,V>, X: Clone {
+  where P: Point, V: Value+GetId<X>, T: Tree<P,V,X>, X: Id {
     DB::open_from_setup(self).await
   }
 }
