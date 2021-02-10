@@ -121,10 +121,7 @@ macro_rules! impl_tree {
             ),
           };
           self.next_tree += 1;
-          let t = $Tree {
-            root: Arc::new(self.build(&build.ext())),
-            _marker: std::marker::PhantomData,
-          };
+          let t = $Tree::new(Arc::new(self.build(&build.ext())));
           self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
           return $Node::Data(vec![],vec![tr]);
         }
@@ -435,7 +432,7 @@ macro_rules! impl_tree {
                         }
                       }
                       if &(bbox.1).$i >= pivots.last().unwrap() {
-                        matching |= 1<<(pivots.len()-1);
+                        matching |= 1<<(pivots.len()-1); // this doesn't look right...
                       }
                       for (bitfield,b) in branch.intersections.iter() {
                         if matching & bitfield > 0 {
@@ -489,12 +486,118 @@ macro_rules! impl_tree {
           }
         }))))
       }
-      fn remove(&mut self, _deletes: Arc<Vec<(($(Coord<$T>),+),X)>>) -> () {
-        eprintln!["todo... remove tree"];
-        /*
-        let mut cursors = Vec::with_capacity(self.roots.len());
-        cursors.extend_from_slice(&self.roots);
-        */
+      fn remove<S>(&mut self, deletes: Arc<Vec<(($(Coord<$T>),+),X)>>, ids: Arc<HashSet<X>>)
+      -> (bool,Vec<TreeId>) where S: RA {
+        let mut cursors = vec![(0usize,Arc::clone(&self.root))];
+        let mut refs = vec![];
+        let mut is_updated = false;
+        while let Some((level,mut c)) = cursors.pop() {
+          let m = Arc::get_mut(&mut c).unwrap();
+          match m {
+            $Node::Branch(branch) => {
+              match level % $dim {
+                $($i => {
+                  let pivots = branch.pivots.$i.as_ref().unwrap();
+                  {
+                    // TODO: break early when matching == max_value
+                    let mut matching: u32 = 0;
+                    for (p,_) in deletes.iter() {
+                      let (x0, x1) = match &p.$i {
+                        Coord::Scalar(x) => (x,x).clone(),
+                        Coord::Interval(x0,x1) => (x0,x1).clone(),
+                      };
+                      if x0 <= pivots.first().unwrap() {
+                        matching |= 1<<0;
+                      }
+                      let ranges = pivots.iter().zip(pivots.iter().skip(1));
+                      for (i,(start,end)) in ranges.enumerate() {
+                        if intersect_iv(start, end, &x0, &x1) {
+                          matching |= 1<<i;
+                          matching |= 1<<(i+1);
+                        }
+                      }
+                      if x1 >= pivots.last().unwrap() {
+                        matching |= 1<<(pivots.len()-1); // should this be -1????
+                      }
+                    }
+                    for (bitfield,b) in branch.intersections.iter() {
+                      if matching & bitfield > 0 {
+                        cursors.push((level+1,Arc::clone(b)));
+                      }
+                    }
+                  }
+                  {
+                    let mut matching: u32 = 0;
+                    // TODO: break early when matching == max_value
+                    for (p,_) in deletes.iter() {
+                      let (x0, x1) = match &p.$i {
+                        Coord::Scalar(x) => (x,x).clone(),
+                        Coord::Interval(x0,x1) => (x0,x1).clone(),
+                      };
+                      let ranges = pivots.iter().zip(pivots.iter().skip(1));
+                      if x0 <= pivots.first().unwrap() {
+                        matching |= 1<<0;
+                      }
+                      for (i,(start,end)) in ranges.enumerate() {
+                        if intersect_iv(start, end, &x0, &x1) {
+                          matching |= 1<<(i+1);
+                        }
+                      }
+                      if x1 >= pivots.last().unwrap() {
+                        matching |= 1<<pivots.len();
+                      }
+                    }
+                    for (i,b) in branch.nodes.iter().enumerate() {
+                      if matching & (1<<i) > 0 {
+                        cursors.push((level+1,Arc::clone(b)));
+                      }
+                    }
+                  }
+                }),+,
+                _ => panic!["unexpected level modulo dimension"]
+              }
+            },
+            $Node::Data(data,rs) => {
+              refs.extend(rs.iter()
+                .filter(|r| {
+                  // unsure why this doesn't work:
+                  // true $(&& intersect_coord(&r.bounds.$i, &(bbox.0).$i, &(bbox.1).$i))+
+                  // work-around for now:
+                  for (p,_) in deletes.iter() {
+                    match level % $dim {
+                      $($i => {
+                        if intersect_coord_coord(&r.bounds.$i, &p.$i) {
+                          return true;
+                        }
+                      }),+,
+                      _ => panic!["unexpected level modulo dimension"]
+                    }
+                  }
+                  false
+                })
+                .map(|r| { r.id })
+                .collect::<Vec<TreeId>>()
+              );
+              let mut updated = false;
+              for d in data.iter() {
+                let id = d.1.get_id();
+                if ids.contains(&id) {
+                  updated = true;
+                  break;
+                }
+              }
+              if updated {
+                is_updated = true;
+                let ndata = data.iter().filter(|d| {
+                  let id = d.1.get_id();
+                  !ids.contains(&id)
+                }).map(|d| d.clone()).collect();
+                *m = $Node::Data(ndata, rs.clone());
+              }
+            },
+          }
+        }
+        (is_updated,refs)
       }
     }
 
@@ -573,7 +676,8 @@ where P: Point, V: Value+GetId<X>, X: Id {
   fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V,X>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RA;
-  fn remove(&mut self, deletes: Arc<Vec<(P,X)>>) -> ();
+  fn remove<S>(&mut self, deletes: Arc<Vec<(P,X)>>, ids: Arc<HashSet<X>>)
+    -> (bool,Vec<TreeId>) where S: RA;
 }
 
 pub struct Merge<'a,S,T,P,V,X>
@@ -581,8 +685,8 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id {
   pub fields: Arc<SetupFields>,
   pub inserts: &'a [(&'a P,&'a V)],
   pub deletes: Arc<Vec<(P,X)>>,
-  pub roots: &'a [TreeRef<P>],
-  pub trees: &'a mut TreeFile<S,T,P,V,X>,
+  pub roots: Arc<Vec<TreeRef<P>>>,
+  pub trees: Arc<Mutex<TreeFile<S,T,P,V,X>>>,
   pub next_tree: &'a mut TreeId,
   pub rebuild_depth: usize,
 }
@@ -601,12 +705,13 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
     l_refs.extend_from_slice(&self.roots);
 
     for _ in 0..self.rebuild_depth {
+      let mut trees = self.trees.lock().await;
       let bounds = l_refs.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
       let intersecting = calc_overlap::<P>(&bounds);
       let mut n_refs = vec![];
       for (r,overlap) in l_refs.iter().zip(intersecting) {
         if overlap {
-          let (list,xrefs) = self.trees.get(&r.id).await?.lock().await.list();
+          let (list,xrefs) = trees.get(&r.id).await?.lock().await.list();
           lists.push(list);
           n_refs.extend(xrefs);
           rm_trees.push(r.id);
@@ -640,11 +745,33 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
   pub async fn remove(&mut self) -> Result<(),Error> {
     if self.deletes.is_empty() { return Ok(()) }
     let mut join = Join::new();
+    let ids = {
+      let mut set = HashSet::new();
+      for d in self.deletes.iter() {
+        set.insert(d.1.clone());
+      }
+      Arc::new(set)
+    };
     for r in self.roots.iter() {
-      let t = Arc::clone(&self.trees.get(&r.id).await?);
       let deletes = Arc::clone(&self.deletes);
+      let trees = Arc::clone(&self.trees);
+      let xids = Arc::clone(&ids);
+      let id = r.id.clone();
       join.push(async move {
-        t.lock().await.remove(deletes);
+        let mut refs = vec![id];
+        while !refs.is_empty() {
+          let r = refs.pop().unwrap();
+          let tm = trees.lock().await.get(&r).await?;
+          let mut t = tm.lock().await;
+          let (is_updated,nrefs) = t.remove::<S>(
+            Arc::clone(&deletes),
+            Arc::clone(&xids),
+          );
+          refs.extend(nrefs);
+          if is_updated {
+            trees.lock().await.put(&r, Arc::clone(&tm)).await;
+          }
+        }
         Ok(())
       });
     }

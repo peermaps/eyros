@@ -1,4 +1,4 @@
-#![feature(async_closure,iter_partition_in_place,try_trait)]
+#![feature(async_closure,iter_partition_in_place,drain_filter)]
 mod store;
 pub use store::Storage;
 #[doc(hidden)] pub use store::FileStore;
@@ -170,17 +170,18 @@ where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V,X>, X: Id {
       .map(|x| x.unwrap())
       .collect();
 
-    let trees = &mut self.trees.lock().await;
-    let merge_trees = self.meta.roots.iter()
-      .take_while(|r| r.is_some())
-      .map(|r| r.as_ref().unwrap().clone())
-      .collect::<Vec<TreeRef<P>>>();
+    let merge_trees = Arc::new(
+      self.meta.roots.iter()
+        .take_while(|r| r.is_some())
+        .map(|r| r.as_ref().unwrap().clone())
+        .collect::<Vec<TreeRef<P>>>()
+    );
     let mut m = Merge {
       fields: Arc::clone(&self.fields),
       inserts: inserts.as_slice(),
       deletes: Arc::new(deletes),
-      roots: merge_trees.as_slice(),
-      trees,
+      roots: Arc::clone(&merge_trees),
+      trees: Arc::clone(&self.trees),
       next_tree: &mut self.meta.next_tree,
       rebuild_depth,
     };
@@ -190,6 +191,7 @@ where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V,X>, X: Id {
     }
     let (tr,t,rm_trees,create_trees) = m.merge().await?;
     //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
+    let trees = &mut self.trees.lock().await;
     for r in rm_trees.iter() {
       trees.remove(r).await;
     }
@@ -212,21 +214,23 @@ where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V,X>, X: Id {
     Ok(())
   }
   pub async fn optimize(&mut self, rebuild_depth: usize) -> Result<(),Error> {
-    let trees = &mut self.trees.lock().await;
-    let merge_trees = self.meta.roots.iter()
-      .filter(|r| r.is_some())
-      .map(|r| r.as_ref().unwrap().clone())
-      .collect::<Vec<TreeRef<P>>>();
+    let merge_trees = Arc::new(
+      self.meta.roots.iter()
+        .filter(|r| r.is_some())
+        .map(|r| r.as_ref().unwrap().clone())
+        .collect::<Vec<TreeRef<P>>>()
+    );
     let mut m = Merge {
       fields: Arc::clone(&self.fields),
       inserts: &vec![],
       deletes: Arc::new(vec![]),
-      roots: merge_trees.as_slice(),
-      trees,
+      roots: Arc::clone(&merge_trees),
+      trees: Arc::clone(&self.trees),
       next_tree: &mut self.meta.next_tree,
       rebuild_depth,
     };
     let (tr,t,rm_trees,create_trees) = m.merge().await?;
+    let trees = &mut self.trees.lock().await;
     for r in rm_trees.iter() {
       trees.remove(r).await;
     }
