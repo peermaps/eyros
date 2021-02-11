@@ -47,8 +47,8 @@ impl Scalar for i16 {}
 impl Scalar for i32 {}
 impl Scalar for i64 {}
 
-pub trait RA: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
-impl<S> RA for S where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
+pub trait RA: RandomAccess<Error=Error>+Unpin+Send+Sync+std::fmt::Debug+'static {}
+impl<S> RA for S where S: RandomAccess<Error=Error>+Unpin+Send+Sync+std::fmt::Debug+'static {}
 
 #[derive(Debug,Clone,PartialEq,PartialOrd)]
 pub enum Coord<X> where X: Scalar {

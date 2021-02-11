@@ -487,117 +487,29 @@ macro_rules! impl_tree {
         }))))
       }
       fn remove<S>(&mut self, deletes: Arc<Vec<(($(Coord<$T>),+),X)>>, ids: Arc<HashSet<X>>)
-      -> (bool,Vec<TreeId>) where S: RA {
-        let mut cursors = vec![(0usize,Arc::clone(&self.root))];
-        let mut refs = vec![];
-        let mut is_updated = false;
-        while let Some((level,mut c)) = cursors.pop() {
-          let m = Arc::get_mut(&mut c).unwrap();
-          match m {
-            $Node::Branch(branch) => {
-              match level % $dim {
-                $($i => {
-                  let pivots = branch.pivots.$i.as_ref().unwrap();
-                  {
-                    // TODO: break early when matching == max_value
-                    let mut matching: u32 = 0;
-                    for (p,_) in deletes.iter() {
-                      let (x0, x1) = match &p.$i {
-                        Coord::Scalar(x) => (x,x).clone(),
-                        Coord::Interval(x0,x1) => (x0,x1).clone(),
-                      };
-                      if x0 <= pivots.first().unwrap() {
-                        matching |= 1<<0;
-                      }
-                      let ranges = pivots.iter().zip(pivots.iter().skip(1));
-                      for (i,(start,end)) in ranges.enumerate() {
-                        if intersect_iv(start, end, &x0, &x1) {
-                          matching |= 1<<i;
-                          matching |= 1<<(i+1);
-                        }
-                      }
-                      if x1 >= pivots.last().unwrap() {
-                        matching |= 1<<(pivots.len()-1); // should this be -1????
-                      }
-                    }
-                    for (bitfield,b) in branch.intersections.iter() {
-                      if matching & bitfield > 0 {
-                        cursors.push((level+1,Arc::clone(b)));
-                      }
-                    }
-                  }
-                  {
-                    let mut matching: u32 = 0;
-                    // TODO: break early when matching == max_value
-                    for (p,_) in deletes.iter() {
-                      let (x0, x1) = match &p.$i {
-                        Coord::Scalar(x) => (x,x).clone(),
-                        Coord::Interval(x0,x1) => (x0,x1).clone(),
-                      };
-                      let ranges = pivots.iter().zip(pivots.iter().skip(1));
-                      if x0 <= pivots.first().unwrap() {
-                        matching |= 1<<0;
-                      }
-                      for (i,(start,end)) in ranges.enumerate() {
-                        if intersect_iv(start, end, &x0, &x1) {
-                          matching |= 1<<(i+1);
-                        }
-                      }
-                      if x1 >= pivots.last().unwrap() {
-                        matching |= 1<<pivots.len();
-                      }
-                    }
-                    for (i,b) in branch.nodes.iter().enumerate() {
-                      if matching & (1<<i) > 0 {
-                        cursors.push((level+1,Arc::clone(b)));
-                      }
-                    }
-                  }
-                }),+,
-                _ => panic!["unexpected level modulo dimension"]
+      -> (Option<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>)>,Vec<TreeId>) where S: RA {
+        let (mut list, refs) = self.list();
+        let len = list.len();
+        list.drain_filter(|(_,v)| {
+          let id = v.get_id();
+          !ids.contains(&id)
+        });
+        let rs = refs.iter()
+          .filter(|r| {
+            for (p,_) in deletes.iter() {
+              if true $(&& intersect_coord_coord(&r.bounds.$i, &p.$i))+ {
+                return true;
               }
-            },
-            $Node::Data(data,rs) => {
-              refs.extend(rs.iter()
-                .filter(|r| {
-                  // unsure why this doesn't work:
-                  // true $(&& intersect_coord(&r.bounds.$i, &(bbox.0).$i, &(bbox.1).$i))+
-                  // work-around for now:
-                  for (p,_) in deletes.iter() {
-                    match level % $dim {
-                      $($i => {
-                        if intersect_coord_coord(&r.bounds.$i, &p.$i) {
-                          return true;
-                        }
-                      }),+,
-                      _ => panic!["unexpected level modulo dimension"]
-                    }
-                  }
-                  false
-                })
-                .map(|r| { r.id })
-                .collect::<Vec<TreeId>>()
-              );
-              let mut updated = false;
-              for d in data.iter() {
-                let id = d.1.get_id();
-                if ids.contains(&id) {
-                  updated = true;
-                  break;
-                }
-              }
-              if updated {
-                is_updated = true;
-                let ndata = data.iter().filter(|d| {
-                  let id = d.1.get_id();
-                  !ids.contains(&id)
-                }).map(|d| d.clone()).collect();
-                *m = $Node::Data(ndata, rs.clone());
-              }
-            },
-          }
+            }
+            false
+          })
+          .map(|r| { r.id })
+          .collect::<Vec<TreeId>>();
+        if len == list.len() {
+          (None,rs)
+        } else {
+          (Some((list,refs)),rs)
         }
-        (is_updated,refs)
       }
     }
 
@@ -677,7 +589,7 @@ where P: Point, V: Value+GetId<X>, X: Id {
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RA;
   fn remove<S>(&mut self, deletes: Arc<Vec<(P,X)>>, ids: Arc<HashSet<X>>)
-    -> (bool,Vec<TreeId>) where S: RA;
+    -> (Option<(Vec<(P,V)>,Vec<TreeRef<P>>)>,Vec<TreeId>) where S: RA;
 }
 
 pub struct Merge<'a,S,T,P,V,X>
@@ -752,24 +664,48 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
       }
       Arc::new(set)
     };
+    let fields = {
+      let mut f = (*self.fields).clone();
+      f.max_records = usize::MAX;
+      f.max_depth = usize::MAX;
+      Arc::new(f)
+    };
     for r in self.roots.iter() {
       let deletes = Arc::clone(&self.deletes);
+      // TODO: remove the delete when found
       let trees = Arc::clone(&self.trees);
       let xids = Arc::clone(&ids);
       let id = r.id.clone();
+      let xfields = Arc::clone(&fields);
       join.push(async move {
         let mut refs = vec![id];
         while !refs.is_empty() {
           let r = refs.pop().unwrap();
           let tm = trees.lock().await.get(&r).await?;
           let mut t = tm.lock().await;
-          let (is_updated,nrefs) = t.remove::<S>(
+          let (built,nrefs) = t.remove::<S>(
             Arc::clone(&deletes),
             Arc::clone(&xids),
           );
           refs.extend(nrefs);
-          if is_updated {
-            trees.lock().await.put(&r, Arc::clone(&tm)).await;
+          if let Some((list,refs)) = built {
+            //trees.lock().await.put(&r, Arc::clone(&tm)).await;
+            let mut rows = Vec::with_capacity(list.len() + refs.len());
+            rows.extend(list.iter().map(|(p,v)| {
+              (p.clone(),InsertValue::Value(v))
+            }).collect::<Vec<_>>());
+            rows.extend(refs.iter().map(|r| {
+              (r.bounds.clone(),InsertValue::Ref(r.clone()))
+            }).collect::<Vec<_>>());
+            let mut next_tree = id;
+            let (tr, t, create_trees) = T::build(
+              Arc::clone(&xfields),
+              &rows,
+              &mut next_tree
+            );
+            assert![tr.id == r, "unexpected id constructing replacement tree for remove()"];
+            assert![create_trees.len() == 0, "unexpected external sub-trees during remove()"];
+            trees.lock().await.put(&r, Arc::new(Mutex::new(t))).await;
           }
         }
         Ok(())

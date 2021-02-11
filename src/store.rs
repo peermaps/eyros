@@ -13,12 +13,13 @@ use crate::Error;
 
 /// Return random access storage adaptors for files by a string name
 #[async_trait::async_trait]
-pub trait Storage<S>: Send+Sync+Unpin {
+pub trait Storage<S>: Send+Sync+Unpin+std::fmt::Debug {
   async fn open (&mut self, name: &str) -> Result<S,Error>;
   async fn remove (&mut self, name: &str) -> Result<(),Error>;
 }
 
 #[cfg(not(feature="wasm"))]
+#[derive(Debug,Clone)]
 pub struct FileStore {
   path: PathBuf
 }

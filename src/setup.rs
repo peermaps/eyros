@@ -2,6 +2,7 @@ use crate::{DB,Tree,Storage,Point,Value,GetId,Id,Error,RA};
 use async_std::sync::{Arc,Mutex};
 
 /// Struct for reading database properties.
+#[derive(Debug,Clone)]
 pub struct SetupFields {
   pub branch_factor: usize,
   pub max_depth: usize,
@@ -59,6 +60,7 @@ impl SetupFields {
 ///   .await?;
 /// # Ok(()) }
 /// ```
+#[derive(Debug,Clone)]
 pub struct Setup<S> where S: RA {
   pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   pub fields: SetupFields
