@@ -101,7 +101,6 @@ macro_rules! impl_tree {
         }
       }
       fn build(&mut self, build: &Build) -> $Node<$($T),+,V,X> {
-        // TODO: insert self.refs into the construction
         let rlen = build.range.1 - build.range.0;
         if rlen == 0 {
           return $Node::Data(vec![],vec![]);
@@ -486,17 +485,22 @@ macro_rules! impl_tree {
           }
         }))))
       }
-      fn remove<S>(&mut self, deletes: Arc<Vec<(($(Coord<$T>),+),X)>>, ids: Arc<HashSet<X>>)
+      async fn remove<S>(&mut self, xids: Arc<Mutex<HashMap<X,($(Coord<$T>),+)>>>)
       -> (Option<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>)>,Vec<TreeId>) where S: RA {
         let (mut list, refs) = self.list();
         let len = list.len();
+        let mut ids = xids.lock().await;
         list.drain_filter(|(_,v)| {
           let id = v.get_id();
-          ids.contains(&id)
+          let x = ids.contains_key(&id);
+          if x {
+            ids.remove(&id);
+          }
+          x
         });
         let rs = refs.iter()
           .filter(|r| {
-            for (p,_) in deletes.iter() {
+            for (_,p) in ids.iter() {
               if true $(&& intersect_coord_coord(&r.bounds.$i, &p.$i))+ {
                 return true;
               }
@@ -588,7 +592,7 @@ where P: Point, V: Value+GetId<X>, X: Id {
   fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V,X>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RA;
-  fn remove<S>(&mut self, deletes: Arc<Vec<(P,X)>>, ids: Arc<HashSet<X>>)
+  async fn remove<S>(&mut self, ids: Arc<Mutex<HashMap<X,P>>>)
     -> (Option<(Vec<(P,V)>,Vec<TreeRef<P>>)>,Vec<TreeId>) where S: RA;
 }
 
@@ -659,11 +663,11 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
     if self.deletes.is_empty() { return Ok(()) }
     let mut join = Join::new();
     let ids = {
-      let mut set = HashSet::new();
+      let mut map = HashMap::new();
       for d in self.deletes.iter() {
-        set.insert(d.1.clone());
+        map.insert(d.1.clone(), d.0.clone());
       }
-      Arc::new(set)
+      Arc::new(Mutex::new(map))
     };
     let fields = {
       let mut f = (*self.fields).clone();
@@ -674,7 +678,6 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
     for ro in self.roots.iter() {
       if ro.is_none() { continue }
       let r = ro.as_ref().unwrap();
-      let deletes = Arc::clone(&self.deletes);
       // TODO: remove the delete when found
       let trees = Arc::clone(&self.trees);
       let xids = Arc::clone(&ids);
@@ -687,9 +690,8 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
           let tm = trees.lock().await.get(&r).await?;
           let mut t = tm.lock().await;
           let (built,nrefs) = t.remove::<S>(
-            Arc::clone(&deletes),
             Arc::clone(&xids),
-          );
+          ).await;
           refs.extend(nrefs);
           if let Some((list,refs)) = built {
             let mut rows = Vec::with_capacity(list.len() + refs.len());
