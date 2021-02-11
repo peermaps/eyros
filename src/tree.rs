@@ -1,5 +1,5 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Scalar,Point,Value,Coord,Error,Overlap,RA,GetId,Id,
+use crate::{Scalar,Point,Value,Coord,Error,Overlap,RA,GetId,Id,Root,
   query::QStream, tree_file::TreeFile, SetupFields};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
@@ -492,7 +492,7 @@ macro_rules! impl_tree {
         let len = list.len();
         list.drain_filter(|(_,v)| {
           let id = v.get_id();
-          !ids.contains(&id)
+          ids.contains(&id)
         });
         let rs = refs.iter()
           .filter(|r| {
@@ -597,7 +597,8 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id {
   pub fields: Arc<SetupFields>,
   pub inserts: &'a [(&'a P,&'a V)],
   pub deletes: Arc<Vec<(P,X)>>,
-  pub roots: Arc<Vec<TreeRef<P>>>,
+  pub inputs: Arc<Vec<TreeRef<P>>>,
+  pub roots: Vec<Root<P>>,
   pub trees: Arc<Mutex<TreeFile<S,T,P,V,X>>>,
   pub next_tree: &'a mut TreeId,
   pub rebuild_depth: usize,
@@ -613,8 +614,8 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
     let mut lists = vec![];
     let mut rm_trees = vec![];
     let mut rows: Vec<(P,InsertValue<'_,P,V>)> = vec![];
-    let mut l_refs = Vec::with_capacity(self.roots.len());
-    l_refs.extend_from_slice(&self.roots);
+    let mut l_refs = Vec::with_capacity(self.inputs.len());
+    l_refs.extend_from_slice(&self.inputs);
 
     for _ in 0..self.rebuild_depth {
       let mut trees = self.trees.lock().await;
@@ -670,7 +671,9 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
       f.max_depth = usize::MAX;
       Arc::new(f)
     };
-    for r in self.roots.iter() {
+    for ro in self.roots.iter() {
+      if ro.is_none() { continue }
+      let r = ro.as_ref().unwrap();
       let deletes = Arc::clone(&self.deletes);
       // TODO: remove the delete when found
       let trees = Arc::clone(&self.trees);
@@ -689,7 +692,6 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
           );
           refs.extend(nrefs);
           if let Some((list,refs)) = built {
-            //trees.lock().await.put(&r, Arc::clone(&tm)).await;
             let mut rows = Vec::with_capacity(list.len() + refs.len());
             rows.extend(list.iter().map(|(p,v)| {
               (p.clone(),InsertValue::Value(v))
@@ -697,13 +699,15 @@ where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
             rows.extend(refs.iter().map(|r| {
               (r.bounds.clone(),InsertValue::Ref(r.clone()))
             }).collect::<Vec<_>>());
-            let mut next_tree = id;
+            let mut next_tree = r;
             let (tr, t, create_trees) = T::build(
               Arc::clone(&xfields),
               &rows,
               &mut next_tree
             );
-            assert![tr.id == r, "unexpected id constructing replacement tree for remove()"];
+            assert![tr.id == r, "unexpected id constructing replacement tree for remove(). \
+              expected: {}, received: {}", r, tr.id
+            ];
             assert![create_trees.len() == 0, "unexpected external sub-trees during remove()"];
             trees.lock().await.put(&r, Arc::new(Mutex::new(t))).await;
           }
