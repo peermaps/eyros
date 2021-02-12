@@ -10,12 +10,6 @@ pub struct SetupFields {
   pub inline: usize,
   pub tree_cache_size: usize,
   pub rebuild_depth: usize,
-  /*
-  pub max_data_size: usize,
-  pub base_size: usize,
-  pub bbox_cache_size: usize,
-  pub data_list_cache_size: usize
-  */
 }
 
 impl SetupFields {
@@ -27,12 +21,6 @@ impl SetupFields {
       inline: 500,
       tree_cache_size: 1000,
       rebuild_depth: 2,
-      /*
-      max_data_size: 3_000,
-      base_size: 9_000,
-      bbox_cache_size: 10_000,
-      data_list_cache_size: 16_000
-      */
     }
   }
 }
@@ -43,19 +31,23 @@ impl SetupFields {
 /// configuration:
 ///
 /// ```rust,no_run
-/// use eyros::{DB,Setup};
+/// use eyros::{DB,Coord,Tree2,Setup};
 /// use random_access_disk::RandomAccessDisk;
 /// use std::path::PathBuf;
 ///
-/// type P = ((f32,f32),(f32,f32));
+/// type T = Tree2<f32,f32,V>;
+/// type P = (Coord<f32>,Coord<f32>);
 /// type V = u32;
 ///
 /// # #[async_std::main]
 /// # async fn main () -> Result<(),Box<dyn std::error::Error+Sync+Send>> {
-/// let mut db: DB<_,_,P,V,_> = Setup::from_path(&PathBuf::from("/tmp/eyros-db/"))
-///   .branch_factor(5)
-///   .max_data_size(3_000)
-///   .base_size(1_000)
+/// let mut db: DB<_,T,P,V> = Setup::from_path(&PathBuf::from("/tmp/eyros-db/"))
+///   .branch_factor(6)
+///   .max_depth(8)
+///   .max_records(20_000)
+///   .inline(500)
+///   .tree_cache_size(1000)
+///   .rebuild_depth(2)
 ///   .build()
 ///   .await?;
 /// # Ok(()) }
@@ -84,6 +76,18 @@ impl<S> Setup<S> where S: RA {
   }
   pub fn max_records(mut self, mr: usize) -> Self {
     self.fields.max_records = mr;
+    self
+  }
+  pub fn inline(mut self, n: usize) -> Self {
+    self.fields.inline = n;
+    self
+  }
+  pub fn tree_cache_size(mut self, n: usize) -> Self {
+    self.fields.tree_cache_size = n;
+    self
+  }
+  pub fn rebuild_depth(mut self, n: usize) -> Self {
+    self.fields.rebuild_depth = n;
     self
   }
   pub async fn build<T,P,V> (self) -> Result<DB<S,T,P,V>,Error>
