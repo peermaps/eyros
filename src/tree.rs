@@ -207,14 +207,7 @@ macro_rules! impl_tree {
                   hset.contains(j)
                 })
               );
-              (*bitfield, if next.range.1 - next.range.0 == rlen {
-                let inserts = &self.inserts;
-                Arc::new($build_data(&self.sorted[next.range.0..next.range.1].iter().map(|i| {
-                  inserts[*i].clone()
-                }).collect::<Vec<(_,InsertValue<'_,_,V>)>>()))
-              } else {
-                Arc::new(self.build(&next))
-              })
+              (*bitfield, Arc::new(self.build(&next)))
             }).collect()
           }),+,
           _ => panic!["unexpected level modulo dimension"]
@@ -231,8 +224,10 @@ macro_rules! impl_tree {
                 build,
                 &mut index,
                 Box::new(|pivot, inserts, j: &usize| {
-                  coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
-                    == Some(std::cmp::Ordering::Less)
+                  match &(inserts[*j].0).$i {
+                    Coord::Scalar(x) => x < &pivot,
+                    Coord::Interval(_,x) => x < &pivot,
+                  }
                 })
               );
               Arc::new(self.build(&next))
@@ -249,26 +244,29 @@ macro_rules! impl_tree {
               );
               nodes.push(Arc::new(self.build(&next)));
             }
-            if pv.len() > 1 {
-              nodes.push({
-                let pivot = pv.first().unwrap();
-                let next = self.next(
-                  pivot,
-                  build,
-                  &mut index,
-                  Box::new(|pivot, inserts, j: &usize| {
-                    coord_cmp_pivot(&(inserts[*j].0).$i, &pivot)
-                      == Some(std::cmp::Ordering::Greater)
-                  })
-                );
-                Arc::new(self.build(&next))
-              });
-            }
+            nodes.push({
+              let pivot = pv.last().unwrap();
+              let next = self.next(
+                &pivot,
+                build,
+                &mut index,
+                Box::new(|pivot, inserts, j: &usize| {
+                  match &(inserts[*j].0).$i {
+                    Coord::Scalar(x) => x > &pivot,
+                    Coord::Interval(x,_) => x > &pivot,
+                  }
+                })
+              );
+              Arc::new(self.build(&next))
+            });
             nodes
           }),+,
           _ => panic!["unexpected level modulo dimension"]
         };
-
+        assert![index == build.range.1 - build.range.0,
+          "{} leftover records not built into nodes or intersections",
+          (build.range.1 - build.range.0) - index
+        ];
         $Node::Branch($Branch {
           pivots,
           intersections,
@@ -429,7 +427,7 @@ macro_rules! impl_tree {
                         matching |= 1<<(pivots.len()-1); // this doesn't look right...
                       }
                       for (bitfield,b) in branch.intersections.iter() {
-                        if matching & bitfield > 0 {
+                        if (matching & bitfield) > 0 {
                           cursors.push((level+1,Arc::clone(b)));
                         }
                       }
@@ -798,12 +796,5 @@ fn coord_max<X>(x: &Coord<X>, r: &X) -> X where X: Scalar {
     Some(std::cmp::Ordering::Less) => r.clone(),
     Some(std::cmp::Ordering::Equal) => r.clone(),
     Some(std::cmp::Ordering::Greater) => l.clone(),
-  }
-}
-
-fn coord_cmp_pivot<X>(x: &Coord<X>, p: &X) -> Option<std::cmp::Ordering> where X: Scalar {
-  match x {
-    Coord::Scalar(a) => a.partial_cmp(p),
-    Coord::Interval(a,_) => a.partial_cmp(p),
   }
 }
