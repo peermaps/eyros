@@ -50,6 +50,7 @@ pub trait Point: 'static+Overlap+Clone+Send+Sync+Debug{
   type Bounds: Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes+Overlap;
   fn to_bounds(&self) -> Result<Self::Bounds,Error>;
   fn bounds_to_point(bounds: &Self::Bounds) -> Self;
+  fn check(&self) -> Result<(),Error>;
 }
 
 pub trait Overlap {
@@ -81,6 +82,20 @@ macro_rules! impl_point {
       }
       fn bounds_to_point(bounds: &Self::Bounds) -> Self {
         ($(Coord::Interval((bounds.0).$i.clone(),(bounds.1).$i.clone())),+)
+      }
+      fn check(&self) -> Result<(),Error> {
+        $(match &(self.$i) {
+          Coord::Interval(min,max) => {
+            if !(min <= max) {
+              return Err(Box::new(failure::err_msg(format![
+                "!(min <= max) dimension {} for Coord::Interval({:?},{:?})",
+                $i, min, max
+              ]).compat()));
+            }
+          },
+          _ => {}
+        };)+
+        Ok(())
       }
     }
   }
@@ -141,6 +156,12 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub async fn batch_with_rebuild_depth(&mut self, rebuild_depth: usize, rows: &[Row<P,V>])
   -> Result<(),Error> {
     if rows.is_empty() { return Ok(()) }
+    for row in rows.iter() {
+      match row {
+        Row::Insert(p,_) => p.check()?,
+        Row::Delete(p,_) => p.check()?,
+      }
+    }
     let inserts: Vec<(&P,&V)> = rows.iter()
       .map(|row| match row {
         Row::Insert(p,v) => Some((p,v)),
