@@ -23,3 +23,8 @@ def_value![i8];
 def_value![i16];
 def_value![i32];
 def_value![i64];
+
+impl<T> Value for Vec<T> where T: Value+Clone+Eq {
+  type Id = Vec<T>;
+  fn get_id(&self) -> Self { self.clone() }
+}
