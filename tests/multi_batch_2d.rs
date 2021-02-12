@@ -87,7 +87,7 @@ async fn multi_batch_f64iv_f32_u16() -> Result<(),Error> {
   let size = 10_000;
   let inserts: Vec<Row<P,V>> = (0..size).map(|_| {
     let x0: f64 = (r.read::<f64>()*2.0-1.0)*1000.0;
-    let x1: f64 = x0 + ((r.read::<f64>().powf(64.0))*2.0-1.0)*500.0;
+    let x1: f64 = x0 + (r.read::<f64>().powf(64.0))*500.0;
     let y: f32 = r.read::<f32>()*4000.0+2000.0;
     let value: u16 = r.read();
     Row::Insert((Coord::Interval(x0,x1),Coord::Scalar(y)), value)
