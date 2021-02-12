@@ -16,7 +16,7 @@ async fn delete() -> Result<(),Error> {
   let mut db = eyros::open_from_path3(dir.path()).await?;
   let mut r = rand().seed([13,12]);
   let size = 40_000;
-  let inserts: Vec<Row<P,V,V>> = (0..size).map(|i| {
+  let inserts: Vec<Row<P,V>> = (0..size).map(|i| {
     let xmin: f32 = r.read::<f32>()*2.0-1.0;
     let xmax: f32 = xmin + r.read::<f32>().powf(64.0)*(1.0-xmin);
     let ymin: f32 = r.read::<f32>()*2.0-1.0;
@@ -31,7 +31,7 @@ async fn delete() -> Result<(),Error> {
   }).collect();
   let batch_size = 5_000;
   let n = size / batch_size;
-  let batches: Vec<Vec<Row<P,V,V>>> = (0..n).map(|i| {
+  let batches: Vec<Vec<Row<P,V>>> = (0..n).map(|i| {
     inserts[i*batch_size..(i+1)*batch_size].to_vec()
   }).collect();
   {

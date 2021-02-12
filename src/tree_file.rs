@@ -1,20 +1,21 @@
 use lru::{LruCache as LRU};
-use crate::{Tree,TreeId,Error,Point,Value,GetId,Id,Storage,RA,SetupFields};
+use crate::{Tree,TreeId,Error,Point,Value,Storage,RA,SetupFields};
 use std::collections::{HashMap,HashSet};
 use async_std::{sync::{Arc,Mutex}};
 #[path="./join.rs"] mod join;
 use join::Join;
 
-pub struct TreeFile<S,T,P,V,X> where T: Tree<P,V,X>, P: Point, V: Value+GetId<X>, X: Id, S: RA {
+#[derive(Debug)]
+pub struct TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   //fields: Arc<SetupFields>,
   cache: LRU<TreeId,Arc<Mutex<T>>>,
   storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   updated: HashMap<TreeId,Arc<Mutex<T>>>,
   removed: HashSet<TreeId>,
-  _marker: std::marker::PhantomData<(P,V,X)>,
+  _marker: std::marker::PhantomData<(P,V)>,
 }
 
-impl<S,T,P,V,X> TreeFile<S,T,P,V,X> where T: Tree<P,V,X>, P: Point, V: Value+GetId<X>, X: Id, S: RA {
+impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   pub fn new(fields: Arc<SetupFields>, storage: Arc<Mutex<Box<dyn Storage<S>>>>) -> Self {
     let cache = LRU::new(fields.tree_cache_size);
     Self {

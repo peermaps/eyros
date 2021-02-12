@@ -1,5 +1,5 @@
 #[cfg(not(feature="wasm"))]
-use crate::{DB,Tree,Point,Value,Error,Setup,SetupFields,Scalar,Coord,GetId,Id};
+use crate::{DB,Tree,Point,Value,Error,Setup,SetupFields,Scalar,Coord};
 #[cfg(not(feature="wasm"))]
 use std::path::{Path,PathBuf};
 #[cfg(not(feature="wasm"))]
@@ -50,8 +50,7 @@ impl Storage<S> for FileStore {
 }
 
 #[cfg(not(feature="wasm"))]
-impl<T,P,V,X> DB<S,T,P,V,X>
-where P: Point+'static, V: Value+GetId<X>+'static, T: Tree<P,V,X>, X: Id {
+impl<T,P,V> DB<S,T,P,V> where P: Point, V: Value, T: Tree<P,V> {
   pub async fn open_from_path(path: &Path) -> Result<Self,Error> {
     Ok(Setup::from_path(path).build().await?)
   }
@@ -73,10 +72,10 @@ macro_rules! impl_open {
     #[cfg(not(feature="wasm"))]
     use crate::$Tree;
     #[cfg(not(feature="wasm"))]
-    pub async fn $open_from_path<$($T),+,V,X>(path: &Path)
-    -> Result<DB<S,$Tree<$($T),+,V,X>,($(Coord<$T>),+),V,X>,Error>
-    where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
-      <DB<S,$Tree<$($T),+,V,X>,($(Coord<$T>),+),V,X>>::open_from_path(path).await
+    pub async fn $open_from_path<$($T),+,V>(path: &Path)
+    -> Result<DB<S,$Tree<$($T),+,V>,($(Coord<$T>),+),V>,Error>
+    where $($T: Scalar),+, V: Value {
+      <DB<S,$Tree<$($T),+,V>,($(Coord<$T>),+),V>>::open_from_path(path).await
     }
   }
 }

@@ -1,12 +1,12 @@
 use desert::CountBytes;
-use crate::{Coord,Scalar,Value,GetId,Id,bytes::varint};
+use crate::{Coord,Scalar,Value,bytes::varint};
 use failure::Error;
 
 macro_rules! impl_count_bytes {
   ($Tree:ident,$Branch:ident,$Node:ident,$count_point_bytes:ident,($($i:tt),+),($($T:tt),+)) => {
     use crate::tree::{$Tree,$Branch,$Node};
 
-    impl<$($T),+,V,X> CountBytes for $Tree<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+    impl<$($T),+,V> CountBytes for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn count_bytes(&self) -> usize {
         let mut bytes = self.root.count_bytes();
         let mut cursors = vec![&*self.root];
@@ -37,7 +37,7 @@ macro_rules! impl_count_bytes {
       }
     }
 
-    impl<$($T),+,V,X> CountBytes for $Branch<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+    impl<$($T),+,V> CountBytes for $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn count_bytes(&self) -> usize {
         let mut size = 0;
         let mut pivot_len = 0;
@@ -64,7 +64,7 @@ macro_rules! impl_count_bytes {
       }
     }
 
-    impl<$($T),+,V,X> CountBytes for $Node<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+    impl<$($T),+,V> CountBytes for $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn count_bytes(&self) -> usize {
         match &self {
           $Node::Branch(_branch) => 4,

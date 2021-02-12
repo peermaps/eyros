@@ -1,5 +1,5 @@
 use desert::FromBytes;
-use crate::{Scalar,Coord,Value,GetId,Id,bytes::varint,tree::TreeRef};
+use crate::{Scalar,Coord,Value,bytes::varint,tree::TreeRef};
 use failure::Error;
 use async_std::sync::Arc;
 
@@ -8,7 +8,7 @@ macro_rules! impl_from_bytes {
   $parse_branch:ident, $parse_data:ident,
   ($($i:tt,$T:tt),+),($($n:tt),+),$dim:expr) => {
     use crate::tree::{$Tree,$Branch,$Node};
-    impl<$($T),+,V,X> FromBytes for $Tree<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+    impl<$($T),+,V> FromBytes for $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       fn from_bytes(src: &[u8]) -> Result<(usize,Self),Error> {
         let mut offset = 0;
         let (s,n) = u32::from_bytes(&src[offset..])?;
@@ -29,8 +29,8 @@ macro_rules! impl_from_bytes {
       }
     }
 
-    fn $parse_branch<$($T),+,V,X>(src: &[u8], xoffset: usize, depth: usize)
-    -> Result<$Node<$($T),+,V,X>,Error> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+    fn $parse_branch<$($T),+,V>(src: &[u8], xoffset: usize, depth: usize)
+    -> Result<$Node<$($T),+,V>,Error> where $($T: Scalar),+, V: Value {
       let mut offset = xoffset;
       let mut pivots = ($($n),+);
       let pivot_len = match depth%$dim {
@@ -96,8 +96,8 @@ macro_rules! impl_from_bytes {
       )))
     }
 
-    fn $parse_data<$($T),+,V,X>(src: &[u8], n: usize) -> Result<(usize,$Node<$($T),+,V,X>),Error>
-    where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+    fn $parse_data<$($T),+,V>(src: &[u8], n: usize) -> Result<(usize,$Node<$($T),+,V>),Error>
+    where $($T: Scalar),+, V: Value {
       let mut offset = 0;
       let (data_len,ref_len) = ((n>>1)&0xffff,n>>17);
       let mut data: Vec<(($(Coord<$T>),+),V)> = Vec::with_capacity(data_len);

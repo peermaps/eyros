@@ -12,31 +12,20 @@ pub use query::QueryStream;
 mod unfold;
 mod tree_file;
 use tree_file::TreeFile;
-mod get_id;
-pub use get_id::{GetId,Id};
+mod value;
+pub use value::Value;
 
 use async_std::{sync::{Arc,Mutex}};
 use random_access_storage::RandomAccess;
 use desert::{ToBytes,FromBytes,CountBytes};
 use core::ops::{Add,Div};
+use std::fmt::Debug;
 
 pub type Error = Box<dyn std::error::Error+Sync+Send>;
-
-pub trait Value: Clone+core::fmt::Debug+Send+Sync+'static+PartialEq
-  +ToBytes+CountBytes+FromBytes {}
-pub trait Scalar: Clone+PartialOrd+From<u8>+core::fmt::Debug
+pub trait Scalar: Clone+PartialOrd+From<u8>+Debug
+  +Send+Sync+'static+PartialEq
   +ToBytes+CountBytes+FromBytes
-  +Value+Add<Output=Self>+Div<Output=Self> {}
-impl Value for f32 {}
-impl Value for f64 {}
-impl Value for u8 {}
-impl Value for u16 {}
-impl Value for u32 {}
-impl Value for u64 {}
-impl Value for i16 {}
-impl Value for i32 {}
-impl Value for i64 {}
-impl<T> Value for Vec<T> where T: Value {}
+  +Add<Output=Self>+Div<Output=Self> {}
 impl Scalar for f32 {}
 impl Scalar for f64 {}
 impl Scalar for u8 {}
@@ -47,8 +36,8 @@ impl Scalar for i16 {}
 impl Scalar for i32 {}
 impl Scalar for i64 {}
 
-pub trait RA: RandomAccess<Error=Error>+Unpin+Send+Sync+std::fmt::Debug+'static {}
-impl<S> RA for S where S: RandomAccess<Error=Error>+Unpin+Send+Sync+std::fmt::Debug+'static {}
+pub trait RA: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
+impl<S> RA for S where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
 
 #[derive(Debug,Clone,PartialEq,PartialOrd)]
 pub enum Coord<X> where X: Scalar {
@@ -57,8 +46,8 @@ pub enum Coord<X> where X: Scalar {
 }
 
 #[async_trait::async_trait]
-pub trait Point: 'static+Overlap+Clone+Send+Sync+core::fmt::Debug {
-  type Bounds: Clone+Send+Sync+core::fmt::Debug+ToBytes+FromBytes+CountBytes+Overlap;
+pub trait Point: 'static+Overlap+Clone+Send+Sync+Debug{
+  type Bounds: Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes+Overlap;
   fn to_bounds(&self) -> Result<Self::Bounds,Error>;
   fn bounds_to_point(bounds: &Self::Bounds) -> Self;
 }
@@ -106,9 +95,9 @@ macro_rules! impl_point {
 #[cfg(feature="8d")] impl_point![Tree8,open_from_path8,(P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7)];
 
 #[derive(Debug,Clone)]
-pub enum Row<P,V,X> where P: Point, V: Value, X: Id {
+pub enum Row<P,V> where P: Point, V: Value {
   Insert(P,V),
-  Delete(P,X)
+  Delete(P,V::Id)
 }
 
 pub type Root<P> = Option<tree::TreeRef<P>>;
@@ -118,18 +107,18 @@ pub struct Meta<P> where P: Point {
   pub next_tree: TreeId,
 }
 
-pub struct DB<S,T,P,V,X>
-where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V,X>, X: Id {
+#[derive(Debug)]
+pub struct DB<S,T,P,V>
+where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   pub fields: Arc<SetupFields>,
   pub meta_store: Arc<Mutex<S>>,
   pub meta: Meta<P>,
-  pub trees: Arc<Mutex<TreeFile<S,T,P,V,X>>>,
-  _marker: std::marker::PhantomData<X>,
+  pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
 }
 
-impl<S,T,P,V,X> DB<S,T,P,V,X>
-where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V,X>, X: Id {
+impl<S,T,P,V> DB<S,T,P,V>
+where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
     let mut meta_store = setup.storage.lock().await.open("meta").await?;
     let meta = match meta_store.len().await? {
@@ -144,13 +133,12 @@ where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V,X>, X: Id {
       meta_store: Arc::new(Mutex::new(meta_store)),
       meta,
       trees: Arc::new(Mutex::new(trees)),
-      _marker: std::marker::PhantomData,
     })
   }
-  pub async fn batch(&mut self, rows: &[Row<P,V,X>]) -> Result<(),Error> {
+  pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     self.batch_with_rebuild_depth(self.fields.rebuild_depth, rows).await
   }
-  pub async fn batch_with_rebuild_depth(&mut self, rebuild_depth: usize, rows: &[Row<P,V,X>])
+  pub async fn batch_with_rebuild_depth(&mut self, rebuild_depth: usize, rows: &[Row<P,V>])
   -> Result<(),Error> {
     if rows.is_empty() { return Ok(()) }
     let inserts: Vec<(&P,&V)> = rows.iter()
@@ -161,7 +149,7 @@ where S: RA, P: Point, V: Value+GetId<X>, T: Tree<P,V,X>, X: Id {
       .filter(|row| !row.is_none())
       .map(|x| x.unwrap())
       .collect();
-    let deletes: Vec<(P,X)> = rows.iter()
+    let deletes: Vec<(P,V::Id)> = rows.iter()
       .map(|row| match row {
         Row::Delete(p,x) => Some((p.clone(),x.clone())),
         _ => None

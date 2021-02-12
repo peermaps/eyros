@@ -14,7 +14,7 @@ async fn mix2() -> Result<(),Error> {
   let mut inserted: Vec<(P,V)> = vec![];
   let mut r = rand().seed([13,12]);
   for _n in 0..50 {
-    let batch: Vec<Row<P,V,V>> = (0..1_000).map(|_| {
+    let batch: Vec<Row<P,V>> = (0..1_000).map(|_| {
       let (point,value) = {
         if r.read::<f32>() > 0.5 {
           let xmin: f32 = r.read::<f32>()*2.0-1.0;

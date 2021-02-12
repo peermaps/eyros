@@ -1,5 +1,5 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Scalar,Point,Value,Coord,Error,Overlap,RA,GetId,Id,Root,
+use crate::{Scalar,Point,Value,Coord,Error,Overlap,RA,Root,
   query::QStream, tree_file::TreeFile, SetupFields};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
@@ -39,13 +39,13 @@ macro_rules! impl_tree {
   ($Tree:ident,$Branch:ident,$Node:ident,$MState:ident,$get_bounds:ident,$build_data:ident,
   ($($T:tt),+),($($i:tt),+),($($u:ty),+),($($n:tt),+),$dim:expr) => {
     #[derive(Debug,PartialEq)]
-    pub enum $Node<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
-      Branch($Branch<$($T),+,V,X>),
+    pub enum $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
+      Branch($Branch<$($T),+,V>),
       Data(Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>),
     }
-    fn $build_data<'a,$($T),+,V,X>(rows: &[
+    fn $build_data<'a,$($T),+,V>(rows: &[
       (($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)
-    ]) -> $Node<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+    ]) -> $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
       let (points, refs) = rows.iter().fold((vec![],vec![]),|(mut points, mut refs), pv| {
         match &pv.1 {
           InsertValue::Value(v) => points.push((pv.0.clone(),(*v).clone())),
@@ -57,22 +57,21 @@ macro_rules! impl_tree {
     }
 
     #[derive(Debug,PartialEq)]
-    pub struct $Branch<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+    pub struct $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub pivots: ($(Option<Vec<$T>>),+),
-      pub intersections: Vec<(u32,Arc<$Node<$($T),+,V,X>>)>,
-      pub nodes: Vec<Arc<$Node<$($T),+,V,X>>>,
-      _marker: std::marker::PhantomData<X>,
+      pub intersections: Vec<(u32,Arc<$Node<$($T),+,V>>)>,
+      pub nodes: Vec<Arc<$Node<$($T),+,V>>>,
     }
 
-    pub struct $MState<'a,$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+    pub struct $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
       pub fields: Arc<SetupFields>,
       pub inserts: &'a [(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
       pub next_tree: TreeId,
-      pub ext_trees: HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V,X>>>>,
+      pub ext_trees: HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>,
       pub sorted: Vec<usize>,
     }
 
-    impl<'a,$($T),+,V,X> $MState<'a,$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+    impl<'a,$($T),+,V> $MState<'a,$($T),+,V> where $($T: Scalar),+, V: Value {
       fn next<T>(&mut self, x: &T, build: &Build, index: &mut usize,
       f: Box<dyn Fn (&T,&[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], &usize) -> bool>) -> Build {
         let inserts = &self.inserts;
@@ -100,7 +99,7 @@ macro_rules! impl_tree {
           count: build.count + (build.range.1-build.range.0) - (range.1-range.0),
         }
       }
-      fn build(&mut self, build: &Build) -> $Node<$($T),+,V,X> {
+      fn build(&mut self, build: &Build) -> $Node<$($T),+,V> {
         let rlen = build.range.1 - build.range.0;
         if rlen == 0 {
           return $Node::Data(vec![],vec![]);
@@ -180,7 +179,7 @@ macro_rules! impl_tree {
         };
 
         let mut index = 0;
-        let intersections: Vec<(u32,Arc<$Node<$($T),+,V,X>>)> = match build.level % $dim {
+        let intersections: Vec<(u32,Arc<$Node<$($T),+,V>>)> = match build.level % $dim {
           $($i => {
             let ps = pivots.$i.as_ref().unwrap();
             let mut ibuckets: HashMap<u32,HashSet<usize>> = HashMap::new();
@@ -274,25 +273,23 @@ macro_rules! impl_tree {
           pivots,
           intersections,
           nodes,
-          _marker: std::marker::PhantomData,
         })
       }
     }
 
-    impl<$($T),+,V,X> $Branch<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
-      pub fn new(pivots: ($(Option<Vec<$T>>),+), intersections: Vec<(u32,Arc<$Node<$($T),+,V,X>>)>,
-      nodes: Vec<Arc<$Node<$($T),+,V,X>>>) -> Self {
+    impl<$($T),+,V> $Branch<$($T),+,V> where $($T: Scalar),+, V: Value {
+      pub fn new(pivots: ($(Option<Vec<$T>>),+), intersections: Vec<(u32,Arc<$Node<$($T),+,V>>)>,
+      nodes: Vec<Arc<$Node<$($T),+,V>>>) -> Self {
         Self {
           pivots,
           intersections,
           nodes,
-          _marker: std::marker::PhantomData,
         }
       }
       pub fn build<'a>(fields: Arc<SetupFields>,
       inserts: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
       next_tree: &mut TreeId)
-      -> (TreeRef<($(Coord<$T>),+)>,$Node<$($T),+,V,X>,HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V,X>>>>) {
+      -> (TreeRef<($(Coord<$T>),+)>,$Node<$($T),+,V>,HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>) {
         let mut mstate = $MState {
           fields,
           inserts,
@@ -332,19 +329,18 @@ macro_rules! impl_tree {
     }
 
     #[derive(Debug,PartialEq)]
-    pub struct $Tree<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
-      pub root: Arc<$Node<$($T),+,V,X>>,
-      _marker: std::marker::PhantomData<X>,
+    pub struct $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
+      pub root: Arc<$Node<$($T),+,V>>
     }
-    impl<$($T),+,V,X> $Tree<$($T),+,V,X> where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
-      pub fn new(root: Arc<$Node<$($T),+,V,X>>) -> Self {
-        Self { root, _marker: std::marker::PhantomData }
+    impl<$($T),+,V> $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
+      pub fn new(root: Arc<$Node<$($T),+,V>>) -> Self {
+        Self { root }
       }
     }
 
     #[async_trait::async_trait]
-    impl<$($T),+,V,X> Tree<($(Coord<$T>),+),V,X> for $Tree<$($T),+,V,X>
-    where $($T: Scalar),+, V: Value+GetId<X>, X: Id {
+    impl<$($T),+,V> Tree<($(Coord<$T>),+),V> for $Tree<$($T),+,V>
+    where $($T: Scalar),+, V: Value {
       fn build<'a>(fields: Arc<SetupFields>,
       rows: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], next_tree: &mut TreeId)
       -> (TreeRef<($(Coord<$T>),+)>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) {
@@ -355,7 +351,6 @@ macro_rules! impl_tree {
         );
         (tr, Self {
           root: Arc::new(root),
-          _marker: std::marker::PhantomData,
         }, ext_trees)
       }
       fn list(&mut self) -> (Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>) {
@@ -382,7 +377,7 @@ macro_rules! impl_tree {
         }
         (rows,refs)
       }
-      fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,($(Coord<$T>),+),V,X>>>,
+      fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,($(Coord<$T>),+),V>>>,
       bbox: &(($($T),+),($($T),+))) -> Arc<Mutex<QStream<($(Coord<$T>),+),V>>>
       where S: RA {
         let istate = (
@@ -485,7 +480,7 @@ macro_rules! impl_tree {
           }
         }))))
       }
-      async fn remove<S>(&mut self, xids: Arc<Mutex<HashMap<X,($(Coord<$T>),+)>>>)
+      async fn remove<S>(&mut self, xids: Arc<Mutex<HashMap<V::Id,($(Coord<$T>),+)>>>)
       -> (Option<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>)>,Vec<TreeId>) where S: RA {
         let (mut list, refs) = self.list();
         let len = list.len();
@@ -584,33 +579,33 @@ macro_rules! impl_tree {
 ];
 
 #[async_trait::async_trait]
-pub trait Tree<P,V,X>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug+'static
-where P: Point, V: Value+GetId<X>, X: Id {
+pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug+'static
+where P: Point, V: Value {
   fn build<'a>(fields: Arc<SetupFields>, rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
     -> (TreeRef<P>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
-  fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V,X>>>,
+  fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>,
     bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
     where S: RA;
-  async fn remove<S>(&mut self, ids: Arc<Mutex<HashMap<X,P>>>)
+  async fn remove<S>(&mut self, ids: Arc<Mutex<HashMap<V::Id,P>>>)
     -> (Option<(Vec<(P,V)>,Vec<TreeRef<P>>)>,Vec<TreeId>) where S: RA;
 }
 
-pub struct Merge<'a,S,T,P,V,X>
-where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id {
+pub struct Merge<'a,S,T,P,V>
+where P: Point, V: Value, T: Tree<P,V>, S: RA {
   pub fields: Arc<SetupFields>,
   pub inserts: &'a [(&'a P,&'a V)],
-  pub deletes: Arc<Vec<(P,X)>>,
+  pub deletes: Arc<Vec<(P,V::Id)>>,
   pub inputs: Arc<Vec<TreeRef<P>>>,
   pub roots: Vec<Root<P>>,
-  pub trees: Arc<Mutex<TreeFile<S,T,P,V,X>>>,
+  pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
   pub next_tree: &'a mut TreeId,
   pub rebuild_depth: usize,
 }
 
 // return value: (tree, remove_trees, create_trees)
-impl<'a,S,T,P,V,X> Merge<'a,S,T,P,V,X>
-where P: Point, V: Value, T: Tree<P,V,X>, S: RA, V: GetId<X>, X: Id  {
+impl<'a,S,T,P,V> Merge<'a,S,T,P,V>
+where P: Point, V: Value, T: Tree<P,V>, S: RA {
   pub async fn merge(&mut self)
   -> Result<(TreeRef<P>,T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>),Error> {
     self.remove().await?;
