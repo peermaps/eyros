@@ -69,7 +69,6 @@ macro_rules! impl_count_bytes {
         match &self {
           $Node::Branch(_branch) => 4,
           $Node::Data(rows,refs) => 4
-            + (rows.len()+7)/8 // deleted bitfield
             + rows.iter().fold(0usize, |sum,row| {
               sum + $count_point_bytes(&row.0) + row.1.count_bytes()
             })

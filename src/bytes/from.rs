@@ -102,9 +102,7 @@ macro_rules! impl_from_bytes {
       let (data_len,ref_len) = ((n>>1)&0xffff,n>>17);
       let mut data: Vec<(($(Coord<$T>),+),V)> = Vec::with_capacity(data_len);
       let mut refs: Vec<TreeRef<($(Coord<$T>),+)>> = vec![];
-      let dbf = &src[offset..offset+(data_len+7)/8];
-      offset += (data_len+7)/8;
-      for i in 0..data_len {
+      for _ in 0..data_len {
         let bitfield = src[offset];
         offset += 1;
         let point = ($(
@@ -125,10 +123,7 @@ macro_rules! impl_from_bytes {
         ),+);
         let (s,value) = V::from_bytes(&src[offset..])?;
         offset += s;
-        let is_deleted = (dbf[i/8]>>(i%8))&1 == 1;
-        if !is_deleted {
-          data.push((point,value));
-        }
+        data.push((point,value));
       }
       for _i in 0..ref_len {
         let (s,r) = varint::decode(&src[offset..])?;

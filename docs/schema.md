@@ -57,8 +57,6 @@ depending on the value of `n % 2`, the node is a:
   this offset is relative to the beginning of the tree file.
 * `1` - data block. `(data_len, ref_len) = ((n>>1)&0xffff, n>>17)`.
   the number of inline records and inline refs to read after the `n` u32.
-  a bitfield of size `floor((n/2+7)/8)` comes before the inline records where a 1 indicates that the
-  record has been deleted.
   `data_len` inline records are followed by `ref_len` inline refs.
   each inline ref is a varint.
 

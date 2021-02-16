@@ -145,17 +145,12 @@ macro_rules! impl_to_bytes {
       let mut offset = 0;
       let n = ((rows.len()<<1) + (refs.len()<<17) + 1) as u32;
       offset += n.write_bytes(&mut buf[offset..])?;
-      for _j in 0..(rows.len()+7)/8 {
-        buf[offset] = 0; // all inserted, no deleted when constructing
-        offset += 1;
-      }
       for row in rows.iter() {
         offset += $write_point_bytes(&row.0, &mut buf[offset..])?;
         offset += row.1.write_bytes(&mut buf[offset..])?;
       }
       for r in refs.iter() {
         offset += varint::encode(r.id, &mut buf[offset..])?;
-        //eprintln!["to:bounds={:?}", &r.bounds];
         $(match &r.bounds.$i {
           Coord::Interval(xmin,xmax) => {
             assert![xmin == xmin, "non-idenity serializing xmin={:?}", xmin];
