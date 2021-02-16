@@ -6,16 +6,16 @@ use std::path::{Path,PathBuf};
 type S = RandomAccessDisk;
 #[cfg(not(feature="wasm"))]
 use random_access_disk::RandomAccessDisk;
-use async_std::sync::{Arc,Mutex};
+#[cfg(not(feature="wasm"))] use async_std::sync::{Arc,Mutex};
 
 #[cfg(feature="wasm")]
 use crate::Error;
 
 /// Return random access storage adaptors for files by a string name
 #[async_trait::async_trait]
-pub trait Storage<S>: Send+Sync+Unpin+std::fmt::Debug {
-  async fn open (&mut self, name: &str) -> Result<S,Error>;
-  async fn remove (&mut self, name: &str) -> Result<(),Error>;
+pub trait Storage<S>: Send+Sync+Unpin {
+  async fn open(&mut self, name: &str) -> Result<S,Error>;
+  async fn remove(&mut self, name: &str) -> Result<(),Error>;
 }
 
 #[cfg(not(feature="wasm"))]
@@ -26,7 +26,7 @@ pub struct FileStore {
 
 #[cfg(not(feature="wasm"))]
 impl FileStore {
-  pub fn new (path: &Path) -> Self {
+  pub fn new(path: &Path) -> Self {
     Self { path: path.to_path_buf() }
   }
 }

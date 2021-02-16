@@ -1,7 +1,7 @@
 #![feature(async_closure,iter_partition_in_place,drain_filter)]
 mod store;
 pub use store::Storage;
-#[doc(hidden)] pub use store::FileStore;
+#[cfg(not(feature="wasm"))] #[doc(hidden)] pub use store::FileStore;
 mod setup;
 pub use setup::{Setup,SetupFields};
 mod tree;
@@ -14,6 +14,8 @@ mod tree_file;
 use tree_file::TreeFile;
 mod value;
 pub use value::Value;
+#[cfg(feature="wasm")]
+mod wasm;
 
 use async_std::{sync::{Arc,Mutex}};
 use random_access_storage::RandomAccess;
@@ -122,7 +124,6 @@ pub struct Meta<P> where P: Point {
   pub next_tree: TreeId,
 }
 
-#[derive(Debug)]
 pub struct DB<S,T,P,V>
 where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
@@ -149,6 +150,9 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       meta,
       trees: Arc::new(Mutex::new(trees)),
     })
+  }
+  pub async fn open_from_storage(storage: Box<dyn Storage<S>>) -> Result<Self,Error> {
+    Setup::from_storage(storage).build().await
   }
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     self.batch_with_rebuild_depth(self.fields.rebuild_depth, rows).await

@@ -1,4 +1,6 @@
-use async_std::{prelude::*,task::{spawn,JoinHandle}};
+use async_std::{prelude::*,task::JoinHandle};
+#[cfg(not(feature="wasm"))] use async_std::task::spawn;
+#[cfg(feature="wasm")] use async_std::task::{spawn_local as spawn};
 use std::future::Future;
 
 pub type Error = Box<dyn std::error::Error+Sync+Send>;

@@ -52,7 +52,7 @@ impl SetupFields {
 ///   .await?;
 /// # Ok(()) }
 /// ```
-#[derive(Debug,Clone)]
+#[derive(Clone)]
 pub struct Setup<S> where S: RA {
   pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   pub fields: SetupFields

@@ -5,7 +5,6 @@ use async_std::{sync::{Arc,Mutex}};
 #[path="./join.rs"] mod join;
 use join::Join;
 
-#[derive(Debug)]
 pub struct TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   //fields: Arc<SetupFields>,
   cache: LRU<TreeId,Arc<Mutex<T>>>,
