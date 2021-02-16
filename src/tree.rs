@@ -187,7 +187,7 @@ macro_rules! impl_tree {
               let mut bitfield: u32 = 0;
               for (i,pivot) in ps.iter().enumerate() {
                 if intersect_pivot(&(self.inserts[*j].0).$i, pivot) {
-                  bitfield |= 1 << i;
+                  bitfield |= (1 << i);
                 }
               }
               if bitfield > 0 && ibuckets.contains_key(&bitfield) {
@@ -244,21 +244,23 @@ macro_rules! impl_tree {
               );
               nodes.push(Arc::new(self.build(&next)));
             }
-            nodes.push({
-              let pivot = pv.last().unwrap();
-              let next = self.next(
-                &pivot,
-                build,
-                &mut index,
-                Box::new(|pivot, inserts, j: &usize| {
-                  match &(inserts[*j].0).$i {
-                    Coord::Scalar(x) => x > &pivot,
-                    Coord::Interval(x,_) => x > &pivot,
-                  }
-                })
-              );
-              Arc::new(self.build(&next))
-            });
+            if (pv.len() > 1) {
+              nodes.push({
+                let pivot = pv.last().unwrap();
+                let next = self.next(
+                  &pivot,
+                  build,
+                  &mut index,
+                  Box::new(|pivot, inserts, j: &usize| {
+                    match &(inserts[*j].0).$i {
+                      Coord::Scalar(x) => x > &pivot,
+                      Coord::Interval(x,_) => x > &pivot,
+                    }
+                  })
+                );
+                Arc::new(self.build(&next))
+              });
+            }
             nodes
           }),+,
           _ => panic!["unexpected level modulo dimension"]
@@ -296,7 +298,6 @@ macro_rules! impl_tree {
           sorted: {
             let mut xs: Vec<usize> = (0..inserts.len()).collect();
             xs.sort_unstable_by(|a,b| {
-              //coord_cmp(&(inserts[*a].0).0,&(inserts[*b].0).0).unwrap()
               match coord_cmp(&(inserts[*a].0).0,&(inserts[*b].0).0) {
                 Some(c) => c,
                 None => panic!["comparison failed for sorting (2). a={:?} b={:?}",
@@ -306,7 +307,7 @@ macro_rules! impl_tree {
             xs
           }
         };
-        //assert![mstate.sorted.len() >= 2, "sorted.len()={}, must be >= 2", mstate.sorted.len()];
+        assert![mstate.sorted.len() >= 1, "sorted.len()={}, must be >= 1", mstate.sorted.len()];
         let bounds = $get_bounds(
           mstate.sorted.iter().map(|i| *i),
           mstate.inserts
@@ -339,6 +340,9 @@ macro_rules! impl_tree {
     #[async_trait::async_trait]
     impl<$($T),+,V> Tree<($(Coord<$T>),+),V> for $Tree<$($T),+,V>
     where $($T: Scalar),+, V: Value {
+      fn empty() -> Self {
+        Self { root: Arc::new($Node::Data(vec![],vec![])) }
+      }
       fn build<'a>(fields: Arc<SetupFields>,
       rows: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], next_tree: &mut TreeId)
       -> (TreeRef<($(Coord<$T>),+)>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) {
@@ -414,17 +418,17 @@ macro_rules! impl_tree {
                     {
                       let mut matching: u32 = 0;
                       if &(bbox.0).$i <= pivots.first().unwrap() {
-                        matching |= 1<<0;
+                        matching |= (1<<0);
                       }
                       let ranges = pivots.iter().zip(pivots.iter().skip(1));
                       for (i,(start,end)) in ranges.enumerate() {
                         if intersect_iv(start, end, &(bbox.0).$i, &(bbox.1).$i) {
-                          matching |= 1<<i;
-                          matching |= 1<<(i+1);
+                          matching |= (1<<i);
+                          matching |= (1<<(i+1));
                         }
                       }
                       if &(bbox.1).$i >= pivots.last().unwrap() {
-                        matching |= 1<<(pivots.len()-1); // this doesn't look right...
+                        matching |= (1<<(pivots.len()-1));
                       }
                       for (bitfield,b) in branch.intersections.iter() {
                         if (matching & bitfield) > 0 {
@@ -462,13 +466,7 @@ macro_rules! impl_tree {
                 );
                 refs.extend(rs.iter()
                   .filter(|r| {
-                    // unsure why this doesn't work:
-                    // true $(&& intersect_coord(&r.bounds.$i, &(bbox.0).$i, &(bbox.1).$i))+
-                    // work-around for now:
-                    match level % $dim {
-                      $($i => intersect_coord(&r.bounds.$i, &(bbox.0).$i, &(bbox.1).$i),)+
-                      _ => panic!["unexpected level modulo dimension"]
-                    }
+                    true $(&& intersect_coord(&r.bounds.$i, &(bbox.0).$i, &(bbox.1).$i))+
                   })
                   .map(|r| { r.id })
                   .collect::<Vec<TreeId>>()
@@ -513,15 +511,16 @@ macro_rules! impl_tree {
     fn $get_bounds<$($T),+,V,I>(mut indexes: I,
     rows: &[(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)]) -> ($(Coord<$T>),+)
     where $($T: Scalar),+, V: Value, I: Iterator<Item=usize> {
+      let first = indexes.next().unwrap();
       let ibounds = (
         ($(
-          match &(rows[indexes.next().unwrap()].0).$i {
+          match &(rows[first].0).$i {
             Coord::Scalar(x) => x.clone(),
             Coord::Interval(x,_) => x.clone(),
           }
         ),+),
         ($(
-          match &(rows[indexes.next().unwrap()].0).$i {
+          match &(rows[first].0).$i {
             Coord::Scalar(x) => x.clone(),
             Coord::Interval(_,x) => x.clone(),
           }
@@ -579,6 +578,7 @@ macro_rules! impl_tree {
 #[async_trait::async_trait]
 pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug+'static
 where P: Point, V: Value {
+  fn empty() -> Self;
   fn build<'a>(fields: Arc<SetupFields>, rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
     -> (TreeRef<P>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
@@ -695,15 +695,21 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
               (r.bounds.clone(),InsertValue::Ref(r.clone()))
             }).collect::<Vec<_>>());
             let mut next_tree = r;
-            let (tr, t, create_trees) = T::build(
-              Arc::clone(&xfields),
-              &rows,
-              &mut next_tree
-            );
-            assert![tr.id == r, "unexpected id constructing replacement tree for remove(). \
-              expected: {}, received: {}", r, tr.id
-            ];
-            assert![create_trees.len() == 0, "unexpected external sub-trees during remove()"];
+            let t = match rows.len() {
+              0 => T::empty(),
+              _ => {
+                let (tr, t, create_trees) = T::build(
+                  Arc::clone(&xfields),
+                  &rows,
+                  &mut next_tree
+                );
+                assert![tr.id == r, "unexpected id constructing replacement tree for remove(). \
+                  expected: {}, received: {}", r, tr.id
+                ];
+                assert![create_trees.len() == 0, "unexpected external sub-trees during remove()"];
+                t
+              },
+            };
             trees.lock().await.put(&r, Arc::new(Mutex::new(t))).await;
           }
         }
@@ -774,27 +780,22 @@ fn coord_cmp<X>(x: &Coord<X>, y: &Coord<X>) -> Option<std::cmp::Ordering> where 
 }
 
 fn coord_min<X>(x: &Coord<X>, r: &X) -> X where X: Scalar {
-  let l = match x {
-    Coord::Scalar(a) => a,
-    Coord::Interval(a,_) => a,
-  };
-  match l.partial_cmp(r) {
-    None => l.clone(),
-    Some(std::cmp::Ordering::Less) => l.clone(),
-    Some(std::cmp::Ordering::Equal) => l.clone(),
-    Some(std::cmp::Ordering::Greater) => r.clone(),
+  match x {
+    Coord::Scalar(a) => cmp_min(a,r),
+    Coord::Interval(a,_) => cmp_min(a,r),
   }
 }
 
 fn coord_max<X>(x: &Coord<X>, r: &X) -> X where X: Scalar {
-  let l = match x {
-    Coord::Scalar(a) => a,
-    Coord::Interval(a,_) => a,
-  };
-  match l.partial_cmp(r) {
-    None => l.clone(),
-    Some(std::cmp::Ordering::Less) => r.clone(),
-    Some(std::cmp::Ordering::Equal) => r.clone(),
-    Some(std::cmp::Ordering::Greater) => l.clone(),
+  match x {
+    Coord::Scalar(a) => cmp_max(a,r),
+    Coord::Interval(_,a) => cmp_max(a,r),
   }
+}
+
+fn cmp_min<X>(a: &X, b: &X) -> X where X: Scalar {
+  (if a < b { a } else { b }).clone()
+}
+fn cmp_max<X>(a: &X, b: &X) -> X where X: Scalar {
+  (if a > b { a } else { b }).clone()
 }
