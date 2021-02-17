@@ -116,6 +116,14 @@ macro_rules! def_mix {
             .map(|x| $Stream::new(x).into())
         })
       }
+      pub fn sync(&self) -> Promise {
+        let db_ref = Arc::clone(&self.db);
+        future_to_promise(async move {
+          let mut db = db_ref.lock().await;
+          db.sync().await.map_err(|e| Error::new(&format!["{:?}",e]))?;
+          Ok(JsValue::NULL)
+        })
+      }
     }
     #[wasm_bindgen]
     pub async fn $open(storage_fn: Function, remove_fn: Function) -> Result<$C,Error> {

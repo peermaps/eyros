@@ -5,7 +5,7 @@ const test = require('tape')
 const randomBytes = require('crypto').randomBytes
 
 test('insert+delete', async function (t) {
-  t.plan(2)
+  t.plan(3)
   var db = await eyros({
     storage: RAM,
     wasmSource: fs.readFileSync(require.resolve(`../2d.wasm`))
@@ -38,19 +38,20 @@ test('insert+delete', async function (t) {
   for (var i = 0; i < beforeRows.length; i+=5) {
     deleteBatch.push({
       type: 'delete',
-      location: beforeRows[i][2]
+      point: beforeRows[i][0],
+      id: beforeRows[i][1]
     })
   }
   await db.batch(deleteBatch)
 
   var afterRows = await collect(await db.query(bbox))
-  t.deepEqual(
-    afterRows.map(row => [ round(row[0]), row[1] ]).sort(cmp),
-    beforeRows
-      .filter((row,i) => i%5 !== 0 && intersect(row[0], bbox))
-      .map(row => [ round(row[0]), row[1] ])
-      .sort(cmp)
-  )
+  var expected = beforeRows
+    .filter((row,i) => i%5 !== 0 && intersect(row[0], bbox))
+    .map(row => [ round(row[0]), row[1] ])
+    .sort(cmp)
+  var observed = afterRows.map(row => [ round(row[0]), row[1] ]).sort(cmp)
+  t.equal(observed.length, expected.length)
+  t.deepEqual(observed, expected)
 })
 
 function intersect (x, bbox) {
