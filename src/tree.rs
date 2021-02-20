@@ -327,6 +327,8 @@ macro_rules! impl_tree {
       }
     }
 
+    /// Tree in N dimensions. You might need to manually specify the appropriate
+    /// Tree{N} as T for `DB<_,T,_,_>`.
     #[derive(Debug,PartialEq)]
     pub struct $Tree<$($T),+,V> where $($T: Scalar),+, V: Value {
       pub root: Arc<$Node<$($T),+,V>>

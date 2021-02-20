@@ -49,7 +49,7 @@ impl<P> FromBytes for Meta<P> where P: Point {
         let (n,bounds) = <P::Bounds>::from_bytes(&src[offset..])?;
         //eprintln!["meta:from bounds={:?}", &bounds];
         offset += n;
-        roots.push(Some(TreeRef { id, bounds: P::bounds_to_point(&bounds) }));
+        roots.push(Some(TreeRef { id, bounds: P::from_bounds(&bounds) }));
       } else {
         roots.push(None);
       }

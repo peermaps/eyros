@@ -1,6 +1,8 @@
 use desert::{ToBytes,CountBytes,FromBytes};
 use core::{fmt::Debug,hash::Hash};
 
+/// Define the payload stored at a given geometry point.
+/// Value types must define an `Id` that uniquely identify them so they can be deleted.
 pub trait Value: Clone+Hash+Debug+Send+Sync+'static+ToBytes+CountBytes+FromBytes {
   type Id: Clone+Hash+Eq+Debug+Send+Sync+'static;
   fn get_id(&self) -> Self::Id;

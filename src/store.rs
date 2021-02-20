@@ -72,6 +72,8 @@ macro_rules! impl_open {
     #[cfg(not(feature="wasm"))]
     use crate::$Tree;
     #[cfg(not(feature="wasm"))]
+    /// Open a database from a `path` in N dimensions.
+    /// This function helps in selecting the appropriate `Tree{N}` type.
     pub async fn $open_from_path<$($T),+,V>(path: &Path)
     -> Result<DB<S,$Tree<$($T),+,V>,($(Coord<$T>),+),V>,Error>
     where $($T: Scalar),+, V: Value {

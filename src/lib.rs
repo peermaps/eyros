@@ -1,3 +1,83 @@
+//! # eyros
+//!
+//! eyros (εύρος) is a multi-dimensional interval database.
+//!
+//! The database is based on [bkd][] and [interval][] trees.
+//!
+//! * high batch-write performance
+//! * designed for peer-to-peer distribution and query-driven sparse replication
+//! * [compiles to web assembly for use in the browser][eyros-npm]
+//! * good for geospatial and time-series data
+//!
+//! eyros operates on scalar (x) or interval (min,max) coordinates for each
+//! dimension. There are 2 operations: batched write (for inserting and deleting)
+//! and query by bounding box. All features that intersect the bounding box are
+//! returned in the query results.
+//!
+//! [bkd]: https://users.cs.duke.edu/~pankaj/publications/papers/bkd-sstd.pdf
+//! [interval]: http://www.dgp.toronto.edu/~jstewart/378notes/22intervals/
+//! [eyros-npm]: https://www.npmjs.com/package/eyros
+//!
+//! # example
+//!
+//! This example inserts 5000 records, writes the data to disk, then queries and prints records inside
+//! the bounding box `((-120.0,20.0,10_000),(-100.0,35.0,20_000))`.
+//!
+//! The bounding box is of the form `((min_x,min_y,min_z),(max_x,max_y,max_z))`.
+//!
+//! ``` rust
+//! use eyros::{Row,Coord};
+//! use rand::random;
+//! use async_std::prelude::*;
+//!
+//! type P = (Coord<f32>,Coord<f32>,Coord<u16>);
+//! type V = u64;
+//! type E = Box<dyn std::error::Error+Sync+Send>;
+//!
+//! #[async_std::main]
+//! async fn main() -> Result<(),E> {
+//!   let mut db = eyros::open_from_path3(
+//!     &std::path::PathBuf::from("/tmp/eyros.db")
+//!   ).await?;
+//!   let batch: Vec<Row<P,V>> = (0..5_000).map(|i| {
+//!     let xmin = (random::<f32>()*2.0-1.0)*180.0;
+//!     let xmax = xmin + random::<f32>().powf(16.0)*(180.0-xmin);
+//!     let ymin = (random::<f32>()*2.0-1.0)*90.0;
+//!     let ymax = ymin + random::<f32>().powf(16.0)*(90.0-ymin);
+//!     let z = random::<u16>();
+//!     let point = (
+//!       Coord::Interval(xmin,xmax),
+//!       Coord::Interval(ymin,ymax),
+//!       Coord::Scalar(z)
+//!     );
+//!     Row::Insert(point, i)
+//!   }).collect();
+//!   db.batch(&batch).await?;
+//!   db.sync().await?;
+//!
+//!   let bbox = ((-120.0,20.0,10_000),(-100.0,35.0,20_000));
+//!   let mut stream = db.query(&bbox).await?;
+//!   while let Some(result) = stream.next().await {
+//!     println!("{:?}", result?);
+//!   }
+//!   Ok(())
+//! }
+//! ```
+//!
+//! The output from this program is of the form `(coords, value)`:
+//!
+//! ```sh
+//! $ cargo run --example polygons -q
+//! ((Interval(-100.94689, -100.94689), Interval(20.108843, 20.109331), Scalar(16522)), 4580)
+//! ((Interval(-111.62768, -110.40406), Interval(-7.519809, 86.154755), Scalar(12384)), 2603)
+//! ((Interval(-114.46505, -31.340988), Interval(-57.901405, 20.235504), Scalar(11360)), 1245)
+//! ((Interval(-159.97859, 121.304184), Interval(32.35743, 32.35743), Scalar(10164)), 3294)
+//! ((Interval(-150.29192, -35.475517), Interval(-39.97779, 29.163605), Scalar(15333)), 2336)
+//! ((Interval(-162.45879, -92.46166), Interval(31.187943, 31.187975), Scalar(12221)), 2826)
+//! ((Interval(-160.53441, -88.66396), Interval(10.031784, 21.852394), Scalar(11711)), 2366)
+//! ((Interval(-132.39021, -98.14838), Interval(-0.06010294, 53.88453), Scalar(10685)), 3441)
+//! ```
+
 #![feature(async_closure,iter_partition_in_place,drain_filter)]
 mod store;
 pub use store::Storage;
@@ -5,10 +85,10 @@ pub use store::Storage;
 mod setup;
 pub use setup::{Setup,SetupFields};
 mod tree;
-pub use tree::{Tree,TreeRef,TreeId,Merge};
+#[doc(hidden)] pub use tree::{Tree,TreeRef,TreeId,Merge};
 mod bytes;
 mod query;
-pub use query::QueryStream;
+#[doc(hidden)] pub use query::QueryStream;
 mod unfold;
 mod tree_file;
 use tree_file::TreeFile;
@@ -24,6 +104,8 @@ use core::ops::{Add,Div};
 use std::fmt::Debug;
 
 pub type Error = Box<dyn std::error::Error+Sync+Send>;
+
+/// All coordinate values must implement this collection of traits.
 pub trait Scalar: Clone+PartialOrd+From<u8>+Debug
   +Send+Sync+'static+PartialEq
   +ToBytes+CountBytes+FromBytes
@@ -38,24 +120,37 @@ impl Scalar for i16 {}
 impl Scalar for i32 {}
 impl Scalar for i64 {}
 
-pub trait RA: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
+#[doc(hidden)] pub trait RA: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
 impl<S> RA for S where S: RandomAccess<Error=Error>+Unpin+Send+Sync+'static {}
 
+/// The `Coord` enum represents the value for a dimension instead of a `Point` tuple.
+/// Use `Coord::Scalar(x)` to represent a single value and `Coord::Interval(min,max)`
+/// to represent a range of values from `min` to `max`, inclusive.
 #[derive(Debug,Clone,PartialEq,PartialOrd)]
 pub enum Coord<X> where X: Scalar {
   Scalar(X),
   Interval(X,X)
 }
 
+/// The `Point` trait represents the geometric coordinates of a feature.
+/// Each `Point` defines a `Bounds` that represents how to express bounding boxes.
+/// `Points` and `Bounds` are converted between each other with the `to_bounds()` and
+/// `from_bounds()` methods.
 #[async_trait::async_trait]
 pub trait Point: 'static+Overlap+Clone+Send+Sync+Debug{
   type Bounds: Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes+Overlap;
+  /// Convert to a `Bounds`, which may not be possible.
   fn to_bounds(&self) -> Result<Self::Bounds,Error>;
-  fn bounds_to_point(bounds: &Self::Bounds) -> Self;
+  /// Convert a `Bounds` into a `Point`.
+  fn from_bounds(bounds: &Self::Bounds) -> Self;
+  /// Return an Error when the current `Point` is invalid.
+  /// For example, for an interval `(min,max)` it may be that `min > max`.
   fn check(&self) -> Result<(),Error>;
 }
 
+/// Intersection tests used by `Point` and `Point::Bounds`.
 pub trait Overlap {
+  /// Return whether two features intersect.
   fn overlap(&self, other: &Self) -> bool;
 }
 
@@ -82,7 +177,7 @@ macro_rules! impl_point {
           }),+),
         ))
       }
-      fn bounds_to_point(bounds: &Self::Bounds) -> Self {
+      fn from_bounds(bounds: &Self::Bounds) -> Self {
         ($(Coord::Interval((bounds.0).$i.clone(),(bounds.1).$i.clone())),+)
       }
       fn check(&self) -> Result<(),Error> {
@@ -111,19 +206,23 @@ macro_rules! impl_point {
 #[cfg(feature="7d")] impl_point![Tree7,open_from_path7,(P0,P1,P2,P3,P4,P5,P6),(0,1,2,3,4,5,6)];
 #[cfg(feature="8d")] impl_point![Tree8,open_from_path8,(P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7)];
 
+/// Enum container for batch operations on the database.
 #[derive(Debug,Clone)]
 pub enum Row<P,V> where P: Point, V: Value {
   Insert(P,V),
   Delete(P,V::Id)
 }
 
+#[doc(hidden)]
 pub type Root<P> = Option<tree::TreeRef<P>>;
+#[doc(hidden)]
 #[derive(Debug,Clone)]
 pub struct Meta<P> where P: Point {
   pub roots: Vec<Root<P>>,
   pub next_tree: TreeId,
 }
 
+/// Top-level database API.
 pub struct DB<S,T,P,V>
 where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
@@ -135,6 +234,49 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
 
 impl<S,T,P,V> DB<S,T,P,V>
 where S: RA, P: Point, V: Value, T: Tree<P,V> {
+  /// Create a database instance from `setup`, a configuration builder.
+  ///
+  /// ```rust,no_run
+  /// # use eyros::{DB,Coord,Tree2,Setup};
+  /// # use std::path::PathBuf;
+  /// # #[async_std::main]
+  /// # async fn main () -> Result<(),Box<dyn std::error::Error+Sync+Send>> {
+  /// # type P = (Coord<f32>,Coord<f32>);
+  /// # type V = u32;
+  /// # type T = Tree2<f32,f32,V>;
+  /// let mut db: DB<_,T,P,V> = DB::open_from_setup(
+  ///   Setup::from_path(&PathBuf::from("/tmp/eyros-db/"))
+  ///     .branch_factor(5)
+  ///     .max_depth(8)
+  ///     .max_records(20_000)
+  /// ).await?;
+  /// # Ok(()) }
+  /// ```
+  ///
+  /// You can also use `Setup`'s `.build()?` method to get a `DB` instance:
+  ///
+  /// ```rust,no_run
+  /// use eyros::{DB,Coord,Tree2,Setup};
+  /// # use std::path::PathBuf;
+  ///
+  /// # type P = (Coord<f32>,Coord<f32>);
+  /// # type V = u32;
+  /// # type T = Tree2<f32,f32,V>;
+  /// # #[async_std::main]
+  /// # async fn main () -> Result<(),Box<dyn std::error::Error+Sync+Send>> {
+  /// let mut db: DB<_,T,P,V> = Setup::from_path(&PathBuf::from("/tmp/eyros-db/"))
+  ///   .branch_factor(5)
+  ///   .max_depth(8)
+  ///   .max_records(20_000)
+  ///   .build()
+  ///   .await?;
+  /// # Ok(()) }
+  /// ```
+  ///
+  /// Always open a database with the same types. There are no runtime checks yet
+  /// to ensure a database is opened with the same types that it was created with.
+  /// It's fine to change the Setup settings on a previously-created database,
+  /// but those settings will only affect new operations.
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
     let mut meta_store = setup.storage.lock().await.open("meta").await?;
     let meta = match meta_store.len().await? {
@@ -151,12 +293,22 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       trees: Arc::new(Mutex::new(trees)),
     })
   }
+  /// Create a database instance from `storage`, an interface for reading, writing, and removing
+  /// files.
   pub async fn open_from_storage(storage: Box<dyn Storage<S>>) -> Result<Self,Error> {
     Setup::from_storage(storage).build().await
   }
+  /// Write a collection of updates to the database. This does not sync the changes to disk: call
+  /// `sync()` for that. Each update can be a `Row::Insert(point,value)` or a
+  /// `Row::Delete(point,id)` (where the type of `id` is defined in `Value::Id`). For deletes, you
+  /// need not have exactly the same `point` as the original record, only a point that will
+  /// intersect it.
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
     self.batch_with_rebuild_depth(self.fields.rebuild_depth, rows).await
   }
+  /// Perform a batch update with an explicit rebuild depth to override the rebuild depth defined in
+  /// the `Setup`. A greater rebuild depth trades write performance for better query performance,
+  /// which you can also obtain by calling `optimize()`.
   pub async fn batch_with_rebuild_depth(&mut self, rebuild_depth: usize, rows: &[Row<P,V>])
   -> Result<(),Error> {
     if rows.is_empty() { return Ok(()) }
@@ -227,6 +379,9 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     }
     Ok(())
   }
+  /// Improve query performance by rebuilding the first `rebuild_depth` levels of the tree.
+  /// A higher value for `rebuild_depth` will use more memory, as the trees are read into memory
+  /// during rebuilding and not written back out again until `sync()` is called.
   pub async fn optimize(&mut self, rebuild_depth: usize) -> Result<(),Error> {
     let merge_trees = Arc::new(
       self.meta.roots.iter()
@@ -257,12 +412,17 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     self.meta.roots.push(Some(tr));
     Ok(())
   }
+  /// Write the changes made to the database to file storage.
   pub async fn sync(&mut self) -> Result<(),Error> {
     self.trees.lock().await.sync().await?;
     let rbytes = self.meta.to_bytes()?;
     self.meta_store.lock().await.write(0, &rbytes).await?;
     Ok(())
   }
+  /// Query the database for every feature that intersects `bbox`. Results are provided as a
+  /// readable stream of `(point,value)` records.
+  /// Queries hold a lock on the database, so you probably shouldn't leave them open for very long
+  /// if you need to make more writes.
   pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
     let mut queries = vec![];
     for root in self.meta.roots.iter() {

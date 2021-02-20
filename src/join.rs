@@ -15,6 +15,7 @@ impl<T> Join<T> where T: Send+'static {
   pub fn push<F>(&mut self, future: F) -> () where F: Future<Output=Result<T,Error>>+Send+'static {
     self.tasks.push(spawn(future));
   }
+  // todo: configurable amount of parallelism
   pub async fn try_join(&mut self) -> Result<(),Error> {
     let mut itasks = self.tasks.iter_mut();
     loop {
