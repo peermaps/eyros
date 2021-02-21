@@ -19,7 +19,7 @@ test('insert+delete', async function (t) {
     insertBatch.push({
       type: 'insert',
       point,
-      value: Uint8Array.from(randomBytes(Math.floor(Math.random()*10+1)))
+      value: Uint8Array.from(randomBytes(Math.floor(Math.random()*10+5)))
     })
   }
   await db.batch(insertBatch)
