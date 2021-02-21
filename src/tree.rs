@@ -718,7 +718,16 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
         Ok(())
       });
     }
-    join.try_join().await
+    join.try_join().await?;
+    {
+      let xids = ids.lock().await;
+      if !xids.is_empty() {
+        return Err(Box::new(failure::err_msg(format![
+          "ids not found during remove(): {:?}", &xids
+        ]).compat()));
+      }
+    }
+    Ok(())
   }
 }
 
