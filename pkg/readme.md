@@ -85,13 +85,15 @@ const eyros8d = require('eyros/8d')
 
 The precision for all databases is presently f32.
 
-## `var db = await eyros${N}d(opts)`
+## `var db = await eyros{N}d(opts)`
 
 Open a database for the given dimension from:
 
 * `opts.wasmSource` - arraybuffer or typed array of wasm data
 * `opts.wasmModule` - already-created WebAssembly.Module instance
 * `opts.storage(name)` - function that returns a random-access interface
+* `opts.getId(value)` - return a Uint8Array `id` for a given `value`.
+  defaults to returning the value
 
 One of `opts.wasmSource` or `opts.wasmModule` must be provided.
 
@@ -101,6 +103,31 @@ in bytes that has been allocated for the given file.
 
 Files to supply to `opts.wasmSource` can be obtained from the root of this
 package under the convention `${N}d.wasm` for a dimension `N`.
+
+## `await db.batch(rows)`
+
+Insert `rows`, an array of operations to perform on the database.
+
+Each `row` must have a `row.type` set to `'insert'` or `'delete'` with a `row.point`
+and a `row.value` Uint8Array (for inserts) or a `row.id` (for deletes).
+
+`row.point` is an n-dimensional array of scalar floats or 2-item arrays of `[min,max]` floats for
+each dimension.
+
+## `await db.sync()`
+
+Write database changes to the underlying data storage.
+
+## `var q = await db.query(bbox)`
+
+Return an async iterator `q` containing all records from the database that intersect the `bbox`.
+
+Obtain results by calling `row = await q.next()` until it yields a falsy result.
+Each `row` is a 2-item array of the form `[point,value]` and each `point` is an n-dimensional array
+of scalar floats or 2-item arrays of `[min,max]` floats for each dimension.
+
+`bbox` is an array of the form `[minX,minY,...,maxX,maxY,...]`.
+For 2 dimensions, the `bbox` would be `[west,south,east,north]` for `lon,lat` coordinates.
 
 # install
 
