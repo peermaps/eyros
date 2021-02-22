@@ -1,7 +1,9 @@
-use crate::{DB,Row,Coord};
+use crate::{DB,Row,Coord,Value};
 mod storage;
 pub use storage::{JsStorage,JsRandomAccess};
 mod stream;
+use desert::{ToBytes,CountBytes,FromBytes};
+use core::hash::Hash;
 
 use wasm_bindgen::prelude::{wasm_bindgen,JsValue};
 use wasm_bindgen_futures::future_to_promise;
@@ -9,7 +11,61 @@ use js_sys::{Error,Function,Array,Uint8Array,Promise,Reflect::get};
 use async_std::sync::{Arc,Mutex};
 
 type S = JsRandomAccess;
-type V = Vec<u8>;
+type FE = failure::Error;
+
+struct GetId {
+  pub f: Option<Function>
+}
+unsafe impl Send for GetId {}
+unsafe impl Sync for GetId {}
+static mut GETID: GetId = GetId { f: None };
+
+#[wasm_bindgen]
+pub fn set_getid(getid_fn: Function) -> () {
+  if getid_fn.is_function() {
+    unsafe { GETID.f = Some(getid_fn) }
+  } else {
+    unsafe { GETID.f = None }
+  }
+}
+
+#[derive(Debug,Clone,Hash)]
+pub struct V {
+  pub data: Vec<u8>
+}
+
+impl Value for V {
+  type Id = Vec<u8>;
+  fn get_id(&self) -> Self::Id {
+    if let Some(f) = unsafe { &GETID.f } {
+      let id: Uint8Array = f.call1(
+        &JsValue::NULL,
+        unsafe { &Uint8Array::view(&self.data) }
+      ).unwrap().into();
+      return id.to_vec();
+    }
+    self.data.clone()
+  }
+}
+impl ToBytes for V {
+  fn to_bytes(&self) -> Result<Vec<u8>,FE> {
+    self.data.to_bytes()
+  }
+}
+impl CountBytes for V {
+  fn count_from_bytes(src: &[u8]) -> Result<usize,FE> {
+    <Vec<u8>>::count_from_bytes(src)
+  }
+  fn count_bytes(&self) -> usize {
+    self.data.count_bytes()
+  }
+}
+impl FromBytes for V {
+  fn from_bytes(src: &[u8]) -> Result<(usize,Self),FE> {
+    let (size,data) = <Vec<u8>>::from_bytes(src)?;
+    Ok((size, Self { data }))
+  }
+}
 
 macro_rules! def_mix {
   ($C:ident, $Stream:ident, $Tree:ident, $open:ident, $n:literal, ($($T:ty),+), ($($I:tt),+)) => {
@@ -47,8 +103,8 @@ macro_rules! def_mix {
               let value: Uint8Array = get(&row,&"value".into())
                 .map(|x| x.into())
                 .map_err(errf)?;
-              let mut buf: V = vec![0;value.length() as usize];
-              value.copy_to(&mut buf);
+              let mut data: Vec<u8> = vec![0;value.length() as usize];
+              value.copy_to(&mut data);
               Row::Insert(($(
                 {
                   let p = point.get($I);
@@ -63,7 +119,7 @@ macro_rules! def_mix {
                     false => Coord::Scalar(p.as_f64().unwrap() as $T)
                   }
                 }
-              ),+), buf)
+              ),+), V { data })
             },
             "delete" => {
               let point: Array = (get(&row,&"point".into()))
@@ -72,7 +128,7 @@ macro_rules! def_mix {
               let id: Uint8Array = get(&row,&"id".into())
                 .map(|x| x.into())
                 .map_err(errf)?;
-              let mut buf: V = vec![0;id.length() as usize];
+              let mut buf: Vec<u8> = vec![0;id.length() as usize];
               id.copy_to(&mut buf);
               Row::Delete(($(
                 {
@@ -130,7 +186,8 @@ macro_rules! def_mix {
       type P = ($(Coord<$T>),+);
       type T = $Tree<$($T),+,V>;
       let db: DB<S,T,P,V> = DB::open_from_storage(Box::new(JsStorage {
-        storage_fn, remove_fn
+        storage_fn,
+        remove_fn,
       })).await.map_err(|e| Error::new(&format!["{:?}",e]))?;
       Ok($C { db: Arc::new(Mutex::new(db)) })
     }

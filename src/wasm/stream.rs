@@ -1,10 +1,8 @@
-use crate::{Coord,Error};
+use crate::{Coord,Error,wasm::V};
 use async_std::{prelude::*,stream::Stream,sync::{Arc,Mutex}};
 use wasm_bindgen::prelude::{wasm_bindgen,JsValue};
 use wasm_bindgen_futures::future_to_promise;
 use js_sys::{Error as JsError,Array,Uint8Array,Promise};
-
-type V = Vec<u8>;
 
 macro_rules! def_stream {
   ($C:ident, ($($T:tt),+), $n:literal, ($($i:tt),+)) => {
@@ -46,7 +44,7 @@ macro_rules! def_stream {
                 p.into()
               });
               r.set(1, { // value
-                let u: Uint8Array = value.as_slice().into();
+                let u: Uint8Array = value.data.as_slice().into();
                 u.into()
               });
               Ok(r.into())
