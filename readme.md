@@ -66,7 +66,7 @@ async fn main() -> Result<(),E> {
 
 The output from this program is of the form `(coords, value)`:
 
-```
+``` sh
 $ cargo run --example polygons -q
 ((Interval(-100.94689, -100.94689), Interval(20.108843, 20.109331), Scalar(16522)), 4580)
 ((Interval(-111.62768, -110.40406), Interval(-7.519809, 86.154755), Scalar(12384)), 2603)
