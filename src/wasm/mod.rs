@@ -1,9 +1,11 @@
-use crate::{DB,Row,Coord,Value};
+use crate::{DB,Row,Coord,Value,Error as E};
 mod storage;
 pub use storage::{JsStorage,JsRandomAccess};
 mod stream;
 use desert::{ToBytes,CountBytes,FromBytes};
 use core::hash::Hash;
+mod error;
+mod errback;
 
 use wasm_bindgen::prelude::{wasm_bindgen,JsValue};
 use wasm_bindgen_futures::future_to_promise;
@@ -11,7 +13,6 @@ use js_sys::{Error,Function,Array,Uint8Array,Promise,Reflect::get};
 use async_std::sync::{Arc,Mutex};
 
 type S = JsRandomAccess;
-type FE = failure::Error;
 
 struct GetId {
   pub f: Option<Function>
@@ -48,12 +49,12 @@ impl Value for V {
   }
 }
 impl ToBytes for V {
-  fn to_bytes(&self) -> Result<Vec<u8>,FE> {
+  fn to_bytes(&self) -> Result<Vec<u8>,E> {
     self.data.to_bytes()
   }
 }
 impl CountBytes for V {
-  fn count_from_bytes(src: &[u8]) -> Result<usize,FE> {
+  fn count_from_bytes(src: &[u8]) -> Result<usize,E> {
     <Vec<u8>>::count_from_bytes(src)
   }
   fn count_bytes(&self) -> usize {
@@ -61,7 +62,7 @@ impl CountBytes for V {
   }
 }
 impl FromBytes for V {
-  fn from_bytes(src: &[u8]) -> Result<(usize,Self),FE> {
+  fn from_bytes(src: &[u8]) -> Result<(usize,Self),E> {
     let (size,data) = <Vec<u8>>::from_bytes(src)?;
     Ok((size, Self { data }))
   }

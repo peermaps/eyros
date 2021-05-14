@@ -1,6 +1,5 @@
-use desert::{ToBytes,CountBytes};
-use crate::{Coord,Scalar,Value,tree::TreeRef,bytes::varint};
-use failure::Error;
+use desert::{ToBytes,CountBytes,varint};
+use crate::{Coord,Scalar,Value,tree::TreeRef,Error};
 use std::collections::HashMap;
 
 macro_rules! impl_to_bytes {

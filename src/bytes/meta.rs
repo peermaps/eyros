@@ -1,6 +1,5 @@
-use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Point,Meta,bytes::varint,TreeRef};
-use failure::{Error,bail};
+use desert::{ToBytes,FromBytes,CountBytes,varint};
+use crate::{Point,Meta,TreeRef,Error,EyrosErrorKind};
 
 impl<P> ToBytes for Meta<P> where P: Point, Self: CountBytes {
   fn to_bytes(&self) -> Result<Vec<u8>,Error> {
@@ -37,7 +36,7 @@ impl<P> FromBytes for Meta<P> where P: Point {
     offset += n;
     let len = len64 as usize;
     if src.len() < offset + (len+7)/8 {
-      bail!["not enough bytes to construct roots bitfield for Meta"]
+      return EyrosErrorKind::MetaBitfieldInsufficientBytes {}.raise();
     }
     let bitfield = &src[offset..offset+(len+7)/8];
     offset += (len+7)/8;

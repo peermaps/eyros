@@ -1,6 +1,5 @@
-use desert::FromBytes;
-use crate::{Scalar,Coord,Value,bytes::varint,tree::TreeRef};
-use failure::Error;
+use desert::{FromBytes,varint};
+use crate::{Scalar,Coord,Value,tree::TreeRef,Error};
 use async_std::sync::Arc;
 
 macro_rules! impl_from_bytes {

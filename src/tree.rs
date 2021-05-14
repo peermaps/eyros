@@ -1,5 +1,5 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Scalar,Point,Value,Coord,Error,Overlap,RA,Root,
+use crate::{Scalar,Point,Value,Coord,Error,EyrosErrorKind,Overlap,RA,Root,
   query::QStream, tree_file::TreeFile, SetupFields};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
@@ -722,9 +722,9 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
     {
       let xids = ids.lock().await;
       if !xids.is_empty() {
-        return Err(Box::new(failure::err_msg(format![
-          "ids not found during remove(): {:?}", &xids
-        ]).compat()));
+        return EyrosErrorKind::RemoveIdsMissing {
+          ids: xids.keys().map(|id| format!["{:?}",id]).collect()
+        }.raise();
       }
     }
     Ok(())

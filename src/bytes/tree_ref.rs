@@ -1,6 +1,5 @@
 use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Point,tree::{TreeRef,TreeId}};
-use failure::Error;
+use crate::{Point,tree::{TreeRef,TreeId},Error};
 
 impl<P> ToBytes for TreeRef<P> where P: Point+ToBytes, Self: CountBytes {
   fn to_bytes(&self) -> Result<Vec<u8>,Error> {

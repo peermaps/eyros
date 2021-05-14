@@ -1,6 +1,5 @@
-use desert::CountBytes;
-use crate::{Coord,Scalar,Value,bytes::varint};
-use failure::Error;
+use desert::{CountBytes,varint};
+use crate::{Coord,Scalar,Value,Error};
 
 macro_rules! impl_count_bytes {
   ($Tree:ident,$Branch:ident,$Node:ident,$count_point_bytes:ident,($($i:tt),+),($($T:tt),+)) => {

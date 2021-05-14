@@ -1,5 +1,8 @@
-#![feature(async_closure,iter_partition_in_place,drain_filter,extended_key_value_attributes)]
+#![feature(async_closure,iter_partition_in_place,drain_filter,
+  extended_key_value_attributes, backtrace)]
 #![doc=include_str!("../readme.md")]
+mod error;
+pub use error::{EyrosError,EyrosErrorKind,Error};
 mod store;
 pub use store::Storage;
 #[cfg(not(feature="wasm"))] #[doc(hidden)] pub use store::FileStore;
@@ -23,8 +26,6 @@ use random_access_storage::RandomAccess;
 use desert::{ToBytes,FromBytes,CountBytes};
 use core::ops::{Add,Div};
 use std::fmt::Debug;
-
-pub type Error = Box<dyn std::error::Error+Sync+Send>;
 
 /// All coordinate values must implement this collection of traits.
 pub trait Scalar: Clone+PartialOrd+From<u8>+Debug
@@ -86,13 +87,13 @@ macro_rules! impl_point {
         Ok((
           ($(match &self.$i {
             Coord::Scalar(_) => {
-              return Err(Box::new(failure::err_msg("scalar found in bounds").compat()));
+              return EyrosErrorKind::ScalarInBounds {}.raise();
             },
             Coord::Interval(min,_) => min.clone(),
           }),+),
           ($(match &self.$i {
             Coord::Scalar(_) => {
-              return Err(Box::new(failure::err_msg("scalar found in bounds").compat()));
+              return EyrosErrorKind::ScalarInBounds {}.raise();
             },
             Coord::Interval(_,max) => max.clone(),
           }),+),
@@ -105,10 +106,11 @@ macro_rules! impl_point {
         $(match &(self.$i) {
           Coord::Interval(min,max) => {
             if !(min <= max) {
-              return Err(Box::new(failure::err_msg(format![
-                "!(min <= max) dimension {} for Coord::Interval({:?},{:?})",
-                $i, min, max
-              ]).compat()));
+              return EyrosErrorKind::IntervalSides {
+                dimension: $i,
+                min: format!["{:?}", min],
+                max: format!["{:?}", max],
+              }.raise();
             }
           },
           _ => {}
