@@ -104,7 +104,7 @@ in bytes that has been allocated for the given file.
 Files to supply to `opts.wasmSource` can be obtained from the root of this
 package under the convention `${N}d.wasm` for a dimension `N`.
 
-## `await db.batch(rows)`
+## `await db.batch(rows, opts={})`
 
 Insert `rows`, an array of operations to perform on the database.
 
@@ -113,6 +113,11 @@ and a `row.value` Uint8Array (for inserts) or a `row.id` (for deletes).
 
 `row.point` is an n-dimensional array of scalar floats or 2-item arrays of `[min,max]` floats for
 each dimension.
+
+Optionally provide:
+
+* `opts.rebuildDepth` - depth to calculate an optimizing rebuild up to (default: 2)
+* `opts.errorIfMissing` - whether to raise an error if deleted records are not found before removal
 
 ## `await db.sync()`
 

@@ -601,6 +601,7 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
   pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
   pub next_tree: &'a mut TreeId,
   pub rebuild_depth: usize,
+  pub error_if_missing: bool,
 }
 
 // return value: (tree, remove_trees, create_trees)
@@ -719,7 +720,7 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
       });
     }
     join.try_join().await?;
-    {
+    if self.error_if_missing {
       let xids = ids.lock().await;
       if !xids.is_empty() {
         return EyrosErrorKind::RemoveIdsMissing {

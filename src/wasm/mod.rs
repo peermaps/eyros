@@ -1,4 +1,4 @@
-use crate::{DB,Row,Coord,Value,Error as E};
+use crate::{DB,Row,Coord,Value,BatchOptions,Error as E};
 mod storage;
 pub use storage::{JsStorage,JsRandomAccess};
 mod stream;
@@ -78,12 +78,23 @@ macro_rules! def_mix {
     }
     #[wasm_bindgen]
     impl $C {
-      pub fn batch(&self, rows: JsValue) -> Promise {
+      pub fn batch(&self, rows: JsValue, opts: JsValue) -> Promise {
+        let errf = |e| Error::new(&format!["{:?}",e]);
         let db_ref = Arc::clone(&self.db);
         future_to_promise(async move {
+          let mut r_opts = BatchOptions::new();
+          if opts.is_object() {
+            if let Some(depth) = get(&opts,&"rebuildDepth".into()).map_err(errf)?.as_f64() {
+              r_opts = r_opts.rebuild_depth(depth as usize);
+            }
+            if let Some(x) = get(&opts,&"errorIfMissing".into()).map_err(errf)?.as_bool() {
+              r_opts = r_opts.error_if_missing(x);
+            }
+          }
           let mut db = db_ref.lock().await;
           let batch = Self::batch_rows(rows)?;
-          db.batch(&batch).await.map_err(|e| Error::new(&format!["{:?}",e]))?;
+          db.batch_with_options(&batch, &r_opts).await
+            .map_err(|e| Error::new(&format!["{:?}",e]))?;
           Ok(JsValue::NULL)
         })
       }

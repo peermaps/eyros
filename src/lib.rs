@@ -20,6 +20,8 @@ mod value;
 pub use value::Value;
 #[cfg(feature="wasm")]
 mod wasm;
+mod batch;
+pub use batch::{BatchFields,BatchOptions};
 
 use async_std::{sync::{Arc,Mutex}};
 use random_access_storage::RandomAccess;
@@ -221,19 +223,26 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub async fn open_from_storage(storage: Box<dyn Storage<S>>) -> Result<Self,Error> {
     Setup::from_storage(storage).build().await
   }
-  /// Write a collection of updates to the database. This does not sync the changes to disk: call
-  /// `sync()` for that. Each update can be a `Row::Insert(point,value)` or a
-  /// `Row::Delete(point,id)` (where the type of `id` is defined in `Value::Id`). For deletes, you
-  /// need not have exactly the same `point` as the original record, only a point that will
+  /// Write a collection of updates to the database with default options.
+  /// This does not sync the changes to disk: call `sync()` for that.
+  /// Each update can be a `Row::Insert(point,value)` or a `Row::Delete(point,id)`
+  /// (where the type of `id` is defined in `Value::Id`). For deletes, you need not
+  /// have exactly the same `point` as the original record, only a point that will
   /// intersect it.
   pub async fn batch(&mut self, rows: &[Row<P,V>]) -> Result<(),Error> {
-    self.batch_with_rebuild_depth(self.fields.rebuild_depth, rows).await
+    let opts = BatchOptions::new().rebuild_depth(self.fields.rebuild_depth);
+    self.batch_with_options(rows, &opts).await
   }
   /// Perform a batch update with an explicit rebuild depth to override the rebuild depth defined in
   /// the `Setup`. A greater rebuild depth trades write performance for better query performance,
   /// which you can also obtain by calling `optimize()`.
   pub async fn batch_with_rebuild_depth(&mut self, rebuild_depth: usize, rows: &[Row<P,V>])
   -> Result<(),Error> {
+    let opts = BatchOptions::new().rebuild_depth(rebuild_depth);
+    self.batch_with_options(rows, &opts).await
+  }
+  /// Perform a batch update with explicit batch options.
+  pub async fn batch_with_options(&mut self, rows: &[Row<P,V>], opts: &BatchOptions) -> Result<(),Error> {
     if rows.is_empty() { return Ok(()) }
     for row in rows.iter() {
       match row {
@@ -272,7 +281,8 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       roots: self.meta.roots.clone(),
       trees: Arc::clone(&self.trees),
       next_tree: &mut self.meta.next_tree,
-      rebuild_depth,
+      rebuild_depth: opts.fields.rebuild_depth,
+      error_if_missing: opts.fields.error_if_missing,
     };
     if inserts.is_empty() {
       m.remove().await?;
@@ -321,6 +331,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       trees: Arc::clone(&self.trees),
       next_tree: &mut self.meta.next_tree,
       rebuild_depth,
+      error_if_missing: true,
     };
     let (tr,t,rm_trees,create_trees) = m.merge().await?;
     let trees = &mut self.trees.lock().await;
