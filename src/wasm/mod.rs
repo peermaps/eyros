@@ -1,4 +1,4 @@
-use crate::{DB,Row,Coord,Value,BatchOptions,Error as E};
+use crate::{DB,Setup,Row,Coord,Value,BatchOptions,Error as E};
 mod storage;
 pub use storage::{JsStorage,JsRandomAccess};
 mod stream;
@@ -7,7 +7,7 @@ use core::hash::Hash;
 mod error;
 mod errback;
 
-use wasm_bindgen::prelude::{wasm_bindgen,JsValue};
+use wasm_bindgen::{prelude::{wasm_bindgen,JsValue},JsCast};
 use wasm_bindgen_futures::future_to_promise;
 use js_sys::{Error,Function,Array,Uint8Array,Promise,Reflect::get};
 use async_std::sync::{Arc,Mutex};
@@ -194,13 +194,24 @@ macro_rules! def_mix {
       }
     }
     #[wasm_bindgen]
-    pub async fn $open(storage_fn: Function, remove_fn: Function) -> Result<$C,Error> {
-      type P = ($(Coord<$T>),+);
-      type T = $Tree<$($T),+,V>;
-      let db: DB<S,T,P,V> = DB::open_from_storage(Box::new(JsStorage {
+    pub async fn $open(opts: JsValue) -> Result<$C,Error> {
+      let errf = |e| Error::new(&format!["{:?}",e]);
+      let storage_fn = match get(&opts,&"storage".into()).map_err(errf)?.dyn_into() {
+        Ok(storage) => storage,
+        Err(_) => { return Err(Error::new("must provide opts.storage function")) },
+      };
+      let remove_fn = match get(&opts,&"remove".into()).map_err(errf)?.dyn_into() {
+        Ok(remove) => remove,
+        Err(_) => { return Err(Error::new("must provide opts.remove function")) },
+      };
+      let setup = Setup::from_storage(Box::new(JsStorage {
         storage_fn,
         remove_fn,
-      })).await.map_err(|e| Error::new(&format!["{:?}",e]))?;
+      }));
+      type P = ($(Coord<$T>),+);
+      type T = $Tree<$($T),+,V>;
+      let db: DB<S,T,P,V> = setup.build().await
+        .map_err(|e| Error::new(&format!["{:?}",e]))?;
       Ok($C { db: Arc::new(Mutex::new(db)) })
     }
   }

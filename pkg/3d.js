@@ -8,8 +8,8 @@ module.exports = function (opts) {
   if (typeof opts.getId === 'function') {
     api.set_getid(opts.getId)
   }
-  return api.open_f32_f32_f32(
-    wrapStorage(opts.storage),
-    opts.remove || function () {}
-  )
+  return api.open_f32_f32_f32(Object.assign({}, opts, {
+    storage: wrapStorage(opts.storage),
+    remove: opts.remove || function () {}
+  }))
 }
