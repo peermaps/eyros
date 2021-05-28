@@ -147,6 +147,10 @@ pub struct Meta<P> where P: Point {
   pub next_tree: TreeId,
 }
 
+pub trait Debugger: Debug+Send+Sync {
+  fn debug(&mut self, _msg: &str) -> ();
+}
+
 /// Top-level database API.
 pub struct DB<S,T,P,V>
 where S: RA, P: Point, V: Value, T: Tree<P,V> {
@@ -155,6 +159,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub meta_store: Arc<Mutex<S>>,
   pub meta: Meta<P>,
   pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
+  pub debug: Option<Arc<Mutex<Box<dyn Debugger>>>>,
 }
 
 impl<S,T,P,V> DB<S,T,P,V>
@@ -209,6 +214,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       n => Meta::from_bytes(&meta_store.read(0,n).await?)?.1,
     };
     let fields = Arc::new(setup.fields);
+    let debug = fields.debug.as_ref().map(|d| Arc::clone(d));
     let trees = TreeFile::new(Arc::clone(&fields), Arc::clone(&setup.storage));
     Ok(Self {
       storage: Arc::clone(&setup.storage),
@@ -216,6 +222,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       meta_store: Arc::new(Mutex::new(meta_store)),
       meta,
       trees: Arc::new(Mutex::new(trees)),
+      debug,
     })
   }
   /// Create a database instance from `storage`, an interface for reading, writing, and removing

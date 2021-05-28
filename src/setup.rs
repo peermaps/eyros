@@ -1,4 +1,4 @@
-use crate::{DB,Tree,Storage,Point,Value,Error,RA};
+use crate::{DB,Tree,Storage,Point,Value,Error,RA,Debugger};
 use async_std::sync::{Arc,Mutex};
 
 /// Struct for reading database properties.
@@ -10,6 +10,7 @@ pub struct SetupFields {
   pub inline: usize,
   pub tree_cache_size: usize,
   pub rebuild_depth: usize,
+  pub debug: Option<Arc<Mutex<Box<dyn Debugger>>>>,
 }
 
 impl SetupFields {
@@ -21,6 +22,7 @@ impl SetupFields {
       inline: 500,
       tree_cache_size: 1000,
       rebuild_depth: 2,
+      debug: None,
     }
   }
 }
@@ -88,6 +90,10 @@ impl<S> Setup<S> where S: RA {
   }
   pub fn rebuild_depth(mut self, n: usize) -> Self {
     self.fields.rebuild_depth = n;
+    self
+  }
+  pub fn debug(mut self, f: Box<dyn Debugger>) -> Self {
+    self.fields.debug = Some(Arc::new(Mutex::new(f)));
     self
   }
   pub async fn build<T,P,V> (self) -> Result<DB<S,T,P,V>,Error>
