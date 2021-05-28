@@ -204,10 +204,34 @@ macro_rules! def_mix {
         Ok(remove) => remove,
         Err(_) => { return Err(Error::new("must provide opts.remove function")) },
       };
-      let setup = Setup::from_storage(Box::new(JsStorage {
+      let mut setup = Setup::from_storage(Box::new(JsStorage {
         storage_fn,
         remove_fn,
       }));
+      match get(&opts,&"branchFactor".into()).map_err(errf)?.as_f64() {
+        Some(x) => { setup = setup.branch_factor(x as usize); },
+        _ => {},
+      };
+      match get(&opts,&"maxDepth".into()).map_err(errf)?.as_f64() {
+        Some(x) => { setup = setup.max_depth(x as usize); },
+        _ => {},
+      };
+      match get(&opts,&"maxRecords".into()).map_err(errf)?.as_f64() {
+        Some(x) => { setup = setup.max_records(x as usize); },
+        _ => {},
+      };
+      match get(&opts,&"inline".into()).map_err(errf)?.as_f64() {
+        Some(x) => { setup = setup.inline(x as usize); },
+        _ => {},
+      };
+      match get(&opts,&"treeCacheSize".into()).map_err(errf)?.as_f64() {
+        Some(x) => { setup = setup.tree_cache_size(x as usize); },
+        _ => {},
+      };
+      match get(&opts,&"rebuildDepth".into()).map_err(errf)?.as_f64() {
+        Some(x) => { setup = setup.rebuild_depth(x as usize); },
+        _ => {},
+      };
       type P = ($(Coord<$T>),+);
       type T = $Tree<$($T),+,V>;
       let db: DB<S,T,P,V> = setup.build().await

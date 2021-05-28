@@ -94,6 +94,13 @@ Open a database for the given dimension from:
 * `opts.storage(name)` - function that returns a random-access interface
 * `opts.getId(value)` - return a Uint8Array `id` for a given `value`.
   defaults to returning the value
+* `opts.branchFactor` - number of non-intersecting branches per node. default: `6`
+* `opts.maxDepth` - maximum tree depth before splitting into a separate tree file. default: `8`
+* `opts.maxRecords` - maximum number of records to store per tree file. default: `20_000`
+* `opts.inline` - threshold under which records will be written out in a list rather than branches.
+  default: `500`
+* `opts.treeCacheSize` - maximum number of trees to cache in the lru. default: `1000`
+* `opts.rebuildDepth` - number of levels to rebuild each batch in an optimization pass: default `2`
 
 One of `opts.wasmSource` or `opts.wasmModule` must be provided.
 
