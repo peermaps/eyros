@@ -101,6 +101,7 @@ Open a database for the given dimension from:
   default: `500`
 * `opts.treeCacheSize` - maximum number of trees to cache in the lru. default: `1000`
 * `opts.rebuildDepth` - number of levels to rebuild each batch in an optimization pass: default `2`
+* `opts.debug` - optionally supply a function to receive internal debug messages
 
 One of `opts.wasmSource` or `opts.wasmModule` must be provided.
 
