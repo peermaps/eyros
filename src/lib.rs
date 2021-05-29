@@ -22,6 +22,8 @@ pub use value::Value;
 mod wasm;
 mod batch;
 pub use batch::{BatchFields,BatchOptions};
+mod debugger;
+pub use debugger::Debugger;
 
 use async_std::{sync::{Arc,Mutex}};
 use random_access_storage::RandomAccess;
@@ -147,10 +149,6 @@ pub struct Meta<P> where P: Point {
   pub next_tree: TreeId,
 }
 
-pub trait Debugger: Debug+Send+Sync {
-  fn debug(&mut self, _msg: &str) -> ();
-}
-
 /// Top-level database API.
 pub struct DB<S,T,P,V>
 where S: RA, P: Point, V: Value, T: Tree<P,V> {
@@ -159,7 +157,6 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub meta_store: Arc<Mutex<S>>,
   pub meta: Meta<P>,
   pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
-  pub debug: Option<Arc<Mutex<Box<dyn Debugger>>>>,
 }
 
 impl<S,T,P,V> DB<S,T,P,V>
@@ -208,13 +205,15 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   /// It's fine to change the Setup settings on a previously-created database,
   /// but those settings will only affect new operations.
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
+    let fields = Arc::new(setup.fields);
+    if let Some(d) = &fields.debug {
+      d.send("opening db".into()).await?;
+    }
     let mut meta_store = setup.storage.lock().await.open("meta").await?;
     let meta = match meta_store.len().await? {
       0 => Meta { roots: vec![], next_tree: 0 },
       n => Meta::from_bytes(&meta_store.read(0,n).await?)?.1,
     };
-    let fields = Arc::new(setup.fields);
-    let debug = fields.debug.as_ref().map(|d| Arc::clone(d));
     let trees = TreeFile::new(Arc::clone(&fields), Arc::clone(&setup.storage));
     Ok(Self {
       storage: Arc::clone(&setup.storage),
@@ -222,7 +221,6 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       meta_store: Arc::new(Mutex::new(meta_store)),
       meta,
       trees: Arc::new(Mutex::new(trees)),
-      debug,
     })
   }
   /// Create a database instance from `storage`, an interface for reading, writing, and removing

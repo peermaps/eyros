@@ -6,6 +6,8 @@ use desert::{ToBytes,CountBytes,FromBytes};
 use core::hash::Hash;
 mod error;
 mod errback;
+mod debug;
+use debug::JsDebug;
 
 use wasm_bindgen::{prelude::{wasm_bindgen,JsValue},JsCast};
 use wasm_bindgen_futures::future_to_promise;
@@ -231,6 +233,10 @@ macro_rules! def_mix {
       match get(&opts,&"rebuildDepth".into()).map_err(errf)?.as_f64() {
         Some(x) => { setup = setup.rebuild_depth(x as usize); },
         _ => {},
+      };
+      match get(&opts,&"debug".into()).map_err(errf)?.dyn_into::<Function>() {
+        Ok(f) => { setup = setup.debug(JsDebug::new(f)); },
+        Err(_) => {},
       };
       type P = ($(Coord<$T>),+);
       type T = $Tree<$($T),+,V>;

@@ -1,8 +1,11 @@
 use crate::{DB,Tree,Storage,Point,Value,Error,RA,Debugger};
-use async_std::sync::{Arc,Mutex};
+use async_std::{sync::{Arc,Mutex},channel::{unbounded,Sender}};
+
+#[cfg(not(feature="wasm"))] use async_std::task::spawn;
+#[cfg(feature="wasm")] use async_std::task::{spawn_local as spawn};
 
 /// Struct for reading database properties.
-#[derive(Debug,Clone)]
+#[derive(Clone)]
 pub struct SetupFields {
   pub branch_factor: usize,
   pub max_depth: usize,
@@ -10,7 +13,7 @@ pub struct SetupFields {
   pub inline: usize,
   pub tree_cache_size: usize,
   pub rebuild_depth: usize,
-  pub debug: Option<Arc<Mutex<Box<dyn Debugger>>>>,
+  pub debug: Option<Sender<String>>,
 }
 
 impl SetupFields {
@@ -92,8 +95,18 @@ impl<S> Setup<S> where S: RA {
     self.fields.rebuild_depth = n;
     self
   }
-  pub fn debug(mut self, f: Box<dyn Debugger>) -> Self {
-    self.fields.debug = Some(Arc::new(Mutex::new(f)));
+  pub fn debug(mut self, d: impl Debugger+Send+Sync+'static) -> Self {
+    let debug = Arc::new(Mutex::new(d));
+    let (sender,receiver) = unbounded();
+    spawn(async move {
+      while let Ok(r) = receiver.recv().await {
+        let s: String = r;
+        debug.lock().await.send(&s);
+      }
+    });
+    // todo read sender into f
+    // Arc::new(Mutex::new(f)));
+    self.fields.debug = Some(sender);
     self
   }
   pub async fn build<T,P,V> (self) -> Result<DB<S,T,P,V>,Error>
