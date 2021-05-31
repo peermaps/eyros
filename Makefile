@@ -19,14 +19,14 @@ wasm-dev:
 	fi
 
 wasm-n:
-	wasm-pack build -t nodejs --no-typescript \
+	wasm-pack build -t nodejs --no-typescript -m no-install \
 		--out-dir target/pkg \
 		-- --no-default-features --features wasm --features $(n)
 	cp target/pkg/eyros_bg.wasm pkg/$(n).wasm
 	node pkg/bin/fix.js target/pkg/eyros.js $(n).wasm > pkg/lib/$(n)-api.js
 
 wasm-n-dev:
-	wasm-pack build --dev -t nodejs --no-typescript \
+	wasm-pack build --dev -t nodejs --no-typescript -m no-install \
 		--out-dir target/pkg \
 		-- --no-default-features --features wasm --features $(n)
 	cp target/pkg/eyros_bg.wasm pkg/$(n).wasm
