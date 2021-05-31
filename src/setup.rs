@@ -16,6 +16,23 @@ pub struct SetupFields {
   pub debug: Option<Sender<String>>,
 }
 
+impl std::fmt::Debug for SetupFields {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("SetupFields")
+      .field("branch_factor", &self.branch_factor)
+      .field("max_depth", &self.max_depth)
+      .field("max_records", &self.max_records)
+      .field("inline", &self.inline)
+      .field("tree_cache_size", &self.tree_cache_size)
+      .field("rebuild_depth", &self.rebuild_depth)
+      .field("debug", &format_args!["{}", match &self.debug {
+        Some(_) => "[enabled]",
+        None => "[not enabled]",
+      }])
+      .finish()
+  }
+}
+
 impl SetupFields {
   pub fn default() -> Self {
     Self {
@@ -27,6 +44,12 @@ impl SetupFields {
       rebuild_depth: 2,
       debug: None,
     }
+  }
+  pub async fn log(&self, msg: &str) -> Result<(),Error> {
+    if let Some(d) = &self.debug {
+      d.send(msg.into()).await?;
+    }
+    Ok(())
   }
 }
 

@@ -382,14 +382,16 @@ macro_rules! impl_tree {
         (rows,refs)
       }
       fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,($(Coord<$T>),+),V>>>,
-      bbox: &(($($T),+),($($T),+))) -> Arc<Mutex<QStream<($(Coord<$T>),+),V>>>
-      where S: RA {
+        bbox: &(($($T),+),($($T),+)), fields: Arc<SetupFields>,
+        root_index: usize, root_id: TreeId,
+      ) -> Arc<Mutex<QStream<($(Coord<$T>),+),V>>> where S: RA {
         let istate = (
           bbox.clone(),
           vec![], // queue
           vec![(0usize,Arc::clone(&self.root))], // cursors
           vec![], // refs
           Arc::clone(&trees),
+          Arc::clone(&fields)
         );
         Arc::new(Mutex::new(Box::new(unfold(istate, async move |mut state| {
           let bbox = &state.0;
@@ -397,6 +399,7 @@ macro_rules! impl_tree {
           let cursors = &mut state.2;
           let refs = &mut state.3;
           let trees = &mut state.4;
+          let fields = &mut state.5;
           loop {
             if let Some(q) = queue.pop() {
               return Some((Ok(q),state));
@@ -408,6 +411,9 @@ macro_rules! impl_tree {
               };
               continue;
             } else if cursors.is_empty() {
+              if let Err(_) = fields.log(&format![
+                "query end root_index={} root_id={}", root_index, root_id
+              ]).await {}
               return None;
             }
             let (level,c) = cursors.pop().unwrap();
@@ -584,9 +590,9 @@ where P: Point, V: Value {
   fn build<'a>(fields: Arc<SetupFields>, rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
     -> (TreeRef<P>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
-  fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>,
-    bbox: &P::Bounds) -> Arc<Mutex<QStream<P,V>>>
-    where S: RA;
+  fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>, bbox: &P::Bounds,
+    fields: Arc<SetupFields>, root_index: usize, root_id: TreeId)
+    -> Arc<Mutex<QStream<P,V>>> where S: RA;
   async fn remove<S>(&mut self, ids: Arc<Mutex<HashMap<V::Id,P>>>)
     -> (Option<(Vec<(P,V)>,Vec<TreeRef<P>>)>,Vec<TreeId>) where S: RA;
 }
@@ -713,7 +719,7 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
                 t
               },
             };
-            trees.lock().await.put(&r, Arc::new(Mutex::new(t))).await;
+            trees.lock().await.put(&r, Arc::new(Mutex::new(t))).await?;
           }
         }
         Ok(())

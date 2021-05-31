@@ -10,7 +10,7 @@ type E = Box<dyn std::error::Error+Sync+Send>;
 #[async_std::main]
 async fn main() -> Result<(),E> {
   let mut db: DB<_,T,P,V> = Setup::from_path(&std::path::PathBuf::from("/tmp/eyros.db"))
-    .debug(|msg: &str| println!["{}", msg])
+    .debug(|msg: &str| eprintln!["[debug] {}", msg])
     .build()
     .await?;
   let batch: Vec<Row<P,V>> = (0..5_000).map(|i| {

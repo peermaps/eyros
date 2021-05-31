@@ -206,13 +206,17 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   /// but those settings will only affect new operations.
   pub async fn open_from_setup(setup: Setup<S>) -> Result<Self,Error> {
     let fields = Arc::new(setup.fields);
-    if let Some(d) = &fields.debug {
-      d.send("opening db".into()).await?;
-    }
+    fields.log("opening db").await?;
     let mut meta_store = setup.storage.lock().await.open("meta").await?;
     let meta = match meta_store.len().await? {
-      0 => Meta { roots: vec![], next_tree: 0 },
-      n => Meta::from_bytes(&meta_store.read(0,n).await?)?.1,
+      0 => {
+        fields.log("no existing db found. initialized new meta").await?;
+        Meta { roots: vec![], next_tree: 0 }
+      },
+      n => {
+        fields.log(&format!["existing db found. reading {} bytes from meta store", n]).await?;
+        Meta::from_bytes(&meta_store.read(0,n).await?)?.1
+      },
     };
     let trees = TreeFile::new(Arc::clone(&fields), Arc::clone(&setup.storage));
     Ok(Self {
@@ -297,12 +301,12 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
     let trees = &mut self.trees.lock().await;
     for r in rm_trees.iter() {
-      trees.remove(r).await;
+      trees.remove(r).await?;
     }
     for (r,t) in create_trees.iter() {
-      trees.put(r,Arc::clone(t)).await;
+      trees.put(r,Arc::clone(t)).await?;
     }
-    trees.put(&tr.id, Arc::new(Mutex::new(t))).await;
+    trees.put(&tr.id, Arc::new(Mutex::new(t))).await?;
     for i in 0..merge_trees.len() {
       if i < self.meta.roots.len() {
         self.meta.roots[i] = None;
@@ -341,12 +345,12 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     let (tr,t,rm_trees,create_trees) = m.merge().await?;
     let trees = &mut self.trees.lock().await;
     for r in rm_trees.iter() {
-      trees.remove(r).await;
+      trees.remove(r).await?;
     }
     for (r,t) in create_trees.iter() {
-      trees.put(r,Arc::clone(t)).await;
+      trees.put(r,Arc::clone(t)).await?;
     }
-    trees.put(&tr.id, Arc::new(Mutex::new(t))).await;
+    trees.put(&tr.id, Arc::new(Mutex::new(t))).await?;
     self.meta.roots.clear();
     self.meta.roots.push(Some(tr));
     Ok(())
@@ -363,12 +367,16 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   /// Queries hold a lock on the database, so you probably shouldn't leave them open for very long
   /// if you need to make more writes.
   pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
+    self.fields.log(&format!["query bbox={:?}", bbox]).await?;
     let mut queries = vec![];
-    for root in self.meta.roots.iter() {
+    for (i,root) in self.meta.roots.iter().enumerate() {
       if let Some(r) = root {
+        self.fields.log(&format!["query root i={} id={}", i, r.id]).await?;
         let mut trees = self.trees.lock().await;
         let t = trees.get(&r.id).await?;
-        queries.push(t.lock().await.query(Arc::clone(&self.trees), bbox));
+        queries.push(t.lock().await.query(
+          Arc::clone(&self.trees), bbox, Arc::clone(&self.fields), i, r.id
+        ));
       }
     }
     <QueryStream<P,V>>::from_queries(queries)
