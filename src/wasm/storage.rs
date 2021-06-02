@@ -1,7 +1,9 @@
-use crate::{Storage,Error,wasm::{errback::ErrBack,error::JsError}};
+use crate::{Storage,Error,wasm::error::JsError};
 use random_access_storage::RandomAccess;
-use wasm_bindgen::prelude::JsValue;
+use wasm_bindgen::{prelude::JsValue,closure::Closure};
+use wasm_bindgen_futures::spawn_local;
 use js_sys::{Function,Uint8Array,Reflect::get};
+use async_std::channel::unbounded;
 
 pub struct JsStorage {
   pub storage_fn: Function,
@@ -46,27 +48,48 @@ unsafe impl Sync for JsStorage {}
 impl RandomAccess for JsRandomAccess {
   type Error = Box<dyn std::error::Error+Sync+Send>;
   async fn write(&mut self, offset: u64, data: &[u8]) -> Result<(), Self::Error> {
-    let mut errback = ErrBack::new();
-    JsError::wrap(self.write_fn.call3(
-      &JsValue::NULL,
-      &JsValue::from_f64(offset as f64),
-      unsafe { &Uint8Array::view(&data) },
-      &errback.cb()
-    ))?;
-    JsError::wrap(errback.await)?;
-    Ok(())
+    let (sender,receiver) = unbounded();
+    {
+      let cb = Closure::once_into_js(Box::new(move |err: JsValue| {
+        spawn_local(async move {
+          let r = sender.send(JsError::wrap(if err.is_truthy() { Err(err) } else { Ok(()) }));
+          if let Err(_) = r.await {} // ignore send errors
+        });
+      }) as Box<dyn FnOnce(JsValue)>);
+      JsError::wrap(self.write_fn.call3(
+        &JsValue::NULL,
+        &JsValue::from_f64(offset as f64),
+        unsafe { &Uint8Array::view(&data) },
+        &cb
+      ))?;
+    }
+    receiver.recv().await?
   }
 
   async fn read(&mut self, offset: u64, length: u64) -> Result<Vec<u8>, Self::Error> {
-    let mut errback = ErrBack::new();
-    JsError::wrap(self.read_fn.call3(
-      &JsValue::NULL,
-      &JsValue::from_f64(offset as f64),
-      &JsValue::from_f64(length as f64),
-      &errback.cb()
-    ))?;
-    Ok(JsError::wrap(errback.await
-      .map(|v| { let u: Uint8Array = v.into(); u.to_vec() }))?)
+    let (sender,receiver) = unbounded();
+    {
+      let cb = Closure::once_into_js(Box::new(move |err: JsValue, value: JsValue| {
+        spawn_local(async move {
+          let r = sender.send(JsError::wrap(
+            if err.is_truthy() {
+              Err(err)
+            } else {
+              let u: Uint8Array = value.into();
+              Ok(u.to_vec())
+            }
+          ));
+          if let Err(_) = r.await {} // ignore send errors
+        });
+      }) as Box<dyn FnOnce(JsValue,JsValue)>);
+      JsError::wrap(self.read_fn.call3(
+        &JsValue::NULL,
+        &JsValue::from_f64(offset as f64),
+        &JsValue::from_f64(length as f64),
+        &cb
+      ))?;
+    }
+    receiver.recv().await?
   }
 
   async fn read_to_writer(&mut self, _offset: u64, _length: u64,
@@ -75,44 +98,93 @@ impl RandomAccess for JsRandomAccess {
   }
 
   async fn del(&mut self, offset: u64, length: u64) -> Result<(), Self::Error> {
-    let mut errback = ErrBack::new();
-    JsError::wrap(self.del_fn.call3(
-      &JsValue::NULL,
-      &JsValue::from_f64(offset as f64),
-      &JsValue::from_f64(length as f64),
-      &errback.cb()
-    ))?;
-    JsError::wrap(errback.await)?;
-    Ok(())
+    let (sender,receiver) = unbounded();
+    {
+      let cb = Closure::once_into_js(Box::new(move |err: JsValue| {
+        spawn_local(async move {
+          let r = sender.send(JsError::wrap(if err.is_truthy() { Err(err) } else { Ok(()) }));
+          if let Err(_) = r.await {} // ignore send errors
+        });
+      }) as Box<dyn FnOnce(JsValue)>);
+      JsError::wrap(self.del_fn.call3(
+        &JsValue::NULL,
+        &JsValue::from_f64(offset as f64),
+        &JsValue::from_f64(length as f64),
+        &cb
+      ))?;
+    }
+    receiver.recv().await?
   }
 
   async fn truncate(&mut self, length: u64) -> Result<(), Self::Error> {
-    let mut errback = ErrBack::new();
-    JsError::wrap(self.truncate_fn.call2(
-      &JsValue::NULL,
-      &JsValue::from_f64(length as f64),
-      &errback.cb()
-    ))?;
-    JsError::wrap(errback.await)?;
-    Ok(())
+    let (sender,receiver) = unbounded();
+    {
+      let cb = Closure::once_into_js(Box::new(move |err: JsValue| {
+        spawn_local(async move {
+          let r = sender.send(JsError::wrap(if err.is_truthy() { Err(err) } else { Ok(()) }));
+          if let Err(_) = r.await {} // ignore send errors
+        });
+      }) as Box<dyn FnOnce(JsValue)>);
+      JsError::wrap(self.truncate_fn.call2(
+        &JsValue::NULL,
+        &JsValue::from_f64(length as f64),
+        &cb
+      ))?;
+    }
+    receiver.recv().await?
   }
 
   async fn len(&self) -> Result<u64, Self::Error> {
-    let mut errback = ErrBack::new();
-    JsError::wrap(self.len_fn.call1(&JsValue::NULL, &errback.cb()))?;
-    Ok(JsError::wrap(errback.await.map(|v| v.as_f64().unwrap() as u64))?)
+    let (sender,receiver) = unbounded();
+    {
+      let cb = Closure::once_into_js(Box::new(move |err: JsValue, value: JsValue| {
+        spawn_local(async move {
+          let r = sender.send(JsError::wrap(
+            if err.is_truthy() {
+              Err(err)
+            } else {
+              Ok(value.as_f64().map(|v| v as u64).unwrap_or(0))
+            }
+          ));
+          if let Err(_) = r.await {} // ignore send errors
+        });
+      }) as Box<dyn FnOnce(JsValue,JsValue)>);
+      JsError::wrap(self.len_fn.call1(&JsValue::NULL, &cb))?;
+    }
+    receiver.recv().await?
   }
 
   async fn is_empty(&mut self) -> Result<bool, Self::Error> {
-    let mut errback = ErrBack::new();
-    JsError::wrap(self.len_fn.call1(&JsValue::NULL, &errback.cb()))?;
-    Ok(JsError::wrap(errback.await.map(|v| v.as_f64().unwrap() as u64 == 0))?)
+    let (sender,receiver) = unbounded();
+    {
+      let cb = Closure::once_into_js(Box::new(move |err: JsValue, value: JsValue| {
+        spawn_local(async move {
+          let r = sender.send(JsError::wrap(
+            if err.is_truthy() {
+              Err(err)
+            } else {
+              Ok(value.as_f64().map(|v| v as u64 == 0).unwrap_or(true))
+            }
+          ));
+          if let Err(_) = r.await {} // ignore send errors
+        });
+      }) as Box<dyn FnOnce(JsValue,JsValue)>);
+      JsError::wrap(self.len_fn.call1(&JsValue::NULL, &cb))?;
+    }
+    receiver.recv().await?
   }
 
   async fn sync_all(&mut self) -> Result<(), Self::Error> {
-    let mut errback = ErrBack::new();
-    JsError::wrap(self.sync_fn.call1(&JsValue::NULL, &errback.cb()))?;
-    JsError::wrap(errback.await)?;
-    Ok(())
+    let (sender,receiver) = unbounded();
+    {
+      let cb = Closure::once_into_js(Box::new(move |err: JsValue| {
+        spawn_local(async move {
+          let r = sender.send(JsError::wrap(if err.is_truthy() { Err(err) } else { Ok(()) }));
+          if let Err(_) = r.await {} // ignore send errors
+        });
+      }) as Box<dyn FnOnce(JsValue)>);
+      JsError::wrap(self.sync_fn.call1(&JsValue::NULL, &cb))?;
+    }
+    receiver.recv().await?
   }
 }

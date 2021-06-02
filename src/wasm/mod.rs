@@ -5,7 +5,6 @@ mod stream;
 use desert::{ToBytes,CountBytes,FromBytes};
 use core::hash::Hash;
 mod error;
-mod errback;
 mod debug;
 use debug::JsDebug;
 
