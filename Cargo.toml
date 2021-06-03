@@ -26,6 +26,7 @@ wasm-bindgen = { version = "0.2.74", optional = true }
 wasm-bindgen-futures = { version = "0.4.24", optional = true }
 futures-io = { version = "0.3.5", optional = true }
 js-sys = { version = "0.3.51", optional = true }
+console_error_panic_hook = { version = "0.1.6", optional = true }
 
 [dev-dependencies]
 rand = "0.6.1"
@@ -37,7 +38,7 @@ crate-type = ["rlib","cdylib"]
 
 [features]
 default = ["random-access-disk","2d","3d","4d"]
-wasm = ["wasm-bindgen","wasm-bindgen-futures","futures-io","js-sys"]
+wasm = ["wasm-bindgen","wasm-bindgen-futures","futures-io","js-sys","console_error_panic_hook"]
 no-debug = []
 2d = []
 3d = []

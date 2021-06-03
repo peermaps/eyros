@@ -411,9 +411,10 @@ macro_rules! impl_tree {
               };
               continue;
             } else if cursors.is_empty() {
-              if let Err(_) = fields.log(&format![
-                "query end root_index={} root_id={}", root_index, root_id
-              ]).await {}
+              if let Err(e) = fields.log(&format!["query end root_index={} root_id={}",
+              root_index, root_id]).await {
+                return Some((Err(e.into()),state));
+              }
               return None;
             }
             let (level,c) = cursors.pop().unwrap();

@@ -19,8 +19,6 @@ type S = JsRandomAccess;
 struct GetId {
   pub f: Option<Function>
 }
-unsafe impl Send for GetId {}
-unsafe impl Sync for GetId {}
 static mut GETID: GetId = GetId { f: None };
 
 #[wasm_bindgen]
@@ -197,6 +195,7 @@ macro_rules! def_mix {
     }
     #[wasm_bindgen]
     pub async fn $open(opts: JsValue) -> Result<$C,Error> {
+      console_error_panic_hook::set_once();
       let errf = |e| Error::new(&format!["{:?}",e]);
       let storage_fn: Function = match get(&opts,&"storage".into()).map_err(errf)?.dyn_into() {
         Ok(storage) => storage,
