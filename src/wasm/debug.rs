@@ -1,23 +1,18 @@
 use crate::Debugger;
-use wasm_bindgen::prelude::JsValue;
-use js_sys::Function;
+use async_std::channel::Sender;
 
 pub struct JsDebug {
-  f: Function
+  rpc: Sender<String>,
 }
 
 impl JsDebug {
-  pub fn new(f: Function) -> Self {
-    Self { f }
+  pub fn new(rpc: Sender<String>) -> Self {
+    Self { rpc }
   }
 }
 
-// this MAY work only because wasm is single-threaded (in the browser, for now):
-unsafe impl Send for JsDebug {}
-unsafe impl Sync for JsDebug {}
-
 impl Debugger for JsDebug {
   fn send(&mut self, msg: &str) -> () {
-    if let Err(_) = self.f.call1(&JsValue::NULL, &msg.into()) {}
+    self.rpc.try_send(msg.to_string()).unwrap();
   }
 }

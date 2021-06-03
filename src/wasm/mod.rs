@@ -264,7 +264,16 @@ macro_rules! def_mix {
         _ => {},
       };
       match get(&opts,&"debug".into()).map_err(errf)?.dyn_into::<Function>() {
-        Ok(f) => { setup = setup.debug(JsDebug::new(f)); },
+        Ok(f) => {
+          let (sender,receiver): (Sender<String>, Receiver<String>) = unbounded();
+          spawn_local(async move {
+            while let Ok(msg) = receiver.recv().await {
+              let s: JsValue = msg.into();
+              f.call1(&JsValue::NULL, &s).unwrap();
+            }
+          });
+          setup = setup.debug(JsDebug::new(sender));
+        },
         Err(_) => {},
       };
       type P = ($(Coord<$T>),+);
