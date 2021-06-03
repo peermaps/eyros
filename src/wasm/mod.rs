@@ -5,13 +5,14 @@ mod stream;
 use desert::{ToBytes,CountBytes,FromBytes};
 use core::hash::Hash;
 mod error;
+use error::JsError;
 mod debug;
 use debug::JsDebug;
 
 use wasm_bindgen::{prelude::{wasm_bindgen,JsValue},JsCast};
-use wasm_bindgen_futures::future_to_promise;
+use wasm_bindgen_futures::{future_to_promise,spawn_local};
 use js_sys::{Error,Function,Array,Uint8Array,Promise,Reflect::get};
-use async_std::sync::{Arc,Mutex};
+use async_std::{sync::{Arc,Mutex},channel::{Sender,Receiver,unbounded}};
 
 type S = JsRandomAccess;
 
@@ -197,17 +198,46 @@ macro_rules! def_mix {
     #[wasm_bindgen]
     pub async fn $open(opts: JsValue) -> Result<$C,Error> {
       let errf = |e| Error::new(&format!["{:?}",e]);
-      let storage_fn = match get(&opts,&"storage".into()).map_err(errf)?.dyn_into() {
+      let storage_fn: Function = match get(&opts,&"storage".into()).map_err(errf)?.dyn_into() {
         Ok(storage) => storage,
         Err(_) => { return Err(Error::new("must provide opts.storage function")) },
       };
-      let remove_fn = match get(&opts,&"remove".into()).map_err(errf)?.dyn_into() {
+      let remove_fn: Function = match get(&opts,&"remove".into()).map_err(errf)?.dyn_into() {
         Ok(remove) => remove,
         Err(_) => { return Err(Error::new("must provide opts.remove function")) },
       };
       let mut setup = Setup::from_storage(Box::new(JsStorage {
-        storage_fn,
-        remove_fn,
+        storage_rpc: {
+          let (sender,receiver): (
+            Sender<(String,Sender<Result<JsRandomAccess,E>>)>,
+            Receiver<(String,Sender<Result<JsRandomAccess,E>>)>,
+          ) = unbounded();
+          spawn_local(async move {
+            // todo: do something with these errors
+            while let Ok((name,s)) = receiver.recv().await {
+              let context = JsError::wrap(storage_fn.call1(&JsValue::NULL, &name.into()))
+                .unwrap();
+              s.send(JsRandomAccess::from_context(context).await).await.unwrap();
+            }
+          });
+          sender
+        },
+        remove_rpc: {
+          let (sender,receiver): (
+            Sender<(String,Sender<Result<(),E>>)>,
+            Receiver<(String,Sender<Result<(),E>>)>,
+          ) = unbounded();
+          spawn_local(async move {
+            // todo: do something with these errors
+            while let Ok((name,s)) = receiver.recv().await {
+              s.send(match remove_fn.call1(&JsValue::NULL, &name.into()) {
+                Err(e) => JsError::wrap(Err(e.into())),
+                _ => Ok(()),
+              }).await.unwrap();
+            }
+          });
+          sender
+        },
       }));
       match get(&opts,&"branchFactor".into()).map_err(errf)?.as_f64() {
         Some(x) => { setup = setup.branch_factor(x as usize); },

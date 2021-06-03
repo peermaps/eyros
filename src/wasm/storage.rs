@@ -6,14 +6,50 @@ use js_sys::{Function,Uint8Array,Reflect::get};
 use async_std::channel::{unbounded,Sender,Receiver};
 
 pub struct JsStorage {
-  pub storage_fn: Function,
-  pub remove_fn: Function,
+  pub storage_rpc: Sender<(String,Sender<Result<JsRandomAccess,Error>>)>,
+  pub remove_rpc: Sender<(String,Sender<Result<(),Error>>)>,
 }
 
 #[async_trait::async_trait]
 impl Storage<JsRandomAccess> for JsStorage {
   async fn open(&mut self, name: &str) -> Result<JsRandomAccess,Error> {
-    let context = JsError::wrap(self.storage_fn.call1(&JsValue::NULL, &name.into()))?;
+    let (sender, receiver) = unbounded();
+    self.storage_rpc.send((name.to_string(),sender)).await?;
+    receiver.recv().await?
+  }
+  async fn remove(&mut self, name: &str) -> Result<(),Error> {
+    let (sender, receiver) = unbounded();
+    self.remove_rpc.send((name.to_string(),sender)).await?;
+    receiver.recv().await?
+  }
+}
+
+pub enum JRequest {
+  Write { offset: u64, data: Vec<u8> },
+  Read { offset: u64, length: u64 },
+  Del { offset: u64, length: u64 },
+  Len {},
+  Truncate { length: u64 },
+  IsEmpty {},
+  SyncAll {},
+}
+
+pub enum JResponse {
+  Unit(),
+  Data(Vec<u8>),
+  Length(u64),
+  Bool(bool),
+}
+
+pub struct JsRandomAccess {
+  pub rpc: Sender<(JRequest,Sender<Result<JResponse,Error>>)>,
+}
+
+impl JsRandomAccess {
+  fn new(rpc: Sender<(JRequest,Sender<Result<JResponse,Error>>)>) -> Self {
+    Self { rpc }
+  }
+  pub async fn from_context(context: JsValue) -> Result<Self,Error> {
     let write_fn: Function = JsError::wrap(get(&context,&"write".into()))?.into();
     let read_fn: Function = JsError::wrap(get(&context,&"read".into()))?.into();
     let len_fn: Function = JsError::wrap(get(&context,&"len".into()))?.into();
@@ -139,44 +175,9 @@ impl Storage<JsRandomAccess> for JsStorage {
         }
       }
     });
-    Ok(JsRandomAccess::new(sender))
-  }
-  async fn remove(&mut self, name: &str) -> Result<(),Error> {
-    JsError::wrap(self.remove_fn.call1(&JsValue::NULL, &name.into()))?;
-    Ok(())
+    Ok(Self::new(sender))
   }
 }
-
-pub enum JRequest {
-  Write { offset: u64, data: Vec<u8> },
-  Read { offset: u64, length: u64 },
-  Del { offset: u64, length: u64 },
-  Len {},
-  Truncate { length: u64 },
-  IsEmpty {},
-  SyncAll {},
-}
-
-pub enum JResponse {
-  Unit(),
-  Data(Vec<u8>),
-  Length(u64),
-  Bool(bool),
-}
-
-pub struct JsRandomAccess {
-  pub rpc: Sender<(JRequest,Sender<Result<JResponse,Error>>)>,
-}
-
-impl JsRandomAccess {
-  fn new(rpc: Sender<(JRequest,Sender<Result<JResponse,Error>>)>) -> Self {
-    Self { rpc }
-  }
-}
-
-// this MAY work only because wasm is single-threaded (in the browser, for now):
-unsafe impl Send for JsStorage {}
-unsafe impl Sync for JsStorage {}
 
 #[async_trait::async_trait]
 impl RandomAccess for JsRandomAccess {
