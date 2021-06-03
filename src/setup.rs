@@ -76,6 +76,7 @@ impl SetupFields {
 ///   .inline(500)
 ///   .tree_cache_size(1000)
 ///   .rebuild_depth(2)
+///   .debug(|msg: &str| eprintln!["[debug] {}", msg])
 ///   .build()
 ///   .await?;
 /// # Ok(()) }
@@ -127,8 +128,6 @@ impl<S> Setup<S> where S: RA {
         debug.lock().await.send(&s);
       }
     });
-    // todo read sender into f
-    // Arc::new(Mutex::new(f)));
     self.fields.debug = Some(sender);
     self
   }
