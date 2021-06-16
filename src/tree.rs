@@ -615,7 +615,7 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
 impl<'a,S,T,P,V> Merge<'a,S,T,P,V>
 where P: Point, V: Value, T: Tree<P,V>, S: RA {
   pub async fn merge(&mut self)
-  -> Result<(TreeRef<P>,T,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>),Error> {
+  -> Result<(Option<TreeRef<P>>,Vec<TreeId>,HashMap<TreeId,Arc<Mutex<T>>>),Error> {
     self.remove().await?;
 
     let mut lists = vec![];
@@ -655,12 +655,13 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
       }).collect::<Vec<_>>());
     }
     //assert![rows.len()>0, "rows.len()={}. must be >0", rows.len()];
-    let (tr, t, create_trees) = T::build(
+    let (tr, t, mut create_trees) = T::build(
       Arc::clone(&self.fields),
       &rows,
       &mut self.next_tree
     );
-    Ok((tr, t, rm_trees, create_trees))
+    create_trees.insert(tr.id, Arc::new(Mutex::new(t)));
+    Ok((Some(tr), rm_trees, create_trees))
   }
   pub async fn remove(&mut self) -> Result<(),Error> {
     if self.deletes.is_empty() { return Ok(()) }

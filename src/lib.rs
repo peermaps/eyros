@@ -297,7 +297,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       m.remove().await?;
       return Ok(());
     }
-    let (tr,t,rm_trees,create_trees) = m.merge().await?;
+    let (tr,rm_trees,create_trees) = m.merge().await?;
     //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
     let trees = &mut self.trees.lock().await;
     for r in rm_trees.iter() {
@@ -306,7 +306,6 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     for (r,t) in create_trees.iter() {
       trees.put(r,Arc::clone(t)).await?;
     }
-    trees.put(&tr.id, Arc::new(Mutex::new(t))).await?;
     for i in 0..merge_trees.len() {
       if i < self.meta.roots.len() {
         self.meta.roots[i] = None;
@@ -315,9 +314,9 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       }
     }
     if merge_trees.len() < self.meta.roots.len() {
-      self.meta.roots[merge_trees.len()] = Some(tr);
+      self.meta.roots[merge_trees.len()] = tr;
     } else {
-      self.meta.roots.push(Some(tr));
+      self.meta.roots.push(tr);
     }
     Ok(())
   }
@@ -342,7 +341,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       rebuild_depth,
       error_if_missing: true,
     };
-    let (tr,t,rm_trees,create_trees) = m.merge().await?;
+    let (tr,rm_trees,create_trees) = m.merge().await?;
     let trees = &mut self.trees.lock().await;
     for r in rm_trees.iter() {
       trees.remove(r).await?;
@@ -350,9 +349,8 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     for (r,t) in create_trees.iter() {
       trees.put(r,Arc::clone(t)).await?;
     }
-    trees.put(&tr.id, Arc::new(Mutex::new(t))).await?;
     self.meta.roots.clear();
-    self.meta.roots.push(Some(tr));
+    self.meta.roots.push(tr);
     Ok(())
   }
   /// Write the changes made to the database to file storage.
