@@ -9,7 +9,7 @@ module.exports = function (opts) {
     api.set_getid(opts.getId)
   }
   return api.open_f32_f32_f32_f32_f32_f32_f32_f32(Object.assign({}, opts, {
-    wrapStorage(opts.storage),
-    opts.remove || function () {}
+    storage: wrapStorage(opts.storage),
+    remove: opts.remove || function () {}
   }))
 }
