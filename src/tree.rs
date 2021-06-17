@@ -289,7 +289,8 @@ macro_rules! impl_tree {
       pub fn build<'a>(fields: Arc<SetupFields>,
       inserts: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
       next_tree: &mut TreeId)
-      -> (TreeRef<($(Coord<$T>),+)>,$Node<$($T),+,V>,HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>) {
+      -> (Option<TreeRef<($(Coord<$T>),+)>>,HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>) {
+        if inserts.is_empty() { return (None, HashMap::new()) }
         let mut mstate = $MState {
           fields,
           inserts,
@@ -307,7 +308,7 @@ macro_rules! impl_tree {
             xs
           }
         };
-        assert![mstate.sorted.len() >= 1, "sorted.len()={}, must be >= 1", mstate.sorted.len()];
+        //assert![mstate.sorted.len() >= 1, "sorted.len()={}, must be >= 1", mstate.sorted.len()];
         let bounds = $get_bounds(
           mstate.sorted.iter().map(|i| *i),
           mstate.inserts
@@ -323,7 +324,10 @@ macro_rules! impl_tree {
           bounds,
         };
         *next_tree += 1;
-        (tr, root, mstate.ext_trees)
+        mstate.ext_trees.insert(tr.id, Arc::new(Mutex::new($Tree {
+          root: Arc::new(root)
+        })));
+        (Some(tr), mstate.ext_trees)
       }
     }
 
@@ -347,15 +351,8 @@ macro_rules! impl_tree {
       }
       fn build<'a>(fields: Arc<SetupFields>,
       rows: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], next_tree: &mut TreeId)
-      -> (TreeRef<($(Coord<$T>),+)>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) {
-        let (tr,root,ext_trees) = $Branch::build(
-          fields,
-          rows,
-          next_tree
-        );
-        (tr, Self {
-          root: Arc::new(root),
-        }, ext_trees)
+      -> (Option<TreeRef<($(Coord<$T>),+)>>,HashMap<TreeId,Arc<Mutex<Self>>>) {
+        $Branch::build(fields, rows, next_tree)
       }
       fn list(&mut self) -> (Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>) {
         let mut cursors = vec![Arc::clone(&self.root)];
@@ -589,7 +586,7 @@ pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug+'sta
 where P: Point, V: Value {
   fn empty() -> Self;
   fn build<'a>(fields: Arc<SetupFields>, rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
-    -> (TreeRef<P>,Self,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
+    -> (Option<TreeRef<P>>,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>, bbox: &P::Bounds,
     fields: Arc<SetupFields>, root_index: usize, root_id: TreeId)
@@ -655,13 +652,12 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
       }).collect::<Vec<_>>());
     }
     //assert![rows.len()>0, "rows.len()={}. must be >0", rows.len()];
-    let (tr, t, mut create_trees) = T::build(
+    let (tr, create_trees) = T::build(
       Arc::clone(&self.fields),
       &rows,
       &mut self.next_tree
     );
-    create_trees.insert(tr.id, Arc::new(Mutex::new(t)));
-    Ok((Some(tr), rm_trees, create_trees))
+    Ok((tr, rm_trees, create_trees))
   }
   pub async fn remove(&mut self) -> Result<(),Error> {
     if self.deletes.is_empty() { return Ok(()) }
@@ -706,22 +702,24 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
               (r.bounds.clone(),InsertValue::Ref(r.clone()))
             }).collect::<Vec<_>>());
             let mut next_tree = r;
-            let t = match rows.len() {
-              0 => T::empty(),
-              _ => {
-                let (tr, t, create_trees) = T::build(
-                  Arc::clone(&xfields),
-                  &rows,
-                  &mut next_tree
-                );
-                assert![tr.id == r, "unexpected id constructing replacement tree for remove(). \
-                  expected: {}, received: {}", r, tr.id
-                ];
-                assert![create_trees.len() == 0, "unexpected external sub-trees during remove()"];
-                t
-              },
-            };
-            trees.lock().await.put(&r, Arc::new(Mutex::new(t))).await?;
+            if rows.is_empty() {
+              trees.lock().await.put(&r, Arc::new(Mutex::new(T::empty()))).await?;
+            } else {
+              let (tr, create_trees) = T::build(
+                Arc::clone(&xfields),
+                &rows,
+                &mut next_tree
+              );
+              let tr_id = tr.map(|x| x.id);
+              assert![tr_id == Some(r),
+                "unexpected id constructing replacement tree for remove(). \
+                expected: {:?}, received: {:?}", Some(r), tr_id
+              ];
+              assert![create_trees.len() == 1, "unexpected external sub-trees during remove()"];
+              for (r,t) in create_trees {
+                trees.lock().await.put(&r, t).await?;
+              }
+            }
           }
         }
         Ok(())
