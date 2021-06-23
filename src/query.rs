@@ -20,11 +20,7 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
       queries,
     };
     Ok(Box::new(unfold(qs, async move |mut qs| {
-      let res = qs.get_next().await;
-      match res {
-        Some(p) => Some((p,qs)),
-        None => None
-      }
+      qs.get_next().await.map(|p| (p,qs))
     })))
   }
   async fn get_next(&mut self) -> Out<P,V> {
@@ -33,26 +29,16 @@ impl<P,V> QueryStream<P,V> where P: Point, V: Value {
       {
         let ix = self.index;
         let q = &mut self.queries[ix];
-        let next = {
-          let result = q.lock().await.next().await;
-          match result {
-            Some(Err(e)) => return Some(Err(e.into())),
-            _ => {}
-          };
-          result
-        };
-        match next {
-          Some(result) => {
-            self.index = (self.index+1) % len;
-            return Some(result);
-          },
-          None => {}
+        let result = q.lock().await.next().await;
+        if result.is_some() {
+          self.index = (self.index+1) % len;
+          return result;
         }
       }
       let ix = self.index;
       self.queries.remove(ix);
-      if self.queries.len() > 0 {
-        self.index = self.index % self.queries.len();
+      if !self.queries.is_empty() {
+        self.index %= self.queries.len();
       }
     }
     None

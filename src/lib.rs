@@ -1,5 +1,4 @@
-#![feature(async_closure,iter_partition_in_place,drain_filter,
-  extended_key_value_attributes, backtrace)]
+#![feature(async_closure,iter_partition_in_place,drain_filter,backtrace)]
 #![doc=include_str!("../readme.md")]
 mod error;
 pub use error::{EyrosError,EyrosErrorKind,Error};
@@ -109,12 +108,15 @@ macro_rules! impl_point {
       fn check(&self) -> Result<(),Error> {
         $(match &(self.$i) {
           Coord::Interval(min,max) => {
-            if !(min <= max) {
-              return EyrosErrorKind::IntervalSides {
-                dimension: $i,
-                min: format!["{:?}", min],
-                max: format!["{:?}", max],
-              }.raise();
+            match min.partial_cmp(&max) {
+              None | Some(std::cmp::Ordering::Greater) => {
+                return EyrosErrorKind::IntervalSides {
+                  dimension: $i,
+                  min: format!["{:?}", min],
+                  max: format!["{:?}", max],
+                }.raise();
+              },
+              _ => {},
             }
           },
           _ => {}
@@ -332,7 +334,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     );
     let mut m = Merge {
       fields: Arc::clone(&self.fields),
-      inserts: &vec![],
+      inserts: &[],
       deletes: Arc::new(vec![]),
       inputs: Arc::clone(&merge_trees),
       roots: self.meta.roots.clone(),

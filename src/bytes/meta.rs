@@ -66,7 +66,7 @@ impl<P> CountBytes for Meta<P> where P: Point {
     for root in self.roots.iter() {
       size += match root {
         Some(r) => varint::length(r.id as u64)
-          + &r.bounds.to_bounds().unwrap().count_bytes(),
+          + r.bounds.to_bounds().unwrap().count_bytes(),
         None => 0,
       }
     }

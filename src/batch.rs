@@ -28,3 +28,7 @@ impl BatchOptions {
     self
   }
 }
+
+impl Default for BatchOptions {
+  fn default() -> Self { Self::new() }
+}

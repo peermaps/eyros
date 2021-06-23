@@ -79,7 +79,7 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
     Ok(())
   }
   pub async fn sync(&mut self) -> Result<(),Error> {
-    self.fields.log(&format!["sync begin"]).await?;
+    self.fields.log("sync begin").await?;
     let mut join = Join::new();
     for (id,t) in self.updated.iter() {
       let file = get_file(id);
@@ -111,7 +111,7 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
     join.try_join().await?;
     self.updated.clear();
     self.removed.clear();
-    self.fields.log(&format!["sync complete"]).await?;
+    self.fields.log("sync complete").await?;
     Ok(())
   }
 }
@@ -125,7 +125,7 @@ fn get_file(id: &TreeId) -> String {
     (id >> (8*4)) % 0x100,
     (id >> (8*3)) % 0x100,
     (id >> (8*2)) % 0x100,
-    (id >> (8*1)) % 0x100,
-    (id >> (8*0)) % 0x100,
+    (id >> 8) % 0x100,
+    id % 0x100,
   ]
 }

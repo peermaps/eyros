@@ -22,7 +22,7 @@ pub struct Build {
 impl Build {
   fn ext(&self) -> Self {
     Self {
-      range: self.range.clone(),
+      range: self.range,
       level: 0,
       count: 0,
     }
@@ -289,7 +289,7 @@ macro_rules! impl_tree {
       pub fn build<'a>(fields: Arc<SetupFields>,
       inserts: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
       next_tree: &mut TreeId)
-      -> (Option<TreeRef<($(Coord<$T>),+)>>,HashMap<TreeId,Arc<Mutex<$Tree<$($T),+,V>>>>) {
+      -> (Option<TreeRef<($(Coord<$T>),+)>>,CreateTrees<$Tree<$($T),+,V>>) {
         if inserts.is_empty() { return (None, HashMap::new()) }
         let mut mstate = $MState {
           fields,
@@ -581,12 +581,14 @@ macro_rules! impl_tree {
   (usize,usize,usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None,None,None),8
 ];
 
+type CreateTrees<T> = HashMap<TreeId,Arc<Mutex<T>>>;
+
 #[async_trait::async_trait]
 pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug+'static
 where P: Point, V: Value {
   fn empty() -> Self;
   fn build<'a>(fields: Arc<SetupFields>, rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
-    -> (Option<TreeRef<P>>,HashMap<TreeId,Arc<Mutex<Self>>>) where Self: Sized;
+    -> (Option<TreeRef<P>>,CreateTrees<Self>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>, bbox: &P::Bounds,
     fields: Arc<SetupFields>, root_index: usize, root_id: TreeId)
@@ -681,7 +683,7 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
       // TODO: remove the delete when found
       let trees = Arc::clone(&self.trees);
       let xids = Arc::clone(&ids);
-      let id = r.id.clone();
+      let id = r.id;
       let xfields = Arc::clone(&fields);
       join.push(async move {
         let mut refs = vec![id];

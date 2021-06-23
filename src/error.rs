@@ -28,7 +28,7 @@ impl EyrosErrorKind {
 }
 
 impl std::error::Error for EyrosError {
-  fn backtrace<'a>(&'a self) -> Option<&'a Backtrace> {
+  fn backtrace(&'_ self) -> Option<&'_ Backtrace> {
     Some(&self.backtrace)
   }
 }
