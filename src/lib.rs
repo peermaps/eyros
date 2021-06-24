@@ -1,3 +1,4 @@
+#![warn(clippy::future_not_send)]
 #![feature(async_closure,iter_partition_in_place,drain_filter,backtrace)]
 #![doc=include_str!("../readme.md")]
 mod error;

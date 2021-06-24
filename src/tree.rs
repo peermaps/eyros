@@ -381,7 +381,7 @@ macro_rules! impl_tree {
       fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,($(Coord<$T>),+),V>>>,
         bbox: &(($($T),+),($($T),+)), fields: Arc<SetupFields>,
         root_index: usize, root_id: TreeId,
-      ) -> Arc<Mutex<QStream<($(Coord<$T>),+),V>>> where S: RA {
+      ) -> QStream<($(Coord<$T>),+),V> where S: RA {
         let istate = (
           bbox.clone(),
           vec![], // queue
@@ -390,7 +390,7 @@ macro_rules! impl_tree {
           Arc::clone(&trees),
           Arc::clone(&fields)
         );
-        Arc::new(Mutex::new(Box::new(unfold(istate, async move |mut state| {
+        Box::new(unfold(istate, async move |mut state| {
           let bbox = &state.0;
           let queue = &mut state.1;
           let cursors = &mut state.2;
@@ -480,7 +480,7 @@ macro_rules! impl_tree {
               },
             }
           }
-        }))))
+        }))
       }
       async fn remove<S>(&mut self, xids: Arc<Mutex<HashMap<V::Id,($(Coord<$T>),+)>>>)
       -> (Option<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>)>,Vec<TreeId>) where S: RA {
@@ -591,8 +591,7 @@ where P: Point, V: Value {
     -> (Option<TreeRef<P>>,CreateTrees<Self>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>, bbox: &P::Bounds,
-    fields: Arc<SetupFields>, root_index: usize, root_id: TreeId)
-    -> Arc<Mutex<QStream<P,V>>> where S: RA;
+    fields: Arc<SetupFields>, root_index: usize, root_id: TreeId) -> QStream<P,V> where S: RA;
   async fn remove<S>(&mut self, ids: Arc<Mutex<HashMap<V::Id,P>>>)
     -> (Option<(Vec<(P,V)>,Vec<TreeRef<P>>)>,Vec<TreeId>) where S: RA;
 }
