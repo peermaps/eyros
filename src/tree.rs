@@ -99,7 +99,7 @@ macro_rules! impl_tree {
           count: build.count + (build.range.1-build.range.0) - (range.1-range.0),
         }
       }
-      fn build(&mut self, build: &Build) -> $Node<$($T),+,V> {
+      fn build(&mut self, build: &Build, is_rm: bool) -> $Node<$($T),+,V> {
         let rlen = build.range.1 - build.range.0;
         if rlen == 0 {
           return $Node::Data(vec![],vec![]);
@@ -108,6 +108,23 @@ macro_rules! impl_tree {
           return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
             inserts[*i].clone()
           }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)>>());
+        } else if !is_rm && rlen <= self.fields.max_records {
+          let r = self.next_tree;
+          let tr = TreeRef {
+            id: r,
+            bounds: $get_bounds(
+              self.sorted[build.range.0..build.range.1].iter().map(|i| *i),
+              self.inserts
+            ),
+          };
+          self.next_tree += 1;
+          let inserts = &self.inserts;
+          let root = $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
+            inserts[*i].clone()
+          }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)>>());
+          let t = $Tree::new(Arc::new(root));
+          self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
+          return $Node::Data(vec![],vec![tr]);
         }
         if build.level >= self.fields.max_depth || build.count >= self.fields.max_records {
           let r = self.next_tree;
@@ -119,7 +136,7 @@ macro_rules! impl_tree {
             ),
           };
           self.next_tree += 1;
-          let t = $Tree::new(Arc::new(self.build(&build.ext())));
+          let t = $Tree::new(Arc::new(self.build(&build.ext(), is_rm)));
           self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
           return $Node::Data(vec![],vec![tr]);
         }
@@ -207,7 +224,7 @@ macro_rules! impl_tree {
                   hset.contains(j)
                 })
               );
-              (*bitfield, Arc::new(self.build(&next)))
+              (*bitfield, Arc::new(self.build(&next, is_rm)))
             }).collect()
           }),+,
           _ => panic!["unexpected level modulo dimension"]
@@ -230,7 +247,7 @@ macro_rules! impl_tree {
                   }
                 })
               );
-              Arc::new(self.build(&next))
+              Arc::new(self.build(&next, is_rm))
             });
             let ranges = pv.iter().zip(pv.iter().skip(1));
             for range in ranges {
@@ -242,7 +259,7 @@ macro_rules! impl_tree {
                   intersect_coord(&(inserts[*j].0).$i, range.0, range.1)
                 })
               );
-              nodes.push(Arc::new(self.build(&next)));
+              nodes.push(Arc::new(self.build(&next, is_rm)));
             }
             if (pv.len() > 1) {
               nodes.push({
@@ -258,7 +275,7 @@ macro_rules! impl_tree {
                     }
                   })
                 );
-                Arc::new(self.build(&next))
+                Arc::new(self.build(&next, is_rm))
               });
             }
             nodes
@@ -286,10 +303,12 @@ macro_rules! impl_tree {
           nodes,
         }
       }
-      pub fn build<'a>(fields: Arc<SetupFields>,
-      inserts: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
-      next_tree: &mut TreeId)
-      -> (Option<TreeRef<($(Coord<$T>),+)>>,CreateTrees<$Tree<$($T),+,V>>) {
+      pub fn build<'a>(
+        fields: Arc<SetupFields>,
+        inserts: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
+        next_tree: &mut TreeId,
+        is_rm: bool,
+      ) -> (Option<TreeRef<($(Coord<$T>),+)>>,CreateTrees<$Tree<$($T),+,V>>) {
         if inserts.is_empty() { return (None, HashMap::new()) }
         let mut mstate = $MState {
           fields,
@@ -317,7 +336,7 @@ macro_rules! impl_tree {
           range: (0, inserts.len()),
           level: 0,
           count: 0,
-        });
+        }, is_rm);
         *next_tree = mstate.next_tree;
         let tr = TreeRef {
           id: *next_tree,
@@ -349,10 +368,13 @@ macro_rules! impl_tree {
       fn empty() -> Self {
         Self { root: Arc::new($Node::Data(vec![],vec![])) }
       }
-      fn build<'a>(fields: Arc<SetupFields>,
-      rows: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)], next_tree: &mut TreeId)
-      -> (Option<TreeRef<($(Coord<$T>),+)>>,HashMap<TreeId,Arc<Mutex<Self>>>) {
-        $Branch::build(fields, rows, next_tree)
+      fn build<'a>(
+        fields: Arc<SetupFields>,
+        rows: &[(($(Coord<$T>),+),InsertValue<'a,($(Coord<$T>),+),V>)],
+        next_tree: &mut TreeId,
+        is_rm: bool,
+      ) -> (Option<TreeRef<($(Coord<$T>),+)>>,HashMap<TreeId,Arc<Mutex<Self>>>) {
+        $Branch::build(fields, rows, next_tree, is_rm)
       }
       fn list(&mut self) -> (Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>) {
         let mut cursors = vec![Arc::clone(&self.root)];
@@ -587,8 +609,12 @@ type CreateTrees<T> = HashMap<TreeId,Arc<Mutex<T>>>;
 pub trait Tree<P,V>: Send+Sync+ToBytes+FromBytes+CountBytes+std::fmt::Debug+'static
 where P: Point, V: Value {
   fn empty() -> Self;
-  fn build<'a>(fields: Arc<SetupFields>, rows: &[(P,InsertValue<'a,P,V>)], next_tree: &mut TreeId)
-    -> (Option<TreeRef<P>>,CreateTrees<Self>) where Self: Sized;
+  fn build<'a>(
+    fields: Arc<SetupFields>,
+    rows: &[(P,InsertValue<'a,P,V>)],
+    next_tree: &mut TreeId,
+    is_rm: bool,
+  ) -> (Option<TreeRef<P>>,CreateTrees<Self>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>, bbox: &P::Bounds,
     fields: Arc<SetupFields>, root_index: usize, root_id: TreeId) -> QStream<P,V> where S: RA;
@@ -656,7 +682,8 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
     let (tr, create_trees) = T::build(
       Arc::clone(&self.fields),
       &rows,
-      &mut self.next_tree
+      &mut self.next_tree,
+      false
     );
     Ok((tr, rm_trees, create_trees))
   }
@@ -709,7 +736,8 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
               let (tr, create_trees) = T::build(
                 Arc::clone(&xfields),
                 &rows,
-                &mut next_tree
+                &mut next_tree,
+                true
               );
               let tr_id = tr.map(|x| x.id);
               assert![tr_id == Some(r),
