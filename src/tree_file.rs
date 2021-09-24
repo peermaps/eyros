@@ -2,8 +2,9 @@ use lru::{LruCache as LRU};
 use crate::{Tree,TreeId,Error,Point,Value,Storage,RA,SetupFields,EyrosErrorKind};
 use std::collections::{HashMap,HashSet};
 use async_std::{sync::{Arc,Mutex}};
-#[path="./join.rs"] mod join;
-use join::Join;
+#[cfg(not(feature="wasm"))] use async_std::task::spawn;
+#[cfg(feature="wasm")] use async_std::task::{spawn_local as spawn};
+use futures::future::join_all;
 
 pub struct TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   fields: Arc<SetupFields>,
@@ -80,35 +81,36 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   }
   pub async fn sync(&mut self) -> Result<(),Error> {
     self.fields.log("sync begin").await?;
-    let mut join = Join::new();
+    let mut work = vec![];
     for (id,t) in self.updated.iter() {
       let file = get_file(id);
       let tree = Arc::clone(t);
       let storage = Arc::clone(&self.storage);
       self.fields.log(&format!["sync tree (updated) id={} file={}", id, &file]).await?;
-      join.push(async move {
+      work.push(spawn(async move {
         let bytes = tree.lock().await.to_bytes()?;
         let mut s = storage.lock().await.open(&file).await?;
         s.write(0, &bytes).await?;
         s.sync_all().await?;
         let res: Result<(),Error> = Ok(());
         res
-      });
+      }));
     }
     for id in self.removed.iter() {
       let file = get_file(id);
       let storage = self.storage.clone();
       self.fields.log(&format!["sync tree (remove) id={} file={}", id, &file]).await?;
-      join.push(async move {
+      work.push(spawn(async move {
         // ignore errors
         match storage.lock().await.remove(&file).await {
           Ok(()) => {},
           Err(_err) => {}
         }
-        Ok(())
-      });
+        let r: Result<(),Error> = Ok(());
+        r
+      }));
     }
-    join.try_join().await?;
+    for r in join_all(work).await { r?; }
     self.updated.clear();
     self.removed.clear();
     self.fields.log("sync complete").await?;

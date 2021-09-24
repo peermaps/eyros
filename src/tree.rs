@@ -4,8 +4,7 @@ use crate::{Scalar,Point,Value,Coord,Error,EyrosErrorKind,Overlap,RA,Root,
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
 use std::collections::{HashMap,HashSet};
-#[path="./join.rs"] mod join;
-use join::Join;
+use futures::future::join_all;
 
 pub type TreeId = u64;
 #[derive(Debug,Clone,PartialEq)]
@@ -689,7 +688,7 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
   }
   pub async fn remove(&mut self) -> Result<(),Error> {
     if self.deletes.is_empty() { return Ok(()) }
-    let mut join = Join::new();
+    let mut work = vec![];
     let ids = {
       let mut map = HashMap::new();
       for d in self.deletes.iter() {
@@ -711,7 +710,7 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
       let xids = Arc::clone(&ids);
       let id = r.id;
       let xfields = Arc::clone(&fields);
-      join.push(async move {
+      work.push(async move {
         let mut refs = vec![id];
         while !refs.is_empty() {
           let r = refs.pop().unwrap();
@@ -751,10 +750,11 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
             }
           }
         }
-        Ok(())
+        let r: Result<(),Error> = Ok(());
+        r
       });
     }
-    join.try_join().await?;
+    for r in join_all(work).await { r?; }
     if self.error_if_missing {
       let xids = ids.lock().await;
       if !xids.is_empty() {
