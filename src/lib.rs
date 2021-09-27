@@ -12,7 +12,6 @@ mod tree;
 #[doc(hidden)] pub use tree::{Tree,TreeRef,TreeId,Merge};
 mod bytes;
 mod query;
-#[doc(hidden)] pub use query::QueryStream;
 mod unfold;
 mod tree_file;
 use tree_file::TreeFile;
@@ -380,6 +379,6 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
         ));
       }
     }
-    <QueryStream<P,V>>::from_queries(queries)
+    query::from_queries(queries)
   }
 }
