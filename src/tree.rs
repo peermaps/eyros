@@ -3,7 +3,7 @@ use crate::{Scalar,Point,Value,Coord,Error,EyrosErrorKind,Overlap,RA,Root,
   query::QStream, tree_file::TreeFile, SetupFields};
 use async_std::{sync::{Arc,Mutex}};
 use crate::unfold::unfold;
-use std::collections::{HashMap,HashSet};
+use std::collections::{HashMap,HashSet,VecDeque};
 use futures::future::join_all;
 
 pub type TreeId = u64;
@@ -399,6 +399,82 @@ macro_rules! impl_tree {
         }
         (rows,refs)
       }
+      fn query_local(
+        &mut self, bbox: &(($($T),+),($($T),+))
+      ) -> (Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>) {
+        let mut rows = vec![];
+        let mut refs = vec![];
+        let mut cursors = VecDeque::new();
+        cursors.push_back((0,self.root.clone()));
+
+        while let Some((level,c)) = cursors.pop_front() {
+          match c.as_ref() {
+            $Node::Branch(branch) => {
+              match level % $dim {
+                $($i => {
+                  let pivots = branch.pivots.$i.as_ref().unwrap();
+
+                  {
+                    let mut matching: u32 = 0;
+                    if &(bbox.0).$i <= pivots.first().unwrap() {
+                      matching |= (1<<0);
+                    }
+                    let ranges = pivots.iter().zip(pivots.iter().skip(1));
+                    for (i,(start,end)) in ranges.enumerate() {
+                      if intersect_iv(start, end, &(bbox.0).$i, &(bbox.1).$i) {
+                        matching |= (1<<i);
+                        matching |= (1<<(i+1));
+                      }
+                    }
+                    if &(bbox.1).$i >= pivots.last().unwrap() {
+                      matching |= (1<<(pivots.len()-1));
+                    }
+                    for (bitfield,b) in branch.intersections.iter() {
+                      if (matching & bitfield) > 0 {
+                        cursors.push_back((level+1,Arc::clone(b)));
+                      }
+                    }
+                  }
+
+                  {
+                    let xs = &branch.nodes;
+                    let ranges = pivots.iter().zip(pivots.iter().skip(1));
+                    if &(bbox.0).$i <= pivots.first().unwrap() {
+                      cursors.push_back((level+1,Arc::clone(xs.first().unwrap())));
+                    }
+                    for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
+                      if intersect_iv(start, end, &(bbox.0).$i, &(bbox.1).$i) {
+                        cursors.push_back((level+1,Arc::clone(b)));
+                      }
+                    }
+                    if &(bbox.1).$i >= pivots.last().unwrap() {
+                      cursors.push_back((level+1,Arc::clone(xs.last().unwrap())));
+                    }
+                  }
+                }),+
+                _ => panic!["unexpected level modulo dimension"]
+              }
+            },
+            $Node::Data(data,rs) => {
+              rows.extend(data.iter()
+                .filter(|pv| {
+                  true $(&& intersect_coord(&(pv.0).$i, &(bbox.0).$i, &(bbox.1).$i))+
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+              );
+              refs.extend(rs.iter()
+                .filter(|r| {
+                  true $(&& intersect_coord(&r.bounds.$i, &(bbox.0).$i, &(bbox.1).$i))+
+                })
+                .cloned()
+                .collect::<Vec<TreeRef<($(Coord<$T>),+)>>>()
+              );
+            },
+          }
+        }
+        (rows,refs)
+      }
       fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,($(Coord<$T>),+),V>>>,
         bbox: &(($($T),+),($($T),+)), fields: Arc<SetupFields>,
         root_index: usize, root_id: TreeId,
@@ -615,6 +691,7 @@ where P: Point, V: Value {
     is_rm: bool,
   ) -> (Option<TreeRef<P>>,CreateTrees<Self>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
+  fn query_local(&mut self, bbox: &P::Bounds) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>, bbox: &P::Bounds,
     fields: Arc<SetupFields>, root_index: usize, root_id: TreeId) -> QStream<P,V> where S: RA;
   async fn remove<S>(&mut self, ids: Arc<Mutex<HashMap<V::Id,P>>>)
