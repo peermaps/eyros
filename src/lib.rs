@@ -29,6 +29,7 @@ use random_access_storage::RandomAccess;
 use desert::{ToBytes,FromBytes,CountBytes};
 use core::ops::{Add,Div};
 use std::fmt::Debug;
+use std::collections::VecDeque;
 
 /// All coordinate values must implement this collection of traits.
 pub trait Scalar: Clone+PartialOrd+From<u8>+Debug
@@ -355,6 +356,25 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     self.meta.roots.push(tr);
     Ok(())
   }
+
+  async fn optimize_get_depth_refs(
+    &mut self, root_id: TreeId, rebuild_depth: usize
+  ) -> Result<Vec<TreeId>,Error> {
+    let mut cursors = VecDeque::new();
+    cursors.push_back((0,root_id));
+    let mut depth_refs = vec![];
+    while let Some((level,id)) = cursors.pop_front() {
+      let tree = self.trees.lock().await.get(&id).await?;
+      let refs = tree.lock().await.list_refs();
+      if level+1 < rebuild_depth {
+        cursors.extend(refs.iter().map(|r| (level+1,r.id)).collect::<Vec<_>>());
+      } else {
+        depth_refs.extend(refs.iter().map(|r| r.id).collect::<Vec<_>>());
+      }
+    }
+    Ok(depth_refs)
+  }
+
   /// Write the changes made to the database to file storage.
   pub async fn sync(&mut self) -> Result<(),Error> {
     self.trees.lock().await.sync().await?;
