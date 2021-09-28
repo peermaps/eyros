@@ -376,28 +376,48 @@ macro_rules! impl_tree {
         $Branch::build(fields, rows, next_tree, is_rm)
       }
       fn list(&mut self) -> (Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>) {
-        let mut cursors = vec![Arc::clone(&self.root)];
+        let mut cursors = VecDeque::new();
+        cursors.push_back(self.root.clone());
         let mut rows = vec![];
         let mut refs = vec![];
-        while let Some(c) = cursors.pop() {
+        while let Some(c) = cursors.pop_front() {
           match c.as_ref() {
             $Node::Branch(branch) => {
               for (_bitfield,b) in branch.intersections.iter() {
-                cursors.push(Arc::clone(b));
+                cursors.push_back(b.clone());
               }
               for b in branch.nodes.iter() {
-                cursors.push(Arc::clone(b));
+                cursors.push_back(b.clone());
               }
             },
             $Node::Data(data,rs) => {
-              rows.extend(data.iter().map(|pv| {
-                (pv.0.clone(),pv.1.clone())
-              }).collect::<Vec<_>>());
+              rows.extend(data.iter().cloned().collect::<Vec<_>>());
               refs.extend_from_slice(&rs);
             },
           }
         }
         (rows,refs)
+      }
+      fn list_refs(&mut self) -> Vec<TreeRef<($(Coord<$T>),+)>> {
+        let mut cursors = VecDeque::new();
+        cursors.push_back(self.root.clone());
+        let mut refs = vec![];
+        while let Some(c) = cursors.pop_front() {
+          match c.as_ref() {
+            $Node::Branch(branch) => {
+              for (_bitfield,b) in branch.intersections.iter() {
+                cursors.push_back(b.clone());
+              }
+              for b in branch.nodes.iter() {
+                cursors.push_back(b.clone());
+              }
+            },
+            $Node::Data(_data,rs) => {
+              refs.extend_from_slice(&rs);
+            },
+          }
+        }
+        refs
       }
       fn query_local(
         &mut self, bbox: &(($($T),+),($($T),+))
@@ -691,6 +711,7 @@ where P: Point, V: Value {
     is_rm: bool,
   ) -> (Option<TreeRef<P>>,CreateTrees<Self>) where Self: Sized;
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
+  fn list_refs(&mut self) -> Vec<TreeRef<P>>;
   fn query_local(&mut self, bbox: &P::Bounds) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>, bbox: &P::Bounds,
     fields: Arc<SetupFields>, root_index: usize, root_id: TreeId) -> QStream<P,V> where S: RA;
