@@ -340,35 +340,6 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       let rs = self.optimize_get_depth_refs(tree_ref.id, rebuild_depth).await?;
       refs.extend(rs);
     }
-    /*
-    let merge_trees = Arc::new(
-      self.meta.roots.iter()
-        .filter(|r| r.is_some())
-        .map(|r| r.as_ref().unwrap().clone())
-        .collect::<Vec<TreeRef<P>>>()
-    );
-    let mut m = Merge {
-      fields: Arc::clone(&self.fields),
-      inserts: &[],
-      deletes: Arc::new(vec![]),
-      inputs: Arc::clone(&merge_trees),
-      roots: self.meta.roots.clone(),
-      trees: Arc::clone(&self.trees),
-      next_tree: &mut self.meta.next_tree,
-      rebuild_depth,
-      error_if_missing: true,
-    };
-    let (tr,rm_trees,create_trees) = m.merge().await?;
-    let trees = &mut self.trees.lock().await;
-    for r in rm_trees.iter() {
-      trees.remove(r).await?;
-    }
-    for (r,t) in create_trees.iter() {
-      trees.put(r,Arc::clone(t)).await?;
-    }
-    self.meta.roots.clear();
-    self.meta.roots.push(tr);
-    */
     Ok(())
   }
 
