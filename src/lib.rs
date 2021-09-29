@@ -327,6 +327,23 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   /// A higher value for `rebuild_depth` will use more memory, as the trees are read into memory
   /// during rebuilding and not written back out again until `sync()` is called.
   pub async fn optimize(&mut self, rebuild_depth: usize) -> Result<(),Error> {
+    let mut refs = VecDeque::new();
+    for root in self.meta.roots.iter() {
+      if let Some(r) = root {
+        refs.push_back(r.clone());
+      }
+    }
+    println!["optimize {:?}", refs.iter().map(|r| r.id).collect::<Vec<_>>()];
+    while let Some(tree_ref) = refs.pop_front() {
+      self.optimize_tree(&tree_ref, rebuild_depth).await?;
+      self.sync().await?;
+      //refs.extend(self.optimize_get_depth_refs(tree_ref.id, rebuild_depth).await?);
+      let rs = self.optimize_get_depth_refs(tree_ref.id, rebuild_depth).await?;
+      println!["optimize_get_depth_refs({})={:?}",
+        tree_ref.id, &rs.iter().map(|r| r.id).collect::<Vec<_>>()];
+      refs.extend(rs);
+    }
+    /*
     let merge_trees = Arc::new(
       self.meta.roots.iter()
         .filter(|r| r.is_some())
@@ -354,15 +371,29 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     }
     self.meta.roots.clear();
     self.meta.roots.push(tr);
+    */
     Ok(())
   }
 
   async fn optimize_tree(&mut self, tree_ref: &TreeRef<P>, rebuild_depth: usize) -> Result<(),Error> {
+    println!["optimize_tree {}", tree_ref.id];
+    // copy tree_ref to a new tree slot and run merge on that
+    // so that refs to this tree still work
+    let mut n_ref = tree_ref.clone();
+    n_ref.id = self.meta.next_tree;
+    self.meta.next_tree += 1;
+    {
+      let mut trees = self.trees.lock().await;
+      let t = trees.get(&tree_ref.id).await?;
+      trees.remove(&tree_ref.id).await?;
+      trees.put(&n_ref.id, t).await?;
+    }
+
     let mut m = Merge {
       fields: Arc::clone(&self.fields),
       inserts: &[],
       deletes: Arc::new(vec![]),
-      inputs: Arc::new(vec![tree_ref.clone()]),
+      inputs: Arc::new(vec![n_ref]),
       roots: vec![],
       trees: Arc::clone(&self.trees),
       next_tree: &mut self.meta.next_tree,
@@ -371,14 +402,13 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     };
     let (tr,rm_trees,create_trees) = m.merge().await?;
     let tr_id = tr.map(|r| r.id);
-    let trees = &mut self.trees.lock().await;
+    let mut trees = self.trees.lock().await;
     for r in rm_trees.iter() {
-      if tr_id != Some(*r) {
-        trees.remove(r).await?;
-      }
+      trees.remove(r).await?;
     }
     for (r,t) in create_trees.iter() {
-      if tr_id != Some(*r) {
+      if tr_id == Some(*r) {
+        println!["write {}", &tree_ref.id];
         trees.put(&tree_ref.id,Arc::clone(t)).await?;
       } else {
         trees.put(r,Arc::clone(t)).await?;
@@ -396,6 +426,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     while let Some((level,id)) = cursors.pop_front() {
       let tree = self.trees.lock().await.get(&id).await?;
       let refs = tree.lock().await.list_refs();
+      println!["list_refs({})={:?}", id, refs.iter().map(|r| r.id).collect::<Vec<_>>()];
       if level+1 < rebuild_depth {
         cursors.extend(refs.iter().map(|r| (level+1,r.id)).collect::<Vec<_>>());
       } else {

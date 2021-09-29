@@ -40,6 +40,11 @@ async fn main() -> Result<(),E> {
     println!["{}: batch for {} records in {} seconds",
       count, batch_size, batch_elapsed];
   }
+  let sync_start = time::Instant::now();
+  db.sync().await?;
+  let sync_elapsed = sync_start.elapsed().as_secs_f64();
+  total += sync_elapsed;
+  println!["# sync in {} seconds", sync_elapsed];
   println!["# wrote {} records in {} seconds\n# {} records / second",
     count, total, (count as f64) / total];
   Ok(())
