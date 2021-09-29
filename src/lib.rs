@@ -333,14 +333,11 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
         refs.push_back(r.clone());
       }
     }
-    println!["optimize {:?}", refs.iter().map(|r| r.id).collect::<Vec<_>>()];
     while let Some(tree_ref) = refs.pop_front() {
       self.optimize_tree(&tree_ref, rebuild_depth).await?;
       self.sync().await?;
       //refs.extend(self.optimize_get_depth_refs(tree_ref.id, rebuild_depth).await?);
       let rs = self.optimize_get_depth_refs(tree_ref.id, rebuild_depth).await?;
-      println!["optimize_get_depth_refs({})={:?}",
-        tree_ref.id, &rs.iter().map(|r| r.id).collect::<Vec<_>>()];
       refs.extend(rs);
     }
     /*
@@ -376,7 +373,6 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   }
 
   async fn optimize_tree(&mut self, tree_ref: &TreeRef<P>, rebuild_depth: usize) -> Result<(),Error> {
-    println!["optimize_tree {}", tree_ref.id];
     // copy tree_ref to a new tree slot and run merge on that
     // so that refs to this tree still work
     let mut n_ref = tree_ref.clone();
@@ -408,7 +404,6 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     }
     for (r,t) in create_trees.iter() {
       if tr_id == Some(*r) {
-        println!["write {}", &tree_ref.id];
         trees.put(&tree_ref.id,Arc::clone(t)).await?;
       } else {
         trees.put(r,Arc::clone(t)).await?;
@@ -426,7 +421,6 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     while let Some((level,id)) = cursors.pop_front() {
       let tree = self.trees.lock().await.get(&id).await?;
       let refs = tree.lock().await.list_refs();
-      println!["list_refs({})={:?}", id, refs.iter().map(|r| r.id).collect::<Vec<_>>()];
       if level+1 < rebuild_depth {
         cursors.extend(refs.iter().map(|r| (level+1,r.id)).collect::<Vec<_>>());
       } else {
