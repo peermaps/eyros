@@ -25,7 +25,7 @@ the bounding box `((-120.0,20.0,10_000),(-100.0,35.0,20_000))`.
 
 The bounding box is of the form `((min_x,min_y,min_z),(max_x,max_y,max_z))`.
 
-``` rust
+``` rust,no_run
 use eyros::{Row,Coord};
 use rand::random;
 use async_std::prelude::*;
