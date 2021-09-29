@@ -747,18 +747,12 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
 
     for _ in 0..self.rebuild_depth {
       let mut trees = self.trees.lock().await;
-      let bounds = l_refs.iter().map(|r| r.bounds.clone()).collect::<Vec<P>>();
-      let intersecting = calc_overlap::<P>(&bounds);
       let mut n_refs = vec![];
-      for (r,overlap) in l_refs.iter().zip(intersecting) {
-        if overlap {
-          let (list,xrefs) = trees.get(&r.id).await?.lock().await.list();
-          lists.push(list);
-          n_refs.extend(xrefs);
-          rm_trees.push(r.id);
-        } else {
-          rows.push((r.bounds.clone(), InsertValue::Ref(r.clone())));
-        }
+      for r in l_refs.iter() {
+        let (list,xrefs) = trees.get(&r.id).await?.lock().await.list();
+        lists.push(list);
+        n_refs.extend(xrefs);
+        rm_trees.push(r.id);
       }
       l_refs = n_refs;
       if l_refs.is_empty() { break }
@@ -863,19 +857,6 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
     }
     Ok(())
   }
-}
-
-fn calc_overlap<X>(bounds: &[X]) -> Vec<bool> where X: Overlap {
-  let mut res = vec![false;bounds.len()];
-  for i in 0..bounds.len() {
-    for j in i+1..bounds.len() {
-      if bounds[i].overlap(&bounds[j]) {
-        res[i] = true;
-        res[j] = true;
-      }
-    }
-  }
-  res
 }
 
 fn find_separation<X>(amin: &X, amax: &X, bmin: &X, bmax: &X, is_min: bool) -> X where X: Scalar {
