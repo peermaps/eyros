@@ -10,6 +10,7 @@ pub struct SetupFields {
   pub branch_factor: usize,
   pub max_depth: usize,
   pub max_records: usize,
+  pub ext_records: usize,
   pub inline: usize,
   pub tree_cache_size: usize,
   pub rebuild_depth: usize,
@@ -39,7 +40,8 @@ impl SetupFields {
       branch_factor: 6,
       max_depth: 8,
       max_records: 20_000,
-      inline: 500,
+      ext_records: 5_000,
+      inline: 50,
       tree_cache_size: 1000,
       rebuild_depth: 2,
       debug: None,
@@ -73,7 +75,8 @@ impl SetupFields {
 ///   .branch_factor(6)
 ///   .max_depth(8)
 ///   .max_records(20_000)
-///   .inline(500)
+///   .ext_records(5_000)
+///   .inline(50)
 ///   .tree_cache_size(1000)
 ///   .rebuild_depth(2)
 ///   .debug(|msg: &str| eprintln!["[debug] {}", msg])
@@ -105,6 +108,10 @@ impl<S> Setup<S> where S: RA {
   }
   pub fn max_records(mut self, mr: usize) -> Self {
     self.fields.max_records = mr;
+    self
+  }
+  pub fn ext_records(mut self, er: usize) -> Self {
+    self.fields.ext_records = er;
     self
   }
   pub fn inline(mut self, n: usize) -> Self {

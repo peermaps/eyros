@@ -107,7 +107,7 @@ macro_rules! impl_tree {
           return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
             inserts[*i].clone()
           }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)>>());
-        } else if !is_rm && rlen <= self.fields.max_records {
+        } else if !is_rm && rlen <= self.fields.ext_records {
           let r = self.next_tree;
           let tr = TreeRef {
             id: r,
