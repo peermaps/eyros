@@ -2,7 +2,7 @@ use eyros::{DB,Coord};
 use async_std::prelude::*;
 
 type P = (Coord<f32>,Coord<f32>);
-type V = u64;
+type V = u32;
 type E = Box<dyn std::error::Error+Sync+Send>;
 
 #[async_std::main]
