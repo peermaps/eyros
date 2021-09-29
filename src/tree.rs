@@ -100,14 +100,23 @@ macro_rules! impl_tree {
       }
       fn build(&mut self, build: &Build, is_rm: bool) -> $Node<$($T),+,V> {
         let rlen = build.range.1 - build.range.0;
+        let mut build_ext = false;
         if rlen == 0 {
           return $Node::Data(vec![],vec![]);
         } else if rlen < self.fields.inline || rlen <= 2 {
           let inserts = &self.inserts;
-          return $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
+          let data = $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
             inserts[*i].clone()
           }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)>>());
+          if data.count_bytes() >= self.fields.inline_max_bytes {
+            build_ext = true;
+          } else {
+            return data;
+          }
         } else if !is_rm && rlen <= self.fields.ext_records {
+          build_ext = true;
+        }
+        if build_ext {
           let r = self.next_tree;
           let tr = TreeRef {
             id: r,

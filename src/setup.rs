@@ -12,6 +12,7 @@ pub struct SetupFields {
   pub max_records: usize,
   pub ext_records: usize,
   pub inline: usize,
+  pub inline_max_bytes: usize,
   pub tree_cache_size: usize,
   pub rebuild_depth: usize,
   pub debug: Option<Sender<String>>,
@@ -23,7 +24,9 @@ impl std::fmt::Debug for SetupFields {
       .field("branch_factor", &self.branch_factor)
       .field("max_depth", &self.max_depth)
       .field("max_records", &self.max_records)
+      .field("ext_records", &self.ext_records)
       .field("inline", &self.inline)
+      .field("inline_max_bytes", &self.inline_max_bytes)
       .field("tree_cache_size", &self.tree_cache_size)
       .field("rebuild_depth", &self.rebuild_depth)
       .field("debug", &format_args!["{}", match &self.debug {
@@ -42,6 +45,7 @@ impl SetupFields {
       max_records: 20_000,
       ext_records: 5_000,
       inline: 50,
+      inline_max_bytes: 20_000,
       tree_cache_size: 1000,
       rebuild_depth: 2,
       debug: None,
@@ -77,6 +81,7 @@ impl SetupFields {
 ///   .max_records(20_000)
 ///   .ext_records(5_000)
 ///   .inline(50)
+///   .inline_max_bytes(20_000)
 ///   .tree_cache_size(1000)
 ///   .rebuild_depth(2)
 ///   .debug(|msg: &str| eprintln!["[debug] {}", msg])
@@ -116,6 +121,10 @@ impl<S> Setup<S> where S: RA {
   }
   pub fn inline(mut self, n: usize) -> Self {
     self.fields.inline = n;
+    self
+  }
+  pub fn inline_max_bytes(mut self, n: usize) -> Self {
+    self.fields.inline_max_bytes = n;
     self
   }
   pub fn tree_cache_size(mut self, n: usize) -> Self {
