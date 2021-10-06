@@ -8,7 +8,7 @@ pub use store::Storage;
 #[cfg(not(feature="wasm"))] #[doc(hidden)] pub use store::FileStore;
 mod setup;
 pub use setup::{Setup,SetupFields};
-mod tree;
+pub mod tree;
 #[doc(hidden)] pub use tree::{Tree,TreeRef,TreeId,Merge};
 mod bytes;
 mod query;
