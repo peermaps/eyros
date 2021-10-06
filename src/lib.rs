@@ -24,7 +24,7 @@ pub use batch::{BatchFields,BatchOptions};
 mod debugger;
 pub use debugger::Debugger;
 
-use async_std::{sync::{Arc,Mutex}};
+use async_std::{sync::{Arc,Mutex,RwLock}};
 use random_access_storage::RandomAccess;
 use desert::{ToBytes,FromBytes,CountBytes};
 use core::ops::{Add,Div};
@@ -153,12 +153,13 @@ pub struct Meta<P> where P: Point {
 }
 
 /// Top-level database API.
+#[derive(Clone)]
 pub struct DB<S,T,P,V>
 where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
   pub fields: Arc<SetupFields>,
   pub meta_store: Arc<Mutex<S>>,
-  pub meta: Meta<P>,
+  pub meta: Arc<RwLock<Meta<P>>>,
   pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
 }
 
@@ -226,7 +227,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       storage: Arc::clone(&setup.storage),
       fields,
       meta_store: Arc::new(Mutex::new(meta_store)),
-      meta,
+      meta: Arc::new(RwLock::new(meta)),
       trees: Arc::new(Mutex::new(trees)),
     })
   }
@@ -279,8 +280,9 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       .map(|x| x.unwrap())
       .collect();
 
+    let mut meta = self.meta.write().await;
     let merge_trees = Arc::new(
-      self.meta.roots.iter()
+      meta.roots.iter()
         .take_while(|r| r.is_some())
         .map(|r| r.as_ref().unwrap().clone())
         .collect::<Vec<TreeRef<P>>>()
@@ -290,9 +292,9 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       inserts: inserts.as_slice(),
       deletes: Arc::new(deletes),
       inputs: Arc::clone(&merge_trees),
-      roots: self.meta.roots.clone(),
+      roots: meta.roots.clone(),
       trees: Arc::clone(&self.trees),
-      next_tree: &mut self.meta.next_tree,
+      next_tree: &mut meta.next_tree,
       rebuild_depth: opts.fields.rebuild_depth,
       error_if_missing: opts.fields.error_if_missing,
     };
@@ -310,16 +312,16 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       trees.put(r,Arc::clone(t)).await?;
     }
     for i in 0..merge_trees.len() {
-      if i < self.meta.roots.len() {
-        self.meta.roots[i] = None;
+      if i < meta.roots.len() {
+        meta.roots[i] = None;
       } else {
-        self.meta.roots.push(None);
+        meta.roots.push(None);
       }
     }
-    if merge_trees.len() < self.meta.roots.len() {
-      self.meta.roots[merge_trees.len()] = tr;
+    if merge_trees.len() < meta.roots.len() {
+      meta.roots[merge_trees.len()] = tr;
     } else {
-      self.meta.roots.push(tr);
+      meta.roots.push(tr);
     }
     Ok(())
   }
@@ -328,7 +330,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   /// during rebuilding and not written back out again until `sync()` is called.
   pub async fn optimize(&mut self, rebuild_depth: usize) -> Result<(),Error> {
     let mut refs = VecDeque::new();
-    for root in self.meta.roots.iter() {
+    for root in self.meta.read().await.roots.iter() {
       if let Some(r) = root {
         refs.push_back(r.clone());
       }
@@ -347,8 +349,9 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     // copy tree_ref to a new tree slot and run merge on that
     // so that refs to this tree still work
     let mut n_ref = tree_ref.clone();
-    n_ref.id = self.meta.next_tree;
-    self.meta.next_tree += 1;
+    let mut meta = self.meta.write().await;
+    n_ref.id = meta.next_tree;
+    meta.next_tree += 1;
     {
       let mut trees = self.trees.lock().await;
       let t = trees.get(&tree_ref.id).await?;
@@ -363,7 +366,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       inputs: Arc::new(vec![n_ref]),
       roots: vec![],
       trees: Arc::clone(&self.trees),
-      next_tree: &mut self.meta.next_tree,
+      next_tree: &mut meta.next_tree,
       rebuild_depth,
       error_if_missing: true,
     };
@@ -404,7 +407,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   /// Write the changes made to the database to file storage.
   pub async fn sync(&mut self) -> Result<(),Error> {
     self.trees.lock().await.sync().await?;
-    let rbytes = self.meta.to_bytes()?;
+    let rbytes = self.meta.read().await.to_bytes()?;
     self.meta_store.lock().await.write(0, &rbytes).await?;
     Ok(())
   }
@@ -415,7 +418,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
     self.fields.log(&format!["query bbox={:?}", bbox]).await?;
     let mut queries = vec![];
-    for (i,root) in self.meta.roots.iter().enumerate() {
+    for (i,root) in self.meta.read().await.roots.iter().enumerate() {
       if let Some(r) = root {
         self.fields.log(&format!["query root i={} id={}", i, r.id]).await?;
         let mut trees = self.trees.lock().await;
