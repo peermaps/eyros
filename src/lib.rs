@@ -153,7 +153,6 @@ pub struct Meta<P> where P: Point {
 }
 
 /// Top-level database API.
-#[derive(Clone)]
 pub struct DB<S,T,P,V>
 where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub storage: Arc<Mutex<Box<dyn Storage<S>>>>,
@@ -161,6 +160,19 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub meta_store: Arc<Mutex<S>>,
   pub meta: Arc<RwLock<Meta<P>>>,
   pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
+}
+
+impl<S,P,V,T> Clone for DB<S,T,P,V>
+where S: RA, P: Point, V: Value, T: Tree<P,V> {
+  fn clone(&self) -> Self {
+    Self {
+      storage: self.storage.clone(),
+      fields: self.fields.clone(),
+      meta_store: self.meta_store.clone(),
+      meta: self.meta.clone(),
+      trees: self.trees.clone(),
+    }
+  }
 }
 
 impl<S,T,P,V> DB<S,T,P,V>
