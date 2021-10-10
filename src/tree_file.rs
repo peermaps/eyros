@@ -1,88 +1,110 @@
 use lru::{LruCache as LRU};
 use crate::{Tree,TreeId,Error,Point,Value,Storage,RA,SetupFields,EyrosErrorKind};
 use std::collections::{HashMap,HashSet};
-use async_std::{sync::{Arc,Mutex}};
+use async_std::{sync::{Arc,Mutex,RwLock}};
 #[cfg(not(feature="wasm"))] use async_std::task::spawn;
 #[cfg(feature="wasm")] use async_std::task::{spawn_local as spawn};
 use futures::future::join_all;
 
 pub struct TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   fields: Arc<SetupFields>,
-  cache: LRU<TreeId,Arc<Mutex<T>>>,
+  cache: Arc<Mutex<LRU<TreeId,Arc<Mutex<T>>>>>,
   storage: Arc<Mutex<Box<dyn Storage<S>>>>,
-  updated: HashMap<TreeId,Arc<Mutex<T>>>,
-  removed: HashSet<TreeId>,
+  updated: Arc<RwLock<HashMap<TreeId,Arc<Mutex<T>>>>>,
+  removed: Arc<RwLock<HashSet<TreeId>>>,
   _marker: std::marker::PhantomData<(P,V)>,
+}
+
+impl<S,T,P,V> Clone for TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
+  fn clone(&self) -> Self {
+    Self {
+      fields: self.fields.clone(),
+      cache: self.cache.clone(),
+      storage: self.storage.clone(),
+      updated: self.updated.clone(),
+      removed: self.removed.clone(),
+      _marker: std::marker::PhantomData,
+    }
+  }
 }
 
 impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   pub fn new(fields: Arc<SetupFields>, storage: Arc<Mutex<Box<dyn Storage<S>>>>) -> Self {
-    let cache = LRU::new(fields.tree_cache_size);
+    let cache = Arc::new(Mutex::new(LRU::new(fields.tree_cache_size)));
     Self {
       fields,
       cache,
       storage,
-      updated: HashMap::new(),
-      removed: HashSet::new(),
+      updated: Arc::new(RwLock::new(HashMap::new())),
+      removed: Arc::new(RwLock::new(HashSet::new())),
       _marker: std::marker::PhantomData,
     }
   }
-  pub async fn get(&mut self, id: &TreeId) -> Result<Arc<Mutex<T>>,Error> {
-    if let Some(t) = self.updated.get(id) {
+  pub async fn get(&self, id: &TreeId) -> Result<Arc<Mutex<T>>,Error> {
+    if let Some(t) = self.updated.read().await.get(id) {
       self.fields.log(&format![
         "get tree id={} file={}: updated", id, get_file(id)
       ]).await?;
       return Ok(Arc::clone(t));
     }
-    if self.removed.contains(id) {
+    if self.removed.read().await.contains(id) {
       self.fields.log(&format![
         "get tree id={} file={}: removed (error)", id, get_file(id)
       ]).await?;
       return EyrosErrorKind::TreeRemoved { id: *id }.raise();
     }
-    match &self.cache.get(id) {
-      Some(t) => {
+    {
+      let mut cache = self.cache.lock().await;
+      if let Some(t) = cache.get(id) {
         self.fields.log(&format![
           "get tree id={} file={}: cached", id, get_file(id)
         ]).await?;
-        Ok(Arc::clone(t))
-      },
-      None => {
-        let file = get_file(id);
-        self.fields.log(&format![
-          "get tree id={} file={}: not cached", id, &file
-        ]).await?;
-        let mut s = self.storage.lock().await.open(&file).await?;
-        let len = s.len().await?;
-        if len == 0 {
-          return EyrosErrorKind::TreeEmpty { id: *id, file }.raise();
-        }
-        let bytes = s.read(0, len).await?;
-        self.fields.log(&format!["read {} bytes from tree id={}", len, id]).await?;
-        let t = Arc::new(Mutex::new(T::from_bytes(&bytes)?.1));
-        self.cache.put(*id, Arc::clone(&t));
-        Ok(t)
+        return Ok(Arc::clone(t));
       }
     }
+    {
+      let file = get_file(id);
+      self.fields.log(&format![
+        "get tree id={} file={}: not cached", id, &file
+      ]).await?;
+      let mut s = self.storage.lock().await.open(&file).await?;
+      let len = s.len().await?;
+      if len == 0 {
+        return EyrosErrorKind::TreeEmpty { id: *id, file }.raise();
+      }
+      let bytes = s.read(0, len).await?;
+      self.fields.log(&format!["read {} bytes from tree id={}", len, id]).await?;
+      let t = Arc::new(Mutex::new(T::from_bytes(&bytes)?.1));
+      self.cache.lock().await.put(*id, Arc::clone(&t));
+      Ok(t)
+    }
   }
-  pub async fn put(&mut self, id: &TreeId, t: Arc<Mutex<T>>) -> Result<(),Error> {
+  pub async fn put(&self, id: &TreeId, t: Arc<Mutex<T>>) -> Result<(),Error> {
     self.fields.log(&format!["put tree id={}", id]).await?;
-    self.cache.put(*id, Arc::clone(&t));
-    self.updated.insert(*id, Arc::clone(&t));
-    self.removed.remove(id);
+    let mut cache = self.cache.lock().await;
+    let mut updated = self.updated.write().await;
+    let mut removed = self.removed.write().await;
+    cache.put(*id, Arc::clone(&t));
+    updated.insert(*id, Arc::clone(&t));
+    removed.remove(id);
     Ok(())
   }
-  pub async fn remove(&mut self, id: &TreeId) -> Result<(),Error> {
+  pub async fn remove(&self, id: &TreeId) -> Result<(),Error> {
     self.fields.log(&format!["remove tree id={}", id]).await?;
-    self.cache.pop(id);
-    self.updated.remove(id);
-    self.removed.insert(*id);
+    let mut cache = self.cache.lock().await;
+    let mut updated = self.updated.write().await;
+    let mut removed = self.removed.write().await;
+    cache.pop(id);
+    updated.remove(id);
+    removed.insert(*id);
     Ok(())
   }
-  pub async fn sync(&mut self) -> Result<(),Error> {
+  pub async fn sync(&self) -> Result<(),Error> {
     self.fields.log("sync begin").await?;
+    let mut updated = self.updated.write().await;
+    let mut removed = self.removed.write().await;
     let mut work = vec![];
-    for (id,t) in self.updated.iter() {
+    for (id,t) in updated.iter() {
       let file = get_file(id);
       let tree = Arc::clone(t);
       let storage = Arc::clone(&self.storage);
@@ -96,7 +118,7 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
         res
       }));
     }
-    for id in self.removed.iter() {
+    for id in removed.iter() {
       let file = get_file(id);
       let storage = self.storage.clone();
       self.fields.log(&format!["sync tree (remove) id={} file={}", id, &file]).await?;
@@ -111,8 +133,8 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
       }));
     }
     for r in join_all(work).await { r?; }
-    self.updated.clear();
-    self.removed.clear();
+    updated.clear();
+    removed.clear();
     self.fields.log("sync complete").await?;
     Ok(())
   }

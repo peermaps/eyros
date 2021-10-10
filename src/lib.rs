@@ -159,7 +159,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   pub fields: Arc<SetupFields>,
   pub meta_store: Arc<Mutex<S>>,
   pub meta: Arc<RwLock<Meta<P>>>,
-  pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
+  pub trees: Arc<TreeFile<S,T,P,V>>,
 }
 
 impl<S,P,V,T> Clone for DB<S,T,P,V>
@@ -240,7 +240,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       fields,
       meta_store: Arc::new(Mutex::new(meta_store)),
       meta: Arc::new(RwLock::new(meta)),
-      trees: Arc::new(Mutex::new(trees)),
+      trees: Arc::new(trees),
     })
   }
   /// Create a database instance from `storage`, an interface for reading, writing, and removing
@@ -303,9 +303,9 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       fields: Arc::clone(&self.fields),
       inserts: inserts.as_slice(),
       deletes: Arc::new(deletes),
-      inputs: Arc::clone(&merge_trees),
+      inputs: merge_trees.clone(),
       roots: meta.roots.clone(),
-      trees: Arc::clone(&self.trees),
+      trees: self.trees.clone(),
       next_tree: &mut meta.next_tree,
       rebuild_depth: opts.fields.rebuild_depth,
       error_if_missing: opts.fields.error_if_missing,
@@ -316,12 +316,11 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     }
     let (tr,rm_trees,create_trees) = m.merge().await?;
     //eprintln!["root {}={} bytes", t.count_bytes(), t.to_bytes()?.len()];
-    let trees = &mut self.trees.lock().await;
     for r in rm_trees.iter() {
-      trees.remove(r).await?;
+      self.trees.remove(r).await?;
     }
     for (r,t) in create_trees.iter() {
-      trees.put(r,Arc::clone(t)).await?;
+      self.trees.put(r,Arc::clone(t)).await?;
     }
     for i in 0..merge_trees.len() {
       if i < meta.roots.len() {
@@ -365,10 +364,9 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     n_ref.id = meta.next_tree;
     meta.next_tree += 1;
     {
-      let mut trees = self.trees.lock().await;
-      let t = trees.get(&tree_ref.id).await?;
-      trees.remove(&tree_ref.id).await?;
-      trees.put(&n_ref.id, t).await?;
+      let t = self.trees.get(&tree_ref.id).await?;
+      self.trees.remove(&tree_ref.id).await?;
+      self.trees.put(&n_ref.id, t).await?;
     }
 
     let mut m = Merge {
@@ -377,22 +375,21 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
       deletes: Arc::new(vec![]),
       inputs: Arc::new(vec![n_ref]),
       roots: vec![],
-      trees: Arc::clone(&self.trees),
+      trees: self.trees.clone(),
       next_tree: &mut meta.next_tree,
       rebuild_depth,
       error_if_missing: true,
     };
     let (tr,rm_trees,create_trees) = m.merge().await?;
     let tr_id = tr.map(|r| r.id);
-    let mut trees = self.trees.lock().await;
     for r in rm_trees.iter() {
-      trees.remove(r).await?;
+      self.trees.remove(r).await?;
     }
     for (r,t) in create_trees.iter() {
       if tr_id == Some(*r) {
-        trees.put(&tree_ref.id,Arc::clone(t)).await?;
+        self.trees.put(&tree_ref.id,Arc::clone(t)).await?;
       } else {
-        trees.put(r,Arc::clone(t)).await?;
+        self.trees.put(r,Arc::clone(t)).await?;
       }
     }
     Ok(())
@@ -405,7 +402,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     cursors.push_back((0,tree_id));
     let mut depth_refs = vec![];
     while let Some((level,id)) = cursors.pop_front() {
-      let tree = self.trees.lock().await.get(&id).await?;
+      let tree = self.trees.get(&id).await?;
       let refs = tree.lock().await.list_refs();
       if level+1 < rebuild_depth {
         cursors.extend(refs.iter().map(|r| (level+1,r.id)).collect::<Vec<_>>());
@@ -418,7 +415,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
 
   /// Write the changes made to the database to file storage.
   pub async fn sync(&mut self) -> Result<(),Error> {
-    self.trees.lock().await.sync().await?;
+    self.trees.sync().await?;
     let rbytes = self.meta.read().await.to_bytes()?;
     self.meta_store.lock().await.write(0, &rbytes).await?;
     Ok(())
@@ -433,10 +430,9 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     for (i,root) in self.meta.read().await.roots.iter().enumerate() {
       if let Some(r) = root {
         self.fields.log(&format!["query root i={} id={}", i, r.id]).await?;
-        let mut trees = self.trees.lock().await;
-        let t = trees.get(&r.id).await?;
+        let t = self.trees.get(&r.id).await?;
         queries.push(t.lock().await.query(
-          Arc::clone(&self.trees), bbox, Arc::clone(&self.fields), i, r.id
+          self.trees.clone(), bbox, Arc::clone(&self.fields), i, r.id
         ));
       }
     }

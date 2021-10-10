@@ -506,7 +506,7 @@ macro_rules! impl_tree {
         }
         (rows,refs)
       }
-      fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,($(Coord<$T>),+),V>>>,
+      fn query<S>(&mut self, trees: Arc<TreeFile<S,Self,($(Coord<$T>),+),V>>,
         bbox: &(($($T),+),($($T),+)), fields: Arc<SetupFields>,
         root_index: usize, root_id: TreeId,
       ) -> QStream<($(Coord<$T>),+),V> where S: RA {
@@ -524,7 +524,7 @@ macro_rules! impl_tree {
           let trees_c = trees.clone();
           spawn(async move {
             while let Ok(r) = refs_r.recv().await {
-              match Arc::clone(&trees_c).lock().await.get(&r).await {
+              match trees_c.get(&r).await {
                 Err(e) => queue_s.send(Err(e.into())).await.unwrap(),
                 Ok(t) => {
                   let (rows,tr_refs) = t.lock().await.query_local(&bbox_c);
@@ -708,7 +708,7 @@ where P: Point, V: Value {
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn list_refs(&mut self) -> Vec<TreeRef<P>>;
   fn query_local(&mut self, bbox: &P::Bounds) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
-  fn query<S>(&mut self, trees: Arc<Mutex<TreeFile<S,Self,P,V>>>, bbox: &P::Bounds,
+  fn query<S>(&mut self, trees: Arc<TreeFile<S,Self,P,V>>, bbox: &P::Bounds,
     fields: Arc<SetupFields>, root_index: usize, root_id: TreeId) -> QStream<P,V> where S: RA;
   async fn remove<S>(&mut self, ids: Arc<Mutex<HashMap<V::Id,P>>>)
     -> (Option<(Vec<(P,V)>,Vec<TreeRef<P>>)>,Vec<TreeId>) where S: RA;
@@ -721,7 +721,7 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
   pub deletes: Arc<Vec<(P,V::Id)>>,
   pub inputs: Arc<Vec<TreeRef<P>>>,
   pub roots: Vec<Root<P>>,
-  pub trees: Arc<Mutex<TreeFile<S,T,P,V>>>,
+  pub trees: Arc<TreeFile<S,T,P,V>>,
   pub next_tree: &'a mut TreeId,
   pub rebuild_depth: usize,
   pub error_if_missing: bool,
@@ -741,10 +741,9 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
     l_refs.extend_from_slice(&self.inputs);
 
     for _ in 0..self.rebuild_depth {
-      let mut trees = self.trees.lock().await;
       let mut n_refs = vec![];
       for r in l_refs.iter() {
-        let (list,xrefs) = trees.get(&r.id).await?.lock().await.list();
+        let (list,xrefs) = self.trees.get(&r.id).await?.lock().await.list();
         lists.push(list);
         n_refs.extend(xrefs);
         rm_trees.push(r.id);
@@ -793,15 +792,15 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
       if ro.is_none() { continue }
       let r = ro.as_ref().unwrap();
       // TODO: remove the delete when found
-      let trees = Arc::clone(&self.trees);
-      let xids = Arc::clone(&ids);
+      let trees = self.trees.clone();
+      let xids = ids.clone();
       let id = r.id;
       let xfields = Arc::clone(&fields);
       work.push(async move {
         let mut refs = vec![id];
         while !refs.is_empty() {
           let r = refs.pop().unwrap();
-          let tm = trees.lock().await.get(&r).await?;
+          let tm = trees.get(&r).await?;
           let mut t = tm.lock().await;
           let (built,nrefs) = t.remove::<S>(
             Arc::clone(&xids),
@@ -817,7 +816,7 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
             }).collect::<Vec<_>>());
             let mut next_tree = r;
             if rows.is_empty() {
-              trees.lock().await.put(&r, Arc::new(Mutex::new(T::empty()))).await?;
+              trees.put(&r, Arc::new(Mutex::new(T::empty()))).await?;
             } else {
               let (tr, create_trees) = T::build(
                 Arc::clone(&xfields),
@@ -832,7 +831,7 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
               ];
               assert![create_trees.len() == 1, "unexpected external sub-trees during remove()"];
               for (r,t) in create_trees {
-                trees.lock().await.put(&r, t).await?;
+                trees.put(&r, t).await?;
               }
             }
           }
