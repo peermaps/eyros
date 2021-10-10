@@ -542,6 +542,7 @@ macro_rules! impl_tree {
           queue_r: channel::Receiver<Result<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeId>),Error>>,
           queue_s: channel::Sender<Result<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeId>),Error>>,
           refs_s: channel::Sender<TreeId>,
+          fields: Arc<SetupFields>,
         }
         let istate = {
           let (v_results,v_refs) = self.query_local(bbox);
@@ -556,6 +557,7 @@ macro_rules! impl_tree {
             queue_r: queue_receiver.clone(),
             queue_s: queue_sender.clone(),
             refs_s: refs_sender.clone(),
+            fields: fields.clone(),
           }
         };
         Box::new(unfold(istate, async move |mut state| {
@@ -591,6 +593,10 @@ macro_rules! impl_tree {
           }
           state.refs_s.close();
           state.queue_s.close();
+          if let Err(e) = state.fields.log(&format!["query end root_index={} root_id={}",
+          root_index, root_id]).await {
+            return Some((Err(e.into()),state));
+          }
           None
         }))
       }
