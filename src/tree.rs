@@ -1,7 +1,9 @@
 use desert::{ToBytes,FromBytes,CountBytes};
 use crate::{Scalar,Point,Value,Coord,Error,EyrosErrorKind,Overlap,RA,Root,
   query::QStream, tree_file::TreeFile, SetupFields};
-use async_std::{sync::{Arc,Mutex}};
+use async_std::{sync::{Arc,Mutex},channel};
+#[cfg(not(feature="wasm"))] use async_std::task::spawn;
+#[cfg(feature="wasm")] use async_std::task::{spawn_local as spawn};
 use crate::unfold::unfold;
 use std::collections::{HashMap,HashSet,VecDeque};
 use futures::future::join_all;
@@ -508,104 +510,88 @@ macro_rules! impl_tree {
         bbox: &(($($T),+),($($T),+)), fields: Arc<SetupFields>,
         root_index: usize, root_id: TreeId,
       ) -> QStream<($(Coord<$T>),+),V> where S: RA {
-        let istate = (
-          bbox.clone(),
-          vec![], // queue
-          vec![(0usize,Arc::clone(&self.root))], // cursors
-          vec![], // refs
-          Arc::clone(&trees),
-          Arc::clone(&fields)
-        );
-        Box::new(unfold(istate, async move |mut state| {
-          let bbox = &state.0;
-          let queue = &mut state.1;
-          let cursors = &mut state.2;
-          let refs = &mut state.3;
-          let trees = &mut state.4;
-          let fields = &mut state.5;
-          loop {
-            if let Some(q) = queue.pop() {
-              return Some((Ok(q),state));
-            }
-            if cursors.is_empty() && !refs.is_empty() {
-              match Arc::clone(trees).lock().await.get(&refs.pop().unwrap()).await {
-                Err(e) => return Some((Err(e.into()),state)),
-                Ok(t) => cursors.push((0usize,Arc::clone(&t.lock().await.root))),
-              };
-              continue;
-            } else if cursors.is_empty() {
-              if let Err(e) = fields.log(&format!["query end root_index={} root_id={}",
-              root_index, root_id]).await {
-                return Some((Err(e.into()),state));
-              }
-              return None;
-            }
-            let (level,c) = cursors.pop().unwrap();
-            match c.as_ref() {
-              $Node::Branch(branch) => {
-                match level % $dim {
-                  $($i => {
-                    let pivots = branch.pivots.$i.as_ref().unwrap();
+        let nproc = std::thread::available_concurrency().map(|n| n.get()).unwrap_or(1);
+        let (refs_sender,refs_receiver) = channel::unbounded();
+        let (queue_sender,queue_receiver) = channel::bounded::<
+          Result<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeId>),Error>
+        >(nproc);
 
-                    {
-                      let mut matching: u32 = 0;
-                      if &(bbox.0).$i <= pivots.first().unwrap() {
-                        matching |= (1<<0);
-                      }
-                      let ranges = pivots.iter().zip(pivots.iter().skip(1));
-                      for (i,(start,end)) in ranges.enumerate() {
-                        if intersect_iv(start, end, &(bbox.0).$i, &(bbox.1).$i) {
-                          matching |= (1<<i);
-                          matching |= (1<<(i+1));
-                        }
-                      }
-                      if &(bbox.1).$i >= pivots.last().unwrap() {
-                        matching |= (1<<(pivots.len()-1));
-                      }
-                      for (bitfield,b) in branch.intersections.iter() {
-                        if (matching & bitfield) > 0 {
-                          cursors.push((level+1,Arc::clone(b)));
-                        }
-                      }
-                    }
-
-                    {
-                      let xs = &branch.nodes;
-                      let ranges = pivots.iter().zip(pivots.iter().skip(1));
-                      if &(bbox.0).$i <= pivots.first().unwrap() {
-                        cursors.push((level+1,Arc::clone(xs.first().unwrap())));
-                      }
-                      for ((start,end),b) in ranges.zip(xs.iter().skip(1)) {
-                        if intersect_iv(start, end, &(bbox.0).$i, &(bbox.1).$i) {
-                          cursors.push((level+1,Arc::clone(b)));
-                        }
-                      }
-                      if &(bbox.1).$i >= pivots.last().unwrap() {
-                        cursors.push((level+1,Arc::clone(xs.last().unwrap())));
-                      }
-                    }
-                  }),+
-                  _ => panic!["unexpected level modulo dimension"]
+        // todo: factor out locking
+        for _ in 0..nproc {
+          let refs_r = refs_receiver.clone();
+          let queue_s = queue_sender.clone();
+          let bbox_c = bbox.clone();
+          let trees_c = trees.clone();
+          spawn(async move {
+            while let Ok(r) = refs_r.recv().await {
+              match Arc::clone(&trees_c).lock().await.get(&r).await {
+                Err(e) => queue_s.send(Err(e.into())).await.unwrap(),
+                Ok(t) => {
+                  let (rows,tr_refs) = t.lock().await.query_local(&bbox_c);
+                  let refs = tr_refs.iter().map(|r| r.id).collect::<Vec<TreeId>>();
+                  queue_s.send(Ok((rows,refs))).await.unwrap();
                 }
-              },
-              $Node::Data(data,rs) => {
-                queue.extend(data.iter()
-                  .filter(|pv| {
-                    true $(&& intersect_coord(&(pv.0).$i, &(bbox.0).$i, &(bbox.1).$i))+
-                  })
-                  .map(|pv| { pv.clone() })
-                  .collect::<Vec<_>>()
-                );
-                refs.extend(rs.iter()
-                  .filter(|r| {
-                    true $(&& intersect_coord(&r.bounds.$i, &(bbox.0).$i, &(bbox.1).$i))+
-                  })
-                  .map(|r| { r.id })
-                  .collect::<Vec<TreeId>>()
-                );
-              },
+              };
+            }
+          });
+        }
+        struct QState<$($T: Scalar),+, V: Value> {
+          refs: VecDeque<TreeId>,
+          results: VecDeque<(($(Coord<$T>),+),V)>,
+          active: usize,
+          queue_r: channel::Receiver<Result<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeId>),Error>>,
+          queue_s: channel::Sender<Result<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeId>),Error>>,
+          refs_s: channel::Sender<TreeId>,
+        }
+        let istate = {
+          let (v_results,v_refs) = self.query_local(bbox);
+          let mut refs = VecDeque::with_capacity(v_refs.len());
+          let mut results = VecDeque::with_capacity(v_results.len());
+          for r in v_results { results.push_back(r); }
+          for r in v_refs { refs.push_back(r.id); }
+          QState {
+            refs,
+            results,
+            active: 0,
+            queue_r: queue_receiver.clone(),
+            queue_s: queue_sender.clone(),
+            refs_s: refs_sender.clone(),
+          }
+        };
+        Box::new(unfold(istate, async move |mut state| {
+          loop {
+            if let Some(res) = state.results.pop_front() {
+              return Some((Ok(res),state));
+            } else if state.active > 0 {
+              match state.queue_r.recv().await.unwrap() {
+                Ok((v_results,v_refs)) => {
+                  state.active -= 1;
+                  state.results.reserve(v_results.len());
+                  state.refs.reserve(v_refs.len());
+                  for r in v_results { state.results.push_back(r); }
+                  for r in v_refs { state.refs.push_back(r); }
+                },
+                Err(e) => {
+                  state.active -= 1;
+                  return Some((Err(e.into()),state));
+                },
+              }
+            } else if !state.refs.is_empty() {
+              for _ in 0..nproc {
+                if let Some(r) = state.refs.pop_front() {
+                  state.active += 1;
+                  state.refs_s.send(r).await.unwrap();
+                } else {
+                  break;
+                }
+              }
+            } else {
+              break;
             }
           }
+          state.refs_s.close();
+          state.queue_s.close();
+          None
         }))
       }
       async fn remove<S>(&mut self, xids: Arc<Mutex<HashMap<V::Id,($(Coord<$T>),+)>>>)
