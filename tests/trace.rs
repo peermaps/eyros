@@ -38,6 +38,7 @@ async fn trace() -> Result<(),Error> {
     count += 1;
   }
   assert_eq![count, size];
+  task::sleep(std::time::Duration::from_secs_f32(0.1)).await;
   assert_eq![
     refs.lock().await.iter().map(|r| r.id).collect::<Vec<TreeId>>(),
     vec![0]
