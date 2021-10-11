@@ -1,7 +1,7 @@
 use desert::{ToBytes,FromBytes,CountBytes};
 use crate::{Scalar,Point,Value,Coord,Error,EyrosErrorKind,Overlap,RA,Root,
   query::{QStream,QTrace}, tree_file::TreeFile, SetupFields};
-use async_std::{sync::{Arc,Mutex},channel};
+use async_std::{sync::{Arc,Mutex},task,channel};
 #[cfg(not(feature="wasm"))] use async_std::task::spawn;
 #[cfg(feature="wasm")] use async_std::task::{spawn_local as spawn};
 use crate::unfold::unfold;
@@ -525,7 +525,7 @@ macro_rules! impl_tree {
         fields: Arc<SetupFields>,
         root_index: usize,
         root: &TreeRef<($(Coord<$T>),+)>,
-        o_trace: Option<Arc<Box<dyn QTrace<($(Coord<$T>),+)>>>>,
+        o_trace: Option<Arc<Mutex<Box<dyn QTrace<($(Coord<$T>),+)>>>>>,
       ) -> QStream<($(Coord<$T>),+),V> where S: RA {
         let nproc = std::thread::available_concurrency().map(|n| n.get()).unwrap_or(1);
         let (refs_sender,refs_receiver) = channel::unbounded::<TreeRef<($(Coord<$T>),+)>>();
@@ -534,7 +534,12 @@ macro_rules! impl_tree {
           Vec<TreeRef<($(Coord<$T>),+)>>,
         ),Error>
         >(nproc);
-        if let Some(trace) = &o_trace { trace.trace(root); }
+        if let Some(trace_r) = &o_trace {
+          let trace = trace_r.clone();
+          task::block_on(async move {
+            trace.lock().await.trace(root);
+          });
+        }
 
         for _ in 0..nproc {
           let refs_r = refs_receiver.clone();
@@ -545,7 +550,7 @@ macro_rules! impl_tree {
             let trace = trace_r.clone();
             spawn(async move {
               while let Ok(r) = refs_r.recv().await {
-                trace.trace(&r);
+                trace.lock().await.trace(&r);
                 match trees_c.get(&r.id).await {
                   Err(e) => queue_s.send(Err(e.into())).await.unwrap(),
                   Ok(t) => {
@@ -774,7 +779,7 @@ where P: Point, V: Value {
     fields: Arc<SetupFields>,
     root_index: usize,
     root: &TreeRef<P>,
-    o_trace: Option<Arc<Box<dyn QTrace<P>>>>,
+    o_trace: Option<Arc<Mutex<Box<dyn QTrace<P>>>>>,
   ) -> QStream<P,V> where S: RA;
   async fn remove<S>(&mut self, ids: Arc<Mutex<HashMap<V::Id,P>>>)
     -> (Option<(Vec<(P,V)>,Vec<TreeRef<P>>)>,Vec<TreeId>) where S: RA;

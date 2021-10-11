@@ -3,7 +3,7 @@ pub trait Debugger {
 }
 
 #[cfg(not(feature="wasm"))]
-impl<F> Debugger for F where F: FnMut (&str) {
+impl<F> Debugger for F where F: FnMut(&str) {
   fn send(&mut self, msg: &str) {
     (self)(msg)
   }

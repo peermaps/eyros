@@ -446,7 +446,7 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   ) -> Result<query::QStream<P,V>,Error> {
     self.fields.log(&format!["query bbox={:?}", bbox]).await?;
     let mut queries = vec![];
-    let trace_r = Arc::new(trace);
+    let trace_r = Arc::new(Mutex::new(trace));
     for (i,root) in self.meta.read().await.roots.iter().enumerate() {
       if let Some(r) = root {
         self.fields.log(&format!["query root i={} id={}", i, r.id]).await?;
