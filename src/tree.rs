@@ -1,7 +1,7 @@
 use desert::{ToBytes,FromBytes,CountBytes};
 use crate::{Scalar,Point,Value,Coord,Error,EyrosErrorKind,Overlap,RA,Root,
   query::{QStream,QTrace}, tree_file::TreeFile, SetupFields};
-use async_std::{sync::{Arc,Mutex},task,channel};
+use async_std::{sync::{Arc,Mutex},channel};
 #[cfg(not(feature="wasm"))] use async_std::task::spawn;
 #[cfg(feature="wasm")] use async_std::task::{spawn_local as spawn};
 use crate::unfold::unfold;
@@ -534,10 +534,15 @@ macro_rules! impl_tree {
           Vec<TreeRef<($(Coord<$T>),+)>>,
         ),Error>
         >(nproc);
+        let (trace_sender,trace_receiver) = channel::unbounded::<TreeRef<($(Coord<$T>),+)>>();
         if let Some(trace_r) = &o_trace {
           let trace = trace_r.clone();
-          task::block_on(async move {
-            trace.lock().await.trace(root);
+          let root_c = root.clone();
+          spawn(async move {
+            trace.lock().await.trace(root_c);
+            while let Ok(tr) = trace_receiver.recv().await {
+              trace.lock().await.trace(tr);
+            }
           });
         }
 
@@ -546,33 +551,21 @@ macro_rules! impl_tree {
           let queue_s = queue_sender.clone();
           let bbox_c = bbox.clone();
           let trees_c = trees.clone();
-          if let Some(trace_r) = &o_trace {
-            let trace = trace_r.clone();
-            spawn(async move {
-              while let Ok(r) = refs_r.recv().await {
-                trace.lock().await.trace(&r);
-                match trees_c.get(&r.id).await {
-                  Err(e) => queue_s.send(Err(e.into())).await.unwrap(),
-                  Ok(t) => {
-                    let (rows,refs) = t.lock().await.query_local(&bbox_c);
-                    queue_s.send(Ok((rows,refs))).await.unwrap();
-                  }
-                };
-              }
-            });
-          } else {
-            spawn(async move {
-              while let Ok(r) = refs_r.recv().await {
-                match trees_c.get(&r.id).await {
-                  Err(e) => queue_s.send(Err(e.into())).await.unwrap(),
-                  Ok(t) => {
-                    let (rows,refs) = t.lock().await.query_local(&bbox_c);
-                    queue_s.send(Ok((rows,refs))).await.unwrap();
-                  }
-                };
-              }
-            });
-          }
+          let is_tracing = o_trace.is_some();
+          let trace_s = trace_sender.clone();
+          spawn(async move {
+            while let Ok(r) = refs_r.recv().await {
+              if is_tracing { trace_s.send(r.clone()).await.unwrap(); }
+              match trees_c.get(&r.id).await {
+                Err(e) => queue_s.send(Err(e.into())).await.unwrap(),
+                Ok(t) => {
+                  let (rows,refs) = t.lock().await.query_local(&bbox_c);
+                  queue_s.send(Ok((rows,refs))).await.unwrap();
+                }
+              };
+            }
+            trace_s.close();
+          });
         }
         struct QState<$($T: Scalar),+, V: Value> {
           refs: VecDeque<TreeRef<($(Coord<$T>),+)>>,
