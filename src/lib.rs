@@ -12,6 +12,7 @@ pub mod tree;
 #[doc(hidden)] pub use tree::{Tree,TreeRef,TreeId,Merge};
 mod bytes;
 mod query;
+pub use query::QTrace;
 mod unfold;
 mod tree_file;
 use tree_file::TreeFile;
@@ -432,7 +433,31 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
         self.fields.log(&format!["query root i={} id={}", i, r.id]).await?;
         let t = self.trees.get(&r.id).await?;
         queries.push(t.lock().await.query(
-          self.trees.clone(), bbox, Arc::clone(&self.fields), i, r.id
+          self.trees.clone(), bbox, Arc::clone(&self.fields), i, r
+        ));
+      }
+    }
+    query::from_queries(queries)
+  }
+  pub async fn query_trace(
+    &mut self,
+    bbox: &P::Bounds,
+    trace: Box<dyn query::QTrace<P>>,
+  ) -> Result<query::QStream<P,V>,Error> {
+    self.fields.log(&format!["query bbox={:?}", bbox]).await?;
+    let mut queries = vec![];
+    let trace_r = Arc::new(trace);
+    for (i,root) in self.meta.read().await.roots.iter().enumerate() {
+      if let Some(r) = root {
+        self.fields.log(&format!["query root i={} id={}", i, r.id]).await?;
+        let t = self.trees.get(&r.id).await?;
+        queries.push(t.lock().await.query_trace(
+          self.trees.clone(),
+          bbox,
+          Arc::clone(&self.fields),
+          i,
+          r,
+          Some(trace_r.clone()),
         ));
       }
     }

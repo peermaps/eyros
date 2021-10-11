@@ -1,5 +1,5 @@
 use lru::{LruCache as LRU};
-use crate::{Tree,TreeId,Error,Point,Value,Storage,RA,SetupFields,EyrosErrorKind};
+use crate::{Tree,TreeId,tree,Error,Point,Value,Storage,RA,SetupFields,EyrosErrorKind};
 use std::collections::{HashMap,HashSet};
 use async_std::{sync::{Arc,Mutex,RwLock}};
 #[cfg(not(feature="wasm"))] use async_std::task::spawn;
@@ -43,13 +43,13 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
   pub async fn get(&self, id: &TreeId) -> Result<Arc<Mutex<T>>,Error> {
     if let Some(t) = self.updated.read().await.get(id) {
       self.fields.log(&format![
-        "get tree id={} file={}: updated", id, get_file(id)
+        "get tree id={} file={}: updated", id, tree::get_file_from_id(id)
       ]).await?;
       return Ok(Arc::clone(t));
     }
     if self.removed.read().await.contains(id) {
       self.fields.log(&format![
-        "get tree id={} file={}: removed (error)", id, get_file(id)
+        "get tree id={} file={}: removed (error)", id, tree::get_file_from_id(id)
       ]).await?;
       return EyrosErrorKind::TreeRemoved { id: *id }.raise();
     }
@@ -57,13 +57,13 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
       let mut cache = self.cache.lock().await;
       if let Some(t) = cache.get(id) {
         self.fields.log(&format![
-          "get tree id={} file={}: cached", id, get_file(id)
+          "get tree id={} file={}: cached", id, tree::get_file_from_id(id)
         ]).await?;
         return Ok(Arc::clone(t));
       }
     }
     {
-      let file = get_file(id);
+      let file = tree::get_file_from_id(id);
       self.fields.log(&format![
         "get tree id={} file={}: not cached", id, &file
       ]).await?;
@@ -105,7 +105,7 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
     let mut removed = self.removed.write().await;
     let mut work = vec![];
     for (id,t) in updated.iter() {
-      let file = get_file(id);
+      let file = tree::get_file_from_id(id);
       let tree = Arc::clone(t);
       let storage = Arc::clone(&self.storage);
       self.fields.log(&format!["sync tree (updated) id={} file={}", id, &file]).await?;
@@ -119,7 +119,7 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
       }));
     }
     for id in removed.iter() {
-      let file = get_file(id);
+      let file = tree::get_file_from_id(id);
       let storage = self.storage.clone();
       self.fields.log(&format!["sync tree (remove) id={} file={}", id, &file]).await?;
       work.push(spawn(async move {
@@ -138,18 +138,4 @@ impl<S,T,P,V> TreeFile<S,T,P,V> where T: Tree<P,V>, P: Point, V: Value, S: RA {
     self.fields.log("sync complete").await?;
     Ok(())
   }
-}
-
-fn get_file(id: &TreeId) -> String {
-  format![
-    "t/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}",
-    (id >> (8*7)) % 0x100,
-    (id >> (8*6)) % 0x100,
-    (id >> (8*5)) % 0x100,
-    (id >> (8*4)) % 0x100,
-    (id >> (8*3)) % 0x100,
-    (id >> (8*2)) % 0x100,
-    (id >> 8) % 0x100,
-    id % 0x100,
-  ]
 }

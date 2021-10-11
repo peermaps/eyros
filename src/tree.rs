@@ -1,6 +1,6 @@
 use desert::{ToBytes,FromBytes,CountBytes};
 use crate::{Scalar,Point,Value,Coord,Error,EyrosErrorKind,Overlap,RA,Root,
-  query::QStream, tree_file::TreeFile, SetupFields};
+  query::{QStream,QTrace}, tree_file::TreeFile, SetupFields};
 use async_std::{sync::{Arc,Mutex},channel};
 #[cfg(not(feature="wasm"))] use async_std::task::spawn;
 #[cfg(feature="wasm")] use async_std::task::{spawn_local as spawn};
@@ -506,50 +506,91 @@ macro_rules! impl_tree {
         }
         (rows,refs)
       }
-      fn query<S>(&mut self, trees: Arc<TreeFile<S,Self,($(Coord<$T>),+),V>>,
-        bbox: &(($($T),+),($($T),+)), fields: Arc<SetupFields>,
-        root_index: usize, root_id: TreeId,
+
+      fn query<S>(
+        &mut self,
+        trees: Arc<TreeFile<S,Self,($(Coord<$T>),+),V>>,
+        bbox: &(($($T),+),($($T),+)),
+        fields: Arc<SetupFields>,
+        root_index: usize,
+        root: &TreeRef<($(Coord<$T>),+)>,
+      ) -> QStream<($(Coord<$T>),+),V> where S: RA {
+        self.query_trace(trees, bbox, fields, root_index, root, None)
+      }
+
+      fn query_trace<S>(
+        &mut self,
+        trees: Arc<TreeFile<S,Self,($(Coord<$T>),+),V>>,
+        bbox: &(($($T),+),($($T),+)),
+        fields: Arc<SetupFields>,
+        root_index: usize,
+        root: &TreeRef<($(Coord<$T>),+)>,
+        o_trace: Option<Arc<Box<dyn QTrace<($(Coord<$T>),+)>>>>,
       ) -> QStream<($(Coord<$T>),+),V> where S: RA {
         let nproc = std::thread::available_concurrency().map(|n| n.get()).unwrap_or(1);
-        let (refs_sender,refs_receiver) = channel::unbounded();
-        let (queue_sender,queue_receiver) = channel::bounded::<
-          Result<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeId>),Error>
+        let (refs_sender,refs_receiver) = channel::unbounded::<TreeRef<($(Coord<$T>),+)>>();
+        let (queue_sender,queue_receiver) = channel::bounded::<Result<(
+          Vec<(($(Coord<$T>),+),V)>,
+          Vec<TreeRef<($(Coord<$T>),+)>>,
+        ),Error>
         >(nproc);
+        if let Some(trace) = &o_trace { trace.trace(root); }
 
-        // todo: factor out locking
         for _ in 0..nproc {
           let refs_r = refs_receiver.clone();
           let queue_s = queue_sender.clone();
           let bbox_c = bbox.clone();
           let trees_c = trees.clone();
-          spawn(async move {
-            while let Ok(r) = refs_r.recv().await {
-              match trees_c.get(&r).await {
-                Err(e) => queue_s.send(Err(e.into())).await.unwrap(),
-                Ok(t) => {
-                  let (rows,tr_refs) = t.lock().await.query_local(&bbox_c);
-                  let refs = tr_refs.iter().map(|r| r.id).collect::<Vec<TreeId>>();
-                  queue_s.send(Ok((rows,refs))).await.unwrap();
-                }
-              };
-            }
-          });
+          if let Some(trace_r) = &o_trace {
+            let trace = trace_r.clone();
+            spawn(async move {
+              while let Ok(r) = refs_r.recv().await {
+                trace.trace(&r);
+                match trees_c.get(&r.id).await {
+                  Err(e) => queue_s.send(Err(e.into())).await.unwrap(),
+                  Ok(t) => {
+                    let (rows,refs) = t.lock().await.query_local(&bbox_c);
+                    queue_s.send(Ok((rows,refs))).await.unwrap();
+                  }
+                };
+              }
+            });
+          } else {
+            spawn(async move {
+              while let Ok(r) = refs_r.recv().await {
+                match trees_c.get(&r.id).await {
+                  Err(e) => queue_s.send(Err(e.into())).await.unwrap(),
+                  Ok(t) => {
+                    let (rows,refs) = t.lock().await.query_local(&bbox_c);
+                    queue_s.send(Ok((rows,refs))).await.unwrap();
+                  }
+                };
+              }
+            });
+          }
         }
         struct QState<$($T: Scalar),+, V: Value> {
-          refs: VecDeque<TreeId>,
+          refs: VecDeque<TreeRef<($(Coord<$T>),+)>>,
           results: VecDeque<(($(Coord<$T>),+),V)>,
           active: usize,
-          queue_r: channel::Receiver<Result<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeId>),Error>>,
-          queue_s: channel::Sender<Result<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeId>),Error>>,
-          refs_s: channel::Sender<TreeId>,
+          queue_r: channel::Receiver<Result<(
+            Vec<(($(Coord<$T>),+),V)>,
+            Vec<TreeRef<($(Coord<$T>),+)>>,
+          ),Error>>,
+          queue_s: channel::Sender<Result<(
+            Vec<(($(Coord<$T>),+),V)>,
+            Vec<TreeRef<($(Coord<$T>),+)>>,
+          ),Error>>,
+          refs_s: channel::Sender<TreeRef<($(Coord<$T>),+)>>,
           fields: Arc<SetupFields>,
+          root: TreeRef<($(Coord<$T>),+)>,
         }
         let istate = {
           let (v_results,v_refs) = self.query_local(bbox);
           let mut refs = VecDeque::with_capacity(v_refs.len());
           let mut results = VecDeque::with_capacity(v_results.len());
           for r in v_results { results.push_back(r); }
-          for r in v_refs { refs.push_back(r.id); }
+          for r in v_refs { refs.push_back(r); }
           QState {
             refs,
             results,
@@ -558,6 +599,7 @@ macro_rules! impl_tree {
             queue_s: queue_sender.clone(),
             refs_s: refs_sender.clone(),
             fields: fields.clone(),
+            root: root.clone(),
           }
         };
         Box::new(unfold(istate, async move |mut state| {
@@ -593,13 +635,16 @@ macro_rules! impl_tree {
           }
           state.refs_s.close();
           state.queue_s.close();
-          if let Err(e) = state.fields.log(&format!["query end root_index={} root_id={}",
-          root_index, root_id]).await {
+          if let Err(e) = state.fields.log(&format![
+            "query end root_index={} root.id={} root.bounds={:?}",
+            root_index, state.root.id, &state.root.bounds
+          ]).await {
             return Some((Err(e.into()),state));
           }
           None
         }))
       }
+
       async fn remove<S>(&mut self, xids: Arc<Mutex<HashMap<V::Id,($(Coord<$T>),+)>>>)
       -> (Option<(Vec<(($(Coord<$T>),+),V)>,Vec<TreeRef<($(Coord<$T>),+)>>)>,Vec<TreeId>) where S: RA {
         let (mut list, refs) = self.list();
@@ -714,8 +759,23 @@ where P: Point, V: Value {
   fn list(&mut self) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
   fn list_refs(&mut self) -> Vec<TreeRef<P>>;
   fn query_local(&mut self, bbox: &P::Bounds) -> (Vec<(P,V)>,Vec<TreeRef<P>>);
-  fn query<S>(&mut self, trees: Arc<TreeFile<S,Self,P,V>>, bbox: &P::Bounds,
-    fields: Arc<SetupFields>, root_index: usize, root_id: TreeId) -> QStream<P,V> where S: RA;
+  fn query<S>(
+    &mut self,
+    trees: Arc<TreeFile<S,Self,P,V>>,
+    bbox: &P::Bounds,
+    fields: Arc<SetupFields>,
+    root_index: usize,
+    root: &TreeRef<P>,
+  ) -> QStream<P,V> where S: RA;
+  fn query_trace<S>(
+    &mut self,
+    trees: Arc<TreeFile<S,Self,P,V>>,
+    bbox: &P::Bounds,
+    fields: Arc<SetupFields>,
+    root_index: usize,
+    root: &TreeRef<P>,
+    o_trace: Option<Arc<Box<dyn QTrace<P>>>>,
+  ) -> QStream<P,V> where S: RA;
   async fn remove<S>(&mut self, ids: Arc<Mutex<HashMap<V::Id,P>>>)
     -> (Option<(Vec<(P,V)>,Vec<TreeRef<P>>)>,Vec<TreeId>) where S: RA;
 }
@@ -857,6 +917,21 @@ where P: Point, V: Value, T: Tree<P,V>, S: RA {
     }
     Ok(())
   }
+}
+
+/// Get the string path for a given TreeId.
+pub fn get_file_from_id(id: &TreeId) -> String {
+  format![
+    "t/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}/{:02x}",
+    (id >> (8*7)) % 0x100,
+    (id >> (8*6)) % 0x100,
+    (id >> (8*5)) % 0x100,
+    (id >> (8*4)) % 0x100,
+    (id >> (8*3)) % 0x100,
+    (id >> (8*2)) % 0x100,
+    (id >> 8) % 0x100,
+    id % 0x100,
+  ]
 }
 
 fn find_separation<X>(amin: &X, amax: &X, bmin: &X, bmax: &X, is_min: bool) -> X where X: Scalar {
