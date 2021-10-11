@@ -1,4 +1,4 @@
-use crate::{DB,Setup,Row,Coord,Value,BatchOptions,Error as E};
+use crate::{DB,Setup,Row,Coord,Point,Value,TreeRef,tree,BatchOptions,Error as E};
 mod storage;
 pub use storage::{JsStorage,JsRandomAccess};
 mod stream;
@@ -8,10 +8,12 @@ mod error;
 use error::JsError;
 mod debug;
 use debug::JsDebug;
+mod trace;
+use trace::JsTrace;
 
 use wasm_bindgen::{prelude::{wasm_bindgen,JsValue},JsCast};
 use wasm_bindgen_futures::{future_to_promise,spawn_local};
-use js_sys::{Error,Function,Array,Uint8Array,Promise,Reflect::get};
+use js_sys::{Error,Function,Array,Object,Uint8Array,Promise,Reflect::get,Reflect::set};
 use async_std::{sync::{Arc,Mutex},channel::{Sender,Receiver,unbounded}};
 
 type S = JsRandomAccess;
@@ -163,7 +165,34 @@ macro_rules! def_mix {
         }
         Ok(batch)
       }
-      pub fn query(&self, bbox_js: JsValue) -> Promise {
+      pub fn query(&self, bbox_js: JsValue, opts: JsValue) -> Promise {
+        let o_trace = get(&opts,&"trace".into())
+          .and_then(|x| x.dyn_into::<Function>())
+          .map(|f| {
+            type P = ($(Coord<$T>),+);
+            let (sender,receiver): (Sender<TreeRef<P>>, Receiver<TreeRef<P>>) = unbounded();
+            spawn_local(async move {
+              while let Ok(tr) = receiver.recv().await {
+                let tr_obj = Object::new();
+                set(&tr_obj, &"id".into(), &JsValue::from_f64(tr.id as f64)).unwrap();
+                set(&tr_obj, &"file".into(), &tree::get_file_from_id(&tr.id).into()).unwrap();
+                let bbox = tr.bounds.to_bounds().unwrap();
+                let bbox_js = Array::new_with_length($n*2);
+                $(
+                  bbox_js.set($I, JsValue::from_f64((bbox.0).$I as f64));
+                  bbox_js.set($I, JsValue::from_f64((bbox.0).$I as f64));
+                )+
+                $(
+                  bbox_js.set($I+$n, JsValue::from_f64((bbox.1).$I as f64));
+                  bbox_js.set($I+$n, JsValue::from_f64((bbox.1).$I as f64));
+                )+
+                set(&tr_obj, &"bbox".into(), &bbox_js).unwrap();
+                f.call1(&JsValue::NULL, &tr_obj).unwrap();
+              }
+            });
+            Some(JsTrace::new(sender))
+          })
+          .unwrap_or(None);
         let db_ref = Arc::clone(&self.db);
         future_to_promise(async move {
           if !Array::is_array(&bbox_js) {
@@ -179,9 +208,15 @@ macro_rules! def_mix {
             ),+)
           );
           let mut db = db_ref.lock().await;
-          db.query(&bbox).await
-            .map_err(|e| Error::new(&format!["{:?}",e]).into())
-            .map(|x| $Stream::new(x).into())
+          if let Some(trace) = o_trace {
+            db.query_trace(&bbox, Box::new(trace)).await
+              .map_err(|e| Error::new(&format!["{:?}",e]).into())
+              .map(|x| $Stream::new(x).into())
+          } else {
+            db.query(&bbox).await
+              .map_err(|e| Error::new(&format!["{:?}",e]).into())
+              .map(|x| $Stream::new(x).into())
+          }
         })
       }
       pub fn sync(&self) -> Promise {

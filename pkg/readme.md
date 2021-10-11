@@ -131,7 +131,7 @@ Optionally provide:
 
 Write database changes to the underlying data storage.
 
-## `var q = await db.query(bbox)`
+## `var q = await db.query(bbox, opts={})`
 
 Return an async iterator `q` containing all records from the database that intersect the `bbox`.
 
@@ -141,6 +141,17 @@ of scalar floats or 2-item arrays of `[min,max]` floats for each dimension.
 
 `bbox` is an array of the form `[minX,minY,...,maxX,maxY,...]`.
 For 2 dimensions, the `bbox` would be `[west,south,east,north]` for `lon,lat` coordinates.
+
+Optionally provide a function `opts.trace(tr)` which will receive a `tr` object just before the
+corresponding file is read from storage:
+
+* `tr.id` - integer id for this tree file
+* `tr.file` - file path string for the tree
+* `tr.bbox` - bounding extents of the tree in `minX,minY,...,maxX,maxY,...]` form
+
+The motivating use case for `opts.trace` is to cancel open requests for content which is no longer
+in view when panning a map. The information from the trace can be passed to the storage layer to
+make these decisions.
 
 # install
 

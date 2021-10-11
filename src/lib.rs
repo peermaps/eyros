@@ -423,8 +423,6 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
   }
   /// Query the database for every feature that intersects `bbox`. Results are provided as a
   /// readable stream of `(point,value)` records.
-  /// Queries hold a lock on the database, so you probably shouldn't leave them open for very long
-  /// if you need to make more writes.
   pub async fn query(&mut self, bbox: &P::Bounds) -> Result<query::QStream<P,V>,Error> {
     self.fields.log(&format!["query bbox={:?}", bbox]).await?;
     let mut queries = vec![];
@@ -439,6 +437,9 @@ where S: RA, P: Point, V: Value, T: Tree<P,V> {
     }
     query::from_queries(queries)
   }
+  /// Query the database for every feature that intersects `bbox`.
+  /// The provided `trace` will be called right before a tree file is opened with the corresponding
+  /// `TreeRef` for the given tree.
   pub async fn query_trace(
     &mut self,
     bbox: &P::Bounds,
