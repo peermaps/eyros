@@ -4,7 +4,7 @@ const eyros = require('../3d')
 ;(async function () {
   var db = await eyros({
     storage: RAM,
-    wasmSource: await (await fetch('3d.wasm')).arrayBuffer()
+    wasmSource: await fetch('3d.wasm')
   })
   await db.batch([
     { type:'insert', point:[+1,+2,-3], value: Uint8Array.from([97,98,99]) },

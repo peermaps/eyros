@@ -24,7 +24,7 @@ const eyros = require('eyros/2d')
 ;(async function () {
   var db = await eyros({
     storage: RAM,
-    wasmSource: await (await fetch('2d.wasm')).arrayBuffer()
+    wasmSource: fetch('2d.wasm')
   })
   await db.batch([
     { type:'insert', point:[+1,+2], value: Uint8Array.from([97,98,99]) },
@@ -89,7 +89,10 @@ The precision for all databases is presently f32.
 
 Open a database for the given dimension from:
 
-* `opts.wasmSource` - arraybuffer or typed array of wasm data
+* `opts.wasmSource` - wasm data contained in an arraybuffer, typed array, [Response][],
+  or a promise resolving to any of those types
+* `opts.wasmStream` - wasm source to pass directly to `WebAssembly.instantiateStreaming()`
+  without inferring whether to stream or not
 * `opts.wasmModule` - already-created WebAssembly.Module instance
 * `opts.storage(name)` - function that returns a random-access interface
 * `opts.getId(value)` - return a Uint8Array `id` for a given `value`.

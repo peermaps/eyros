@@ -11,11 +11,11 @@ console.log(lines.map((line,i) => {
     .replace(/^const wasmModule = .*/, '')
     .replace(/^const wasmInstance = .*/, '')
     .replace(/^wasm = .*/, `
-      module.exports.__setWasmModule = function (wasmModule) {
-        const wasmInstance = new WebAssembly.Instance(wasmModule, imports);
+      module.exports.__setWasmInstance = function (wasmInstance) {
         wasm = wasmInstance.exports;
         module.exports.__wasm = wasm;
-      }
+      };
+      module.exports.__wasmImports = imports;
     `.trim().replace(/^      /gm, ''))
     .replace(/^module\.exports\.__wasm = .*/, '')
 }).filter(line => line.length > 0).join('\n'))
