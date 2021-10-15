@@ -115,6 +115,8 @@ in bytes that has been allocated for the given file.
 Files to supply to `opts.wasmSource` can be obtained from the root of this
 package under the convention `${N}d.wasm` for a dimension `N`.
 
+[Response]: https://developer.mozilla.org/en-US/docs/Web/API/Response
+
 ## `await db.batch(rows, opts={})`
 
 Insert `rows`, an array of operations to perform on the database.
