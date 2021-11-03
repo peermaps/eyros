@@ -527,7 +527,7 @@ macro_rules! impl_tree {
         root: &TreeRef<($(Coord<$T>),+)>,
         o_trace: Option<Arc<Mutex<Box<dyn QTrace<($(Coord<$T>),+)>>>>>,
       ) -> QStream<($(Coord<$T>),+),V> where S: RA {
-        let nproc = std::thread::available_concurrency().map(|n| n.get()).unwrap_or(1);
+        let nproc = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let (refs_sender,refs_receiver) = channel::unbounded::<TreeRef<($(Coord<$T>),+)>>();
         let (queue_sender,queue_receiver) = channel::bounded::<Result<(
           Vec<(($(Coord<$T>),+),V)>,
