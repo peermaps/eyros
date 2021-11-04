@@ -34,5 +34,6 @@ async fn main() -> Result<(),E> {
     println!["{:?}", result?];
   }
 
+  db.sync().await?;
   Ok(())
 }
