@@ -2,6 +2,8 @@
 
 eyros (εύρος) is a multi-dimensional interval database.
 
+![eyros logo](https://peermaps.org/images/eyros-logo.svg)
+
 The database is based on [bkd][] and [interval][] trees.
 
 * high batch-write performance
