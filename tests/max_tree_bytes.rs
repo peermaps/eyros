@@ -1,6 +1,6 @@
-use eyros::{DB,Setup,Tree2,QTrace,TreeRef,TreeId,Row,Coord,Error};
+use eyros::{DB,Setup,Tree2,QTrace,TreeRef,Row,Coord,Error};
 use tempfile::Builder as Tmpfile;
-use async_std::{prelude::*,task,sync::{Arc,Mutex},channel};
+use async_std::{prelude::*,channel};
 use std::collections::HashMap;
 use desert::CountBytes;
 
