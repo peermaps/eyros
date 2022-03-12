@@ -10,6 +10,7 @@ pub struct SetupFields {
   pub branch_factor: usize,
   pub max_depth: usize,
   pub max_records: usize,
+  pub max_tree_bytes: usize,
   pub ext_records: usize,
   pub inline: usize,
   pub inline_max_bytes: usize,
@@ -24,6 +25,7 @@ impl std::fmt::Debug for SetupFields {
       .field("branch_factor", &self.branch_factor)
       .field("max_depth", &self.max_depth)
       .field("max_records", &self.max_records)
+      .field("max_tree_bytes", &self.max_tree_bytes)
       .field("ext_records", &self.ext_records)
       .field("inline", &self.inline)
       .field("inline_max_bytes", &self.inline_max_bytes)
@@ -43,6 +45,7 @@ impl SetupFields {
       branch_factor: 6,
       max_depth: 8,
       max_records: 20_000,
+      max_tree_bytes: 1_000_000,
       ext_records: 5_000,
       inline: 50,
       inline_max_bytes: 20_000,
@@ -79,6 +82,7 @@ impl SetupFields {
 ///   .branch_factor(6)
 ///   .max_depth(8)
 ///   .max_records(20_000)
+///   .max_tree_bytes(1_000_000)
 ///   .ext_records(5_000)
 ///   .inline(50)
 ///   .inline_max_bytes(20_000)
@@ -113,6 +117,10 @@ impl<S> Setup<S> where S: RA {
   }
   pub fn max_records(mut self, mr: usize) -> Self {
     self.fields.max_records = mr;
+    self
+  }
+  pub fn max_tree_bytes(mut self, mtb: usize) -> Self {
+    self.fields.max_tree_bytes = mtb;
     self
   }
   pub fn ext_records(mut self, er: usize) -> Self {
