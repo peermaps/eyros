@@ -64,7 +64,7 @@ pub enum Coord<X> where X: Scalar {
 /// `Points` and `Bounds` are converted between each other with the `to_bounds()` and
 /// `from_bounds()` methods.
 #[async_trait::async_trait]
-pub trait Point: 'static+Overlap+Clone+Send+Sync+Debug{
+pub trait Point: 'static+Overlap+Clone+Send+Sync+Debug {
   type Bounds: Clone+Send+Sync+Debug+ToBytes+FromBytes+CountBytes+Overlap;
   /// Convert to a `Bounds`, which may not be possible.
   fn to_bounds(&self) -> Result<Self::Bounds,Error>;

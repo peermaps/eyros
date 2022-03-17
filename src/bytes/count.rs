@@ -24,9 +24,7 @@ macro_rules! impl_count_bytes {
                 }
               }
             },
-            $Node::Data(_,_) => {
-              bytes += node.count_bytes();
-            },
+            _ => {},
           }
         }
         bytes
@@ -85,7 +83,7 @@ macro_rules! impl_count_bytes {
       }
     }
 
-    fn $count_point_bytes<$($T),+>(pt: &($(Coord<$T>),+)) -> usize where $($T: Scalar),+ {
+    pub fn $count_point_bytes<$($T),+>(pt: &($(Coord<$T>),+)) -> usize where $($T: Scalar),+ {
       let mut size = 1; // 1-byte arity bitfield
       $(size += match &pt.$i {
         Coord::Scalar(x) => x.count_bytes(),

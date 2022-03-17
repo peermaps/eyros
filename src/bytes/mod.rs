@@ -1,5 +1,5 @@
 mod to;
 mod from;
-mod count;
+pub mod count;
 mod tree_ref;
 mod meta;

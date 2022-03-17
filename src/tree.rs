@@ -1,6 +1,6 @@
-use desert::{ToBytes,FromBytes,CountBytes};
-use crate::{Scalar,Point,Value,Coord,Error,EyrosErrorKind,Overlap,RA,Root,
-  query::{QStream,QTrace}, tree_file::TreeFile, SetupFields};
+use desert::{varint,ToBytes,FromBytes,CountBytes};
+use crate::{Scalar,Point,Value,Coord,Error,EyrosErrorKind,Overlap,RA,Root,SetupFields,
+  query::{QStream,QTrace}, tree_file::TreeFile};
 use async_std::{sync::{Arc,Mutex},channel};
 #[cfg(not(feature="wasm"))] use async_std::task::spawn;
 #[cfg(feature="wasm")] use async_std::task::{spawn_local as spawn};
@@ -19,6 +19,7 @@ pub struct Build {
   pub level: usize,
   pub range: (usize,usize), // (start,end) indexes into sorted
   pub count: usize,
+  pub bytes: usize,
 }
 impl Build {
   fn ext(&self) -> Self {
@@ -26,6 +27,7 @@ impl Build {
       range: self.range,
       level: 0,
       count: 0,
+      bytes: 0,
     }
   }
 }
@@ -37,8 +39,9 @@ pub enum InsertValue<'a,P,V> where P: Point, V: Value {
 }
 
 macro_rules! impl_tree {
-  ($Tree:ident,$Branch:ident,$Node:ident,$MState:ident,$get_bounds:ident,$build_data:ident,
+  ($Tree:ident,$Branch:ident,$Node:ident,$MState:ident,$get_bounds:ident,$build_data:ident,$count_point_bytes:ident,
   ($($T:tt),+),($($i:tt),+),($($u:ty),+),($($n:tt),+),$dim:expr) => {
+		use crate::bytes::count::$count_point_bytes;
     #[derive(Debug,PartialEq)]
     pub enum $Node<$($T),+,V> where $($T: Scalar),+, V: Value {
       Branch($Branch<$($T),+,V>),
@@ -98,27 +101,54 @@ macro_rules! impl_tree {
           level: build.level + 1,
           range,
           count: build.count + (build.range.1-build.range.0) - (range.1-range.0),
+          bytes: build.bytes,
         }
       }
-      fn build(&mut self, build: &Build, is_rm: bool) -> $Node<$($T),+,V> {
+      fn build(&mut self, build: &mut Build, is_rm: bool) -> $Node<$($T),+,V> {
         let rlen = build.range.1 - build.range.0;
-        let mut build_ext = false;
+        let mut build_ext = vec![];
         if rlen == 0 {
-          return $Node::Data(vec![],vec![]);
+          let node = $Node::Data(vec![],vec![]);
+          build.bytes += node.count_bytes();
+          return node;
         } else if rlen < self.fields.inline || rlen <= 2 {
           let inserts = &self.inserts;
           let data = $build_data(&self.sorted[build.range.0..build.range.1].iter().map(|i| {
             inserts[*i].clone()
           }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)>>());
-          if data.count_bytes() >= self.fields.inline_max_bytes {
-            build_ext = true;
+          let data_bytes = data.count_bytes();
+          if data_bytes >= self.fields.inline_max_bytes {
+            build_ext.push(build.range.0 .. build.range.1);
+          } else if rlen > 1 && build.bytes + data_bytes > self.fields.max_tree_bytes {
+            let mut running_bytes = 0;
+            let mut start = build.range.0;
+            for i in build.range.0 .. build.range.1 {
+              let (p,iv) = &inserts[self.sorted[i]];
+              let bytes = $count_point_bytes(&p) + 4 + match iv {
+                InsertValue::Ref(r) => varint::length(r.id) $(+ match &r.bounds.$i {
+                  Coord::Interval(x,y) => x.count_bytes() + y.count_bytes(),
+                  _ => 0,
+                })+,
+                InsertValue::Value(v) => v.count_bytes(),
+              };
+              if start < i && running_bytes + bytes > self.fields.max_tree_bytes {
+                build_ext.push(start..i);
+                start = i;
+                running_bytes = 0;
+              }
+              running_bytes += bytes;
+            }
+            if start < build.range.1 {
+              build_ext.push(start..build.range.1);
+            }
           } else {
+            build.bytes += data_bytes;
             return data;
           }
         } else if !is_rm && rlen <= self.fields.ext_records {
-          build_ext = true;
+          build_ext.push(build.range.0 .. build.range.1);
         }
-        if build_ext {
+        if build_ext.len() == 1 {
           let r = self.next_tree;
           let tr = TreeRef {
             id: r,
@@ -134,7 +164,32 @@ macro_rules! impl_tree {
           }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)>>());
           let t = $Tree::new(Arc::new(root));
           self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
-          return $Node::Data(vec![],vec![tr]);
+          let node = $Node::Data(vec![],vec![tr]);
+          build.bytes += node.count_bytes();
+          return node;
+        } else if build_ext.len() > 1 {
+          let mut refs = vec![];
+          for range in build_ext {
+            let r = self.next_tree;
+            let tr = TreeRef {
+              id: r,
+              bounds: $get_bounds(
+                self.sorted[range.clone()].iter().map(|i| *i),
+                self.inserts
+              ),
+            };
+            self.next_tree += 1;
+            let inserts = &self.inserts;
+            let root = $build_data(&self.sorted[range.clone()].iter().map(|i| {
+              inserts[*i].clone()
+            }).collect::<Vec<(($(Coord<$T>),+),InsertValue<'_,($(Coord<$T>),+),V>)>>());
+            let t = $Tree::new(Arc::new(root));
+            self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
+            refs.push(tr)
+          }
+          let node = $Node::Data(vec![],refs);
+          build.bytes += node.count_bytes();
+          return node;
         }
         if build.level >= self.fields.max_depth || build.count >= self.fields.max_records {
           let r = self.next_tree;
@@ -146,9 +201,11 @@ macro_rules! impl_tree {
             ),
           };
           self.next_tree += 1;
-          let t = $Tree::new(Arc::new(self.build(&build.ext(), is_rm)));
+          let t = $Tree::new(Arc::new(self.build(&mut build.ext(), is_rm)));
           self.ext_trees.insert(r, Arc::new(Mutex::new(t)));
-          return $Node::Data(vec![],vec![tr]);
+          let node = $Node::Data(vec![],vec![tr]);
+          build.bytes += node.count_bytes();
+          return node;
         }
 
         let n = (self.fields.branch_factor-1).min(rlen-1); // number of pivots
@@ -226,7 +283,7 @@ macro_rules! impl_tree {
               }
             }
             ibuckets.iter_mut().map(|(bitfield,hset)| {
-              let next = self.next(
+              let mut next = self.next(
                 &hset,
                 build,
                 &mut index,
@@ -234,7 +291,7 @@ macro_rules! impl_tree {
                   hset.contains(j)
                 })
               );
-              (*bitfield, Arc::new(self.build(&next, is_rm)))
+              (*bitfield, Arc::new(self.build(&mut next, is_rm)))
             }).collect()
           }),+,
           _ => panic!["unexpected level modulo dimension"]
@@ -246,7 +303,7 @@ macro_rules! impl_tree {
             let mut nodes = Vec::with_capacity(pv.len()+1);
             nodes.push({
               let pivot = pv.first().unwrap();
-              let next = self.next(
+              let mut next = self.next(
                 pivot,
                 build,
                 &mut index,
@@ -257,11 +314,11 @@ macro_rules! impl_tree {
                   }
                 })
               );
-              Arc::new(self.build(&next, is_rm))
+              Arc::new(self.build(&mut next, is_rm))
             });
             let ranges = pv.iter().zip(pv.iter().skip(1));
             for range in ranges {
-              let next = self.next(
+              let mut next = self.next(
                 &range,
                 build,
                 &mut index,
@@ -269,12 +326,12 @@ macro_rules! impl_tree {
                   intersect_coord(&(inserts[*j].0).$i, range.0, range.1)
                 })
               );
-              nodes.push(Arc::new(self.build(&next, is_rm)));
+              nodes.push(Arc::new(self.build(&mut next, is_rm)));
             }
             if (pv.len() > 1) {
               nodes.push({
                 let pivot = pv.last().unwrap();
-                let next = self.next(
+                let mut next = self.next(
                   &pivot,
                   build,
                   &mut index,
@@ -285,7 +342,7 @@ macro_rules! impl_tree {
                     }
                   })
                 );
-                Arc::new(self.build(&next, is_rm))
+                Arc::new(self.build(&mut next, is_rm))
               });
             }
             nodes
@@ -296,11 +353,13 @@ macro_rules! impl_tree {
           "{} leftover records not built into nodes or intersections",
           (build.range.1 - build.range.0) - index
         ];
-        $Node::Branch($Branch {
+        let node = $Node::Branch($Branch {
           pivots,
           intersections,
           nodes,
-        })
+        });
+        build.bytes += node.count_bytes();
+        node
       }
     }
 
@@ -342,10 +401,11 @@ macro_rules! impl_tree {
           mstate.sorted.iter().map(|i| *i),
           mstate.inserts
         );
-        let root = mstate.build(&Build {
+        let root = mstate.build(&mut Build {
           range: (0, inserts.len()),
           level: 0,
           count: 0,
+          bytes: 0,
         }, is_rm);
         *next_tree = mstate.next_tree;
         let tr = TreeRef {
@@ -716,28 +776,28 @@ macro_rules! impl_tree {
   }
 }
 
-#[cfg(feature="2d")] impl_tree![Tree2,Branch2,Node2,MState2,get_bounds2,build_data2,
+#[cfg(feature="2d")] impl_tree![Tree2,Branch2,Node2,MState2,get_bounds2,build_data2,count_point_bytes2,
   (P0,P1),(0,1),(usize,usize),(None,None),2
 ];
-#[cfg(feature="3d")] impl_tree![Tree3,Branch3,Node3,MState3,get_bounds3,build_data3,
+#[cfg(feature="3d")] impl_tree![Tree3,Branch3,Node3,MState3,get_bounds3,build_data3,count_point_bytes3,
   (P0,P1,P2),(0,1,2),(usize,usize,usize),(None,None,None),3
 ];
-#[cfg(feature="4d")] impl_tree![Tree4,Branch4,Node4,Mstate4,get_bounds4,build_data4,
+#[cfg(feature="4d")] impl_tree![Tree4,Branch4,Node4,Mstate4,get_bounds4,build_data4,count_point_bytes4,
   (P0,P1,P2,P3),(0,1,2,3),(usize,usize,usize,usize),(None,None,None,None),4
 ];
-#[cfg(feature="5d")] impl_tree![Tree5,Branch5,Node5,MState5,get_bounds5,build_data5,
+#[cfg(feature="5d")] impl_tree![Tree5,Branch5,Node5,MState5,get_bounds5,build_data5,count_point_bytes5,
   (P0,P1,P2,P3,P4),(0,1,2,3,4),
   (usize,usize,usize,usize,usize),(None,None,None,None,None),5
 ];
-#[cfg(feature="6d")] impl_tree![Tree6,Branch6,Node6,MState6,get_bounds6,build_data6,
+#[cfg(feature="6d")] impl_tree![Tree6,Branch6,Node6,MState6,get_bounds6,build_data6,count_point_bytes6,
   (P0,P1,P2,P3,P4,P5),(0,1,2,3,4,5),
   (usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None),6
 ];
-#[cfg(feature="7d")] impl_tree![Tree7,Branch7,Node7,MState7,get_bounds7,build_data7,
+#[cfg(feature="7d")] impl_tree![Tree7,Branch7,Node7,MState7,get_bounds7,build_data7,count_point_bytes7,
   (P0,P1,P2,P3,P4,P5,P6),(0,1,2,3,4,5,6),
   (usize,usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None,None),7
 ];
-#[cfg(feature="8d")] impl_tree![Tree8,Branch8,Node8,MState8,get_bounds8,build_data8,
+#[cfg(feature="8d")] impl_tree![Tree8,Branch8,Node8,MState8,get_bounds8,build_data8,count_point_bytes8,
   (P0,P1,P2,P3,P4,P5,P6,P7),(0,1,2,3,4,5,6,7),
   (usize,usize,usize,usize,usize,usize,usize,usize),(None,None,None,None,None,None,None,None),8
 ];
